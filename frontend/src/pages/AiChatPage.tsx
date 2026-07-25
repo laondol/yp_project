@@ -36,6 +36,7 @@ export default function AiChatPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: text }),
+        credentials: 'include',
       })
       if (!res.ok) throw new Error('전송 실패')
       const data = await res.json()

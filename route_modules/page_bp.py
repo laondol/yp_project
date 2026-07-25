@@ -1,8 +1,7 @@
 import os
 from flask import Blueprint, render_template, request, redirect, url_for, jsonify, session, current_app, send_file
 from datetime import datetime, timedelta
-from models import db, User, Post, Message, NewsArticle, ShareReport
-
+from models import db, User, Post, Message, NewsArticle, ShareReport, AiKnowledge, VillageAlert, AiKnowledge, VillageAlert
 page_bp = Blueprint('page', __name__)
 from route_modules.user_bp import _cleanup_expired_posts
 
@@ -53,13 +52,12 @@ def ai_chat_send():
         if u:
             user_info = f'현재 대화중인 사용자: {u.real_name or u.username} (이웃인증: {"O" if u.is_verified_resident else "X"})'
     context = f"함께사는양평 현황: 회원 {user_count}명, 꿈꾸기 제안 {post_count}건. {user_info}"
-    # 최고책임자가 등록한 지식베이스
-    knowledges = AiKnowledge.query.order_by(AiKnowledge.id.desc()).limit(30).all()
     kb_text = ''
-    if knowledges:
-        kb_text = '\n[최고책임자가 가르친 정보]\n' + '\n'.join([f'Q: {k.question}\nA: {k.answer}' for k in knowledges])
     try:
         from openai import OpenAI
+        knowledges = AiKnowledge.query.order_by(AiKnowledge.id.desc()).limit(30).all()
+        if knowledges:
+            kb_text = '\n[최고책임자가 가르친 정보]\n' + '\n'.join([f'Q: {k.question}\nA: {k.answer}' for k in knowledges])
         client = OpenAI(base_url="https://api.groq.com/openai/v1", api_key=current_app.config.get('GROQ_API_KEY',''))
         system_prompt = f"""너는 함께사는양평의 '양평AI'야. 네 존재 목적은 회원과 비회원이 함께사는양평 플랫폼을 편리하게 이용하도록 돕는 거야.
 {context}
@@ -309,3 +307,4 @@ def api_charter():
         with open(md_path, 'r', encoding='utf-8') as f:
             content = markdown.markdown(f.read(), extensions=['extra'])
     return jsonify({'content': content})
+

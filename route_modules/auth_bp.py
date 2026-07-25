@@ -53,8 +53,13 @@ def register_verify_code():
 def register_verify_email_button():
     email = request.form.get('email', '').strip()
     if not email:
-        return jsonify({'status':'error','msg':'이메일을 입력해 주세요.'})
-    redirect_url = request.form.get('redirect', '/legal/list')
+        return jsonify({'status': 'error', 'msg': '이메일을 입력해 주세요.'})
+    redirect_url = request.form.get('redirect', '/register')
+    if not redirect_url.startswith('/'):
+        redirect_url = '/register'
+    purpose = request.form.get('purpose', 'register' if redirect_url.startswith('/register') else 'verify')
+    if purpose == 'register' and User.query.filter_by(email=email).first():
+        return jsonify({'status': 'error', 'msg': '이미 등록된 이메일입니다.'})
     import secrets
     from models import TempEmailVerify
     token = secrets.token_urlsafe(32)
@@ -65,32 +70,50 @@ def register_verify_email_button():
     record = TempEmailVerify(email=email, token=token, redirect=redirect_url)
     db.session.add(record)
     db.session.commit()
-    verify_url = url_for('register_verify_email_confirm', token=token, _external=True)
+    verify_url = url_for('auth.register_verify_email_confirm', token=token, _external=True)
     from services.email_service import EmailService
-    EmailService.send(email, '[양평마을] 이메일 인증을 완료해 주세요',
-        f'아래 링크를 클릭하면 이메일 인증이 완료됩니다.\n\n{verify_url}\n\n이 링크는 30분간 유효합니다.\n문의: yp@unocum.kr')
-    return jsonify({'status':'success','msg':'인증 링크를 이메일로 발송했습니다. 메일함을 확인해 주세요.'})
+    sent = EmailService.send(
+        email,
+        '[함께사는양평] 이메일 인증을 완료해 주세요',
+        f'안녕하세요. 함께사는양평입니다.\n\n아래 링크를 클릭하면 이메일 인증이 완료됩니다.\n\n{verify_url}\n\n이 링크는 30분간 유효합니다.\n문의: yp@unocum.kr',
+    )
+    if sent:
+        return jsonify({'status': 'success', 'msg': '인증 링크를 이메일로 발송했습니다. 메일함을 확인해 주세요.'})
+    debug = current_app.config.get('DEBUG', False)
+    if debug:
+        return jsonify({'status': 'success', 'msg': f'[DEV] 인증 링크 발송 실패 — 아래 링크로 인증하세요.', 'debug_url': verify_url})
+    return jsonify({'status': 'error', 'msg': '이메일 발송에 실패했습니다. 잠시 후 다시 시도해 주세요.'})
 
 @auth_bp.route('/register/verify-email/<token>')
 def register_verify_email_confirm(token):
     from models import TempEmailVerify
     record = TempEmailVerify.query.filter_by(token=token, is_verified=False).first()
+    fallback = '/register'
     if not record:
-        return "<script>alert('만료되었거나 유효하지 않은 링크입니다.'); location.href='/legal/list';</script>"
+        return f"<script>alert('만료되었거나 유효하지 않은 링크입니다.'); location.href='{fallback}';</script>"
     if record.created_at and datetime.now() - record.created_at > timedelta(minutes=30):
         db.session.delete(record)
         db.session.commit()
-        return "<script>alert('인증 링크가 만료되었습니다. 다시 인증해 주세요.'); location.href='/legal/list';</script>"
+        return f"<script>alert('인증 링크가 만료되었습니다. 다시 인증해 주세요.'); location.href='{fallback}';</script>"
     record.is_verified = True
     db.session.commit()
     session['verify_email'] = record.email
     session['email_verified_for_legal'] = True
     session['email_verified_for_psycho'] = True
     session['email_verified_for_register'] = record.email
-    target = record.redirect or '/legal/list'
+    target = record.redirect or fallback
+    if not target.startswith('/'):
+        target = fallback
     db.session.delete(record)
     db.session.commit()
     return f"<script>alert('이메일 인증이 완료되었습니다.'); location.href='{target}';</script>"
+
+@auth_bp.route('/api/auth/register/status')
+def api_register_status():
+    email = session.get('email_verified_for_register')
+    if email:
+        return jsonify({'verified': True, 'email': email})
+    return jsonify({'verified': False})
 
 @auth_bp.route('/reset-password')
 def reset_password():
@@ -110,7 +133,7 @@ def reset_password_send():
     user.reset_token = token
     user.reset_token_expiry = datetime.now() + timedelta(hours=1)
     db.session.commit()
-    reset_url = url_for('reset_password_confirm', token=token, _external=True)
+    reset_url = url_for('auth.reset_password_confirm', token=token, _external=True)
     from services.email_service import EmailService
     sent = EmailService.send(email, '[양평마을] 비밀번호 재설정',
         f'비밀번호 재설정 링크:\n{reset_url}\n\n1시간 내에 사용해 주세요.')
@@ -428,13 +451,16 @@ def verify_email_send():
     user.email_verification_token = token
     user.email_verification_sent_at = datetime.now()
     db.session.commit()
-    verify_url = url_for('verify_email_confirm', token=token, _external=True)
-    EmailService.send(
+    verify_url = url_for('auth.verify_email_confirm', token=token, _external=True)
+    from services.email_service import EmailService
+    sent = EmailService.send(
         user.email,
-        '[양평마을] 이메일 인증을 완료해 주세요',
+        '[함께사는양평] 이메일 인증을 완료해 주세요',
         f'{user.real_name or user.username}님,\n\n아래 링크를 클릭하면 이메일 인증이 완료됩니다:\n\n{verify_url}\n\n인증 후 게시글 작성, 투표 등 모든 기능을 이용하실 수 있습니다.\n\n감사합니다.\n함께사는양평 드림'
     )
-    return jsonify({'status':'success','msg':'인증 이메일을 발송했습니다. 메일함을 확인해 주세요.'})
+    if sent:
+        return jsonify({'status': 'success', 'msg': '인증 이메일을 발송했습니다. 메일함을 확인해 주세요.'})
+    return jsonify({'status': 'error', 'msg': '이메일 발송에 실패했습니다. 잠시 후 다시 시도해 주세요.'})
 
 @auth_bp.route('/verify-email/<token>')
 def verify_email_confirm(token):
@@ -478,6 +504,72 @@ def api_login():
         return jsonify({'status': 'success', 'user': {'id': u.id, 'username': u.username, 'role': u.role, 'email': u.email, 'real_name': u.real_name, 'managed_pages': u.managed_pages, 'points': u.points, 'town': u.town, 'village': u.village}})
     return jsonify({'status': 'error', 'msg': '로그인 정보가 올바르지 않습니다.'}), 401
 
+@auth_bp.route('/login/send-link', methods=['POST'])
+def login_send_link():
+    email = (request.form.get('email') or (request.get_json(silent=True) or {}).get('email') or '').strip()
+    if not email:
+        return jsonify({'status': 'error', 'msg': '이메일을 입력해 주세요.'})
+    u = User.query.filter_by(email=email).first()
+    if not u:
+        return jsonify({'status': 'error', 'msg': '등록되지 않은 이메일입니다.'})
+    import secrets
+    from models import TempEmailVerify
+    existing = TempEmailVerify.query.filter_by(email=email, is_verified=False).first()
+    if existing:
+        db.session.delete(existing)
+        db.session.commit()
+    token = secrets.token_urlsafe(32)
+    record = TempEmailVerify(email=email, token=token, redirect='/intro')
+    db.session.add(record)
+    db.session.commit()
+    login_url = url_for('auth.login_link_confirm', token=token, _external=True)
+    from services.email_service import EmailService
+    sent = EmailService.send(
+        email,
+        '[함께사는양평] 로그인 인증 링크',
+        f'안녕하세요. 함께사는양평입니다.\n\n아래 링크를 클릭하면 로그인됩니다.\n\n{login_url}\n\n이 링크는 발송 후 15분이 지나면 자동 삭제됩니다.\n문의: yp@unocum.kr',
+    )
+    if sent:
+        return jsonify({'status': 'success', 'msg': '로그인 링크를 이메일로 발송했습니다.'})
+    debug = current_app.config.get('DEBUG', False)
+    if debug:
+        return jsonify({'status': 'success', 'msg': '[DEV] 로그인 링크 발송 실패 — 아래 링크로 로그인하세요.', 'debug_url': login_url})
+    return jsonify({'status': 'error', 'msg': '이메일 발송에 실패했습니다. 잠시 후 다시 시도해 주세요.'})
+
+@auth_bp.route('/login/link/<token>')
+def login_link_confirm(token):
+    from models import TempEmailVerify
+    record = TempEmailVerify.query.filter_by(token=token, is_verified=False).first()
+    if not record:
+        return "<script>alert('만료되었거나 유효하지 않은 링크입니다.'); location.href='/login';</script>"
+    if record.created_at and datetime.now() - record.created_at > timedelta(minutes=15):
+        db.session.delete(record)
+        db.session.commit()
+        return "<script>alert('링크가 만료되었습니다. 다시 요청해 주세요.'); location.href='/login';</script>"
+    u = User.query.filter_by(email=record.email).first()
+    if not u:
+        db.session.delete(record)
+        db.session.commit()
+        return "<script>alert('사용자를 찾을 수 없습니다.'); location.href='/login';</script>"
+    target = record.redirect if record.redirect and str(record.redirect).startswith('/') else f'/user/{u.id}'
+    session.update({
+        'user_id': u.id, 'username': u.username, 'role': u.role,
+        'email': u.email or '', 'real_name': u.real_name or '',
+        'managed_pages': u.managed_pages or '',
+    })
+    u.last_login = datetime.now()
+    db.session.delete(record)
+    db.session.commit()
+    return f"<script>location.href='{target}';</script>"
+
+@auth_bp.route('/api/auth/check-username')
+def check_username():
+    nickname = request.args.get('username', '').strip()
+    if not nickname:
+        return jsonify({'available': False})
+    exists = User.query.filter_by(username=nickname).first()
+    return jsonify({'available': not exists})
+
 @auth_bp.route('/api/auth/register', methods=['POST'])
 def api_register():
     data = request.form
@@ -487,13 +579,17 @@ def api_register():
     password = data.get('password', '')
     real_name = data.get('real_name', '')
     username = data.get('username', '').strip()
+    if username and User.query.filter_by(username=username).first():
+        return jsonify({'status': 'error', 'msg': '이미 사용 중인 별명입니다.'}), 400
     if not username and verified_email:
         username = verified_email.split('@')[0][:20]
     lat = data.get('lat', type=float)
     lon = data.get('lon', type=float)
     town = data.get('town', '')
     village = data.get('village', '')
-    neighbor = False
+    home_address = data.get('home_address', '')
+    office_address = data.get('office_address', '')
+    neighbor = data.get('is_neighbor', type=bool) or False
     if lat and lon:
         from services.geocode import gps_to_town_village, is_in_yangpyeong
         if is_in_yangpyeong(lat, lon):
@@ -506,7 +602,7 @@ def api_register():
         return jsonify({'status': 'error', 'msg': '이미 등록된 이메일입니다.'}), 400
     hashed_pw = generate_password_hash(password)
     now = datetime.now()
-    new_user = User(username=username, password=hashed_pw, real_name=real_name, email=verified_email, email_verified=True, town=town, village=village, reg_town=town, reg_village=village, curr_town=town, curr_village=village, is_neighbor=neighbor, location_updated_at=now, points=1000)
+    new_user = User(username=username, password=hashed_pw, real_name=real_name, email=verified_email, email_verified=True, town=town, village=village, reg_town=town, reg_village=village, curr_town=town, curr_village=village, curr_address=home_address[:200] if home_address else None, office_address=office_address[:200] if office_address else None, is_neighbor=neighbor, location_updated_at=now, points=1000)
     profile_img = request.files.get('profile_img')
     if profile_img and profile_img.filename:
         import os

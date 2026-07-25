@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 const FULL_TERMS = `
@@ -96,108 +96,166 @@ const FULL_TERMS = `
 export default function RegisterPage() {
   const navigate = useNavigate()
 
-  const [step, setStep] = useState(1)
-  const [agreeTerms, setAgreeTerms] = useState(false)
-  const [termsOpened, setTermsOpened] = useState(false)
-  const [showFullTerms, setShowFullTerms] = useState(false)
+  const [termsConfirmed, setTermsConfirmed] = useState(false)
   const [email, setEmail] = useState('')
-  const [code, setCode] = useState('')
-  const [codeSent, setCodeSent] = useState(false)
+  const [emailVerified, setEmailVerified] = useState(false)
+  const [linkSent, setLinkSent] = useState(false)
+  const [debugUrl, setDebugUrl] = useState('')
   const [password, setPassword] = useState('')
   const [passwordConfirm, setPasswordConfirm] = useState('')
   const [showPw, setShowPw] = useState(false)
   const [showPwConfirm, setShowPwConfirm] = useState(false)
+  const [realName, setRealName] = useState('')
+  const [homeAddress, setHomeAddress] = useState('')
+  const [officeAddress, setOfficeAddress] = useState('')
   const [lat, setLat] = useState<number | null>(null)
   const [lon, setLon] = useState<number | null>(null)
-  const [address, setAddress] = useState('')
+  const [town, setTown] = useState('')
+  const [village, setVillage] = useState('')
   const [neighborChecked, setNeighborChecked] = useState(false)
-  const [realName, setRealName] = useState('')
-  const [username, setUsername] = useState('')
-  const [profileFile, setProfileFile] = useState<File | null>(null)
+  const [nickname, setNickname] = useState('')
+  const [nicknameStatus, setNicknameStatus] = useState<'idle' | 'checking' | 'available' | 'unavailable'>('idle')
+  const nicknameTimer = useRef<ReturnType<typeof setTimeout>>()
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
-  const handleSendCode = async () => {
-    if (!agreeTerms) { setError('약관에 동의해주세요.'); return }
+  useEffect(() => {
+    fetch('/api/auth/register/status', { credentials: 'include' })
+      .then(r => r.json())
+      .then(d => {
+        if (d.verified && d.email) {
+          setEmail(d.email)
+          setEmailVerified(true)
+          setTermsConfirmed(true)
+        }
+      })
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    if (nicknameTimer.current) clearTimeout(nicknameTimer.current)
+    const v = nickname.trim()
+    if (!v) { setNicknameStatus('idle'); return }
+    setNicknameStatus('checking')
+    nicknameTimer.current = setTimeout(async () => {
+      try {
+        const r = await fetch(`/api/auth/check-username?username=${encodeURIComponent(v)}`)
+        const d = await r.json()
+        setNicknameStatus(d.available ? 'available' : 'unavailable')
+      } catch { setNicknameStatus('idle') }
+    }, 500)
+  }, [nickname])
+
+  const handleSendLink = async () => {
     if (!email) { setError('이메일을 입력해주세요.'); return }
-    setError(''); setLoading(true)
+    setError(''); setLoading(true); setDebugUrl('')
     try {
-      const fd = new FormData(); fd.append('email', email)
-      const res = await fetch('/register/send-code', { method: 'POST', body: fd })
+      const fd = new FormData()
+      fd.append('email', email)
+      fd.append('redirect', '/register')
+      fd.append('purpose', 'register')
+      const res = await fetch('/register/verify-email-button', { method: 'POST', body: fd, credentials: 'include' })
       const data = await res.json()
-      if (data.status === 'error') { setError(data.msg || '인증코드 전송 실패'); return }
-      setCodeSent(true)
-      window.open(`https://mail.google.com`, '_blank', 'noopener')
+      if (data.status === 'error') { setError(data.msg || '인증 링크 전송 실패'); return }
+      setLinkSent(true)
+      if (data.debug_url) setDebugUrl(data.debug_url)
     } catch { setError('서버 연결 실패') }
     finally { setLoading(false) }
   }
 
-  const handleVerifyCode = async () => {
-    if (code.length !== 6) { setError('6자리 인증코드를 입력해주세요.'); return }
-    setError(''); setLoading(true)
-    try {
-      const fd = new FormData(); fd.append('code', code)
-      const res = await fetch('/register/verify-code', { method: 'POST', body: fd })
-      const data = await res.json()
-      if (data.status === 'error') { setError(data.msg || '인증 실패'); return }
-      setStep(3)
-    } catch { setError('서버 연결 실패') }
-    finally { setLoading(false) }
-  }
-
-  const handleGetLocation = () => {
+  const handleCurrentLocation = (target: 'home' | 'office') => {
     if (!navigator.geolocation) { setError('GPS를 지원하지 않는 브라우저입니다.'); return }
+    setError('')
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
         const latitude = pos.coords.latitude
         const longitude = pos.coords.longitude
         setLat(latitude); setLon(longitude)
         try {
-          const res = await fetch(`/api/reverse-geocode-detail?lat=${latitude}&lon=${longitude}`)
-          const data = await res.json()
-          setAddress(data.address || data.msg || '주소 확인 불가')
-          setStep(4)
-        } catch { setAddress('주소 확인 실패'); setStep(4) }
+          const geo = await fetch(`/api/reverse-geocode-detail?lat=${latitude}&lon=${longitude}`)
+          const geoData = await geo.json()
+          const addr = geoData.address || `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`
+          const t = geoData.town || ''
+          const v = geoData.village || ''
+          if (target === 'home') {
+            setHomeAddress(addr)
+            setTown(t); setVillage(v)
+            const nb = await fetch(`/api/check-neighbor?lat=${latitude}&lon=${longitude}`)
+            const nbData = await nb.json()
+            if (nbData.in_yangpyeong) {
+              setNeighborChecked(true)
+              if (!t) { setTown(nbData.town || ''); setVillage(nbData.village || '') }
+            }
+          } else {
+            setOfficeAddress(addr)
+          }
+        } catch { setError('주소 확인 실패') }
       },
       () => { setError('GPS 권한이 필요합니다. 브라우저 설정을 확인해주세요.') },
       { enableHighAccuracy: true, timeout: 10000 },
     )
   }
 
-  const handleNeighborCheck = async () => {
-    if (lat === null || lon === null) return
-    setLoading(true)
-    try {
-      const res = await fetch(`/api/check-neighbor?lat=${lat}&lon=${lon}`)
-      const data = await res.json()
-      if (!res.ok) { setError(data.error || data.msg || '인증 실패') }
-      else { setNeighborChecked(true) }
-    } catch { setError('서버 연결 실패') }
-    finally { setLoading(false) }
+  const handleNeighborCheck = () => {
+    if (!navigator.geolocation) { setError('GPS를 지원하지 않는 브라우저입니다.'); return }
+    setError('')
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const latitude = pos.coords.latitude
+        const longitude = pos.coords.longitude
+        setLat(latitude); setLon(longitude)
+        try {
+          const nb = await fetch(`/api/check-neighbor?lat=${latitude}&lon=${longitude}`)
+          const nbData = await nb.json()
+          if (!nbData.in_yangpyeong) {
+            setError('양평군 내에서만 이웃인증이 가능합니다.')
+            return
+          }
+          setTown(nbData.town || ''); setVillage(nbData.village || '')
+          const geo = await fetch(`/api/reverse-geocode-detail?lat=${latitude}&lon=${longitude}`)
+          const geoData = await geo.json()
+          const gpsAddr = geoData.address || ''
+          if (homeAddress && homeAddress !== gpsAddr) {
+            if (confirm('집주소를 현재 위치로 변경하시겠습니까?')) {
+              setHomeAddress(gpsAddr)
+            }
+          } else if (!homeAddress) {
+            setHomeAddress(gpsAddr)
+          }
+          setNeighborChecked(true)
+        } catch { setError('이웃인증 확인 실패') }
+      },
+      () => { setError('GPS 권한이 필요합니다. 브라우저 설정을 확인해주세요.') },
+      { enableHighAccuracy: true, timeout: 10000 },
+    )
   }
 
   const handleSubmit = async () => {
-    if (password !== passwordConfirm) { setError('비밀번호가 일치하지 않습니다.'); return }
-    if (!neighborChecked) { setError('이웃인증이 필요합니다.'); return }
+    if (!emailVerified) { setError('이메일 인증을 먼저 완료해 주세요.'); return }
+    if (!password || password !== passwordConfirm || password.length < 8) {
+      setError('비밀번호를 8자 이상 입력하고 일치시켜 주세요.'); return
+    }
     setError(''); setLoading(true)
     try {
       const fd = new FormData()
       fd.append('password', password)
       fd.append('real_name', realName)
-      fd.append('username', username)
+      if (nickname.trim()) fd.append('username', nickname.trim())
+      if (homeAddress) fd.append('home_address', homeAddress)
+      if (officeAddress) fd.append('office_address', officeAddress)
       if (lat !== null) fd.append('lat', String(lat))
       if (lon !== null) fd.append('lon', String(lon))
-      if (profileFile) fd.append('profile_img', profileFile)
-      const res = await fetch('/api/auth/register', { method: 'POST', body: fd })
+      if (town) fd.append('town', town)
+      if (village) fd.append('village', village)
+      fd.append('is_neighbor', neighborChecked ? '1' : '0')
+      const res = await fetch('/api/auth/register', { method: 'POST', body: fd, credentials: 'include' })
       const data = await res.json()
-      if (!res.ok) { setError(data.error || data.msg || '회원가입 실패'); return }
+      if (!res.ok || data.status === 'error') { setError(data.error || data.msg || '회원가입 실패'); return }
       alert('회원가입이 완료되었습니다.')
       navigate('/login')
     } catch { setError('서버 연결 실패') }
     finally { setLoading(false) }
   }
-
-  const stepLabels = ['약관 및 인증', '인증확인', '비밀번호', '위치인증', '선택정보']
 
   return (
     <div className="d-flex justify-content-center" style={{ minHeight: '70vh' }}>
@@ -205,72 +263,46 @@ export default function RegisterPage() {
         <div className="card-body p-4">
           <h4 className="fw-bold text-center mb-3" style={{ color: '#198754' }}>회원가입</h4>
 
-          <div className="d-flex justify-content-between mb-4 small">
-            {stepLabels.map((label, i) => (
-              <div key={i} className="text-center" style={{ flex: 1 }}>
-                <div
-                  className={`rounded-circle mx-auto mb-1 d-flex align-items-center justify-content-center fw-bold ${step > i + 1 ? 'bg-success text-white' : step === i + 1 ? 'bg-success text-white' : 'bg-light text-muted'}`}
-                  style={{ width: 28, height: 28, fontSize: 12 }}
-                >
-                  {i + 1}
-                </div>
-                <div style={{ fontSize: 10, color: step === i + 1 ? '#198754' : '#999' }}>{label}</div>
-              </div>
-            ))}
-          </div>
-
           {error && <div className="alert alert-danger py-2 small">{error}</div>}
 
-          {step === 1 && (
-            <>
-              <div className="alert alert-light border small mb-3" style={{ fontSize: '0.8rem', maxHeight: 150, overflowY: 'auto' }}>
-                <strong>💎 닢(물맑은머니) 규칙</strong><br />
-                &bull; 가입 시 1,000닢 지급<br />
-                &bull; 매월 이웃인증 완료 시 1,000닢 지급<br />
-                &bull; 이웃인증은 월 1회 필수, 미인증 시 닢 지급 유보<br />
-                &bull; 인증 완료 후 지급, 다음 지급은 30일 후<br />
-                &bull; 양평군 내에서만 이웃인증 가능
-                <hr className="my-1" />
-                <strong>📋 회원약관</strong><br />
-                1. 함께사는양평은 양평군 주민들의 자치 커뮤니티입니다.<br />
-                2. 타인을 비방하거나 허위 정보를 유포하지 않습니다.<br />
-                3. 공유된 정보는 커뮤니티 전체의 자산이며, 소유권을 주장할 수 없습니다.<br />
-                4. 이웃인증은 양평군 내에서만 가능하며, 월 1회 필수입니다.<br />
-                5. 약관 위반 시 관리자가 서비스 이용을 제한할 수 있습니다.
-              </div>
-
-              <div className="mb-2">
-                <button type="button" className="btn btn-sm btn-outline-success w-100" onClick={() => { setShowFullTerms(!showFullTerms); if (!termsOpened) setTermsOpened(true) }}>
-                  {showFullTerms ? '▲ 전문 접기' : '▼ 전문보기'}
+          {/* 약관 전문 (처음부터 펼쳐짐) */}
+          <div className="card border mb-2" style={{ maxHeight: 350, overflowY: 'auto', fontSize: '0.8rem' }}>
+            <div className="card-body p-3" dangerouslySetInnerHTML={{ __html: FULL_TERMS }} />
+            <div className="card-footer text-center bg-white border-0 pt-0">
+              {!termsConfirmed ? (
+                <button type="button" className="btn btn-success px-4" onClick={() => setTermsConfirmed(true)}>
+                  확인했습니다
                 </button>
-              </div>
-
-              {showFullTerms && (
-                <div className="card border mb-3" style={{ maxHeight: 400, overflowY: 'auto', fontSize: '0.8rem' }}>
-                  <div className="card-body p-3" dangerouslySetInnerHTML={{ __html: FULL_TERMS }} />
-                  <div className="card-footer text-center bg-white border-0 pt-0">
-                    <button type="button" className="btn btn-success px-4" onClick={() => { setAgreeTerms(true); setShowFullTerms(false) }}>
-                      확인했습니다
-                    </button>
-                  </div>
-                </div>
+              ) : (
+                <div className="text-success fw-bold small py-1">✅ 약관에 동의했습니다</div>
               )}
+            </div>
+          </div>
 
-              <div className="form-check mb-3">
-                <input
-                  type="checkbox"
-                  className="form-check-input"
-                  id="agreeTerms"
-                  checked={agreeTerms}
-                  disabled={!termsOpened && !agreeTerms}
-                  onChange={e => setAgreeTerms(e.target.checked)}
-                />
-                <label className="form-check-label small" htmlFor="agreeTerms">
-                  약관 및 닢 규칙에 동의합니다 (필수)
-                </label>
-              </div>
-              <div className="mb-3">
-                <label className="form-label small fw-bold">이메일</label>
+          {/* 체크박스 */}
+          <div className="form-check mb-3">
+            <input
+              type="checkbox"
+              className="form-check-input"
+              id="agreeTerms"
+              checked={termsConfirmed}
+              readOnly
+              onClick={() => {
+                if (!termsConfirmed) {
+                  alert('전문을 보시고 확인을 누르셔야 체크가 가능합니다.')
+                }
+              }}
+            />
+            <label className="form-check-label small" htmlFor="agreeTerms">
+              약관 및 닢 규칙에 동의합니다 (필수)
+            </label>
+          </div>
+
+          {/* 이메일 (약관 동의 후 활성화) */}
+          {termsConfirmed && !emailVerified && (
+            <div className="mb-3">
+              <label className="form-label small fw-bold">이메일</label>
+              <div className="input-group">
                 <input
                   type="email"
                   className="form-control"
@@ -279,44 +311,38 @@ export default function RegisterPage() {
                   placeholder="example@email.com"
                   required
                 />
+                <button className="btn btn-success" onClick={handleSendLink} disabled={loading}>
+                  {loading ? '전송 중...' : '인증 링크'}
+                </button>
               </div>
-              <button className="btn btn-success w-100 py-2 fw-bold" onClick={handleSendCode} disabled={loading}>
-                {loading ? '전송 중...' : '인증하기'}
-              </button>
-              {codeSent && (
-                <div className="mt-3">
-                  <div className="alert alert-info py-2 small">인증코드가 이메일로 전송되었습니다. 메일함을 확인해주세요.</div>
-                  <button className="btn btn-outline-success w-100 py-2 fw-bold" onClick={() => setStep(2)}>인증코드 입력하기</button>
+              {linkSent && (
+                <div className="alert alert-info py-2 small mt-2 mb-0">
+                  [{email}]로 인증 링크를 발송했습니다.<br />
+                  이메일을 확인하고 링크를 클릭하면 아래 폼이 활성화됩니다.
+                  {debugUrl && (
+                    <div className="mt-2">
+                      <a href={debugUrl} className="fw-bold">[DEV] 인증 링크로 바로 가기</a>
+                    </div>
+                  )}
                 </div>
               )}
-            </>
+            </div>
           )}
 
-          {step === 2 && (
-            <>
-              <div className="mb-3">
-                <label className="form-label small fw-bold">인증코드 (6자리)</label>
-                <input
-                  type="text"
-                  className="form-control text-center"
-                  maxLength={6}
-                  value={code}
-                  onChange={e => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                  placeholder="000000"
-                  autoFocus
-                />
-              </div>
-              <button className="btn btn-success w-100 py-2 fw-bold" onClick={handleVerifyCode} disabled={loading}>
-                {loading ? '확인 중...' : '확인'}
-              </button>
-            </>
+          {/* 이메일 인증 완료 */}
+          {emailVerified && (
+            <div className="alert alert-success py-2 small mb-3">
+              ✅ 이메일 인증 완료: <strong>{email}</strong>
+            </div>
           )}
 
-          {step === 3 && (
+          {/* 이메일 인증 후 폼 */}
+          {emailVerified && (
             <>
+              {/* 비밀번호 */}
               <div className="mb-3">
                 <label className="form-label small fw-bold">비밀번호</label>
-                <div className="input-group">
+                <div className="input-group mb-2">
                   <input
                     type={showPw ? 'text' : 'password'}
                     className="form-control"
@@ -330,9 +356,6 @@ export default function RegisterPage() {
                     {showPw ? '🙈' : '👁️'}
                   </button>
                 </div>
-              </div>
-              <div className="mb-3">
-                <label className="form-label small fw-bold">비밀번호 확인</label>
                 <div className="input-group">
                   <input
                     type={showPwConfirm ? 'text' : 'password'}
@@ -347,56 +370,67 @@ export default function RegisterPage() {
                   </button>
                 </div>
               </div>
-              <button className="btn btn-success w-100 py-2 fw-bold" onClick={handleGetLocation}>
-                내 위치 확인하기
-              </button>
-            </>
-          )}
 
-          {step === 4 && (
-            <>
+              {/* 이름 */}
               <div className="mb-3">
-                <label className="form-label small fw-bold">내 위치</label>
-                <div className="form-control bg-light" style={{ minHeight: 38 }}>{address || '위치 확인 중...'}</div>
-                {lat && lon && <div className="text-muted small mt-1">위도: {lat.toFixed(4)}, 경도: {lon.toFixed(4)}</div>}
+                <label className="form-label small fw-bold">이름 (선택)</label>
+                <input type="text" className="form-control" value={realName} onChange={e => setRealName(e.target.value)} placeholder="이름" />
               </div>
-              <button className="btn btn-success w-100 py-2 fw-bold mb-2" onClick={handleNeighborCheck} disabled={loading}>
-                {loading ? '인증 중...' : neighborChecked ? '✅ 이웃인증 완료' : '이웃인증'}
-              </button>
-              <button className="btn btn-outline-success w-100 py-2 fw-bold" onClick={() => setStep(5)} disabled={!neighborChecked}>
-                다음
-              </button>
-            </>
-          )}
 
-          {step === 5 && (
-            <>
+              {/* 별명 */}
               <div className="mb-3">
-                <label className="form-label small fw-bold">이름</label>
-                <input type="text" className="form-control" value={realName} onChange={e => setRealName(e.target.value)} />
+                <label className="form-label small fw-bold">별명 (선택, 중복불가)</label>
+                <input type="text" className="form-control" value={nickname} onChange={e => setNickname(e.target.value)} placeholder="별명" />
+                {nicknameStatus === 'checking' && <div className="small text-muted mt-1">확인 중...</div>}
+                {nicknameStatus === 'available' && <div className="small text-success mt-1">✅ 사용 가능한 별명입니다</div>}
+                {nicknameStatus === 'unavailable' && <div className="small text-danger mt-1">❌ 이미 사용 중인 별명입니다</div>}
               </div>
+
+              {/* 집주소 */}
               <div className="mb-3">
-                <label className="form-label small fw-bold">별명</label>
-                <input type="text" className="form-control" value={username} onChange={e => setUsername(e.target.value)} />
+                <label className="form-label small fw-bold">집주소 (선택)</label>
+                <div className="input-group">
+                  <input type="text" className="form-control" value={homeAddress} onChange={e => setHomeAddress(e.target.value)} placeholder="집주소" />
+                  <button className="btn btn-outline-success" type="button" onClick={() => handleCurrentLocation('home')}>
+                    📍 현재 위치 적용
+                  </button>
+                </div>
               </div>
+
+              {/* 회사주소 */}
               <div className="mb-3">
-                <label className="form-label small fw-bold">프로필 사진</label>
-                <input type="file" className="form-control" accept="image/*" onChange={e => setProfileFile(e.target.files?.[0] || null)} />
+                <label className="form-label small fw-bold">회사주소 (선택)</label>
+                <div className="input-group">
+                  <input type="text" className="form-control" value={officeAddress} onChange={e => setOfficeAddress(e.target.value)} placeholder="회사주소" />
+                  <button className="btn btn-outline-success" type="button" onClick={() => handleCurrentLocation('office')}>
+                    📍 현재 위치 적용
+                  </button>
+                </div>
               </div>
+
+              {/* 이웃인증 */}
+              <div className="mb-3">
+                <label className="form-label small fw-bold">이웃인증</label>
+                <button className="btn btn-success w-100 py-2 fw-bold mb-2" onClick={handleNeighborCheck} disabled={loading}>
+                  {loading ? '인증 중...' : neighborChecked ? '✅ 이웃인증 완료' : '이웃인증'}
+                </button>
+                {neighborChecked && (town || village) && (
+                  <div className="text-success small fw-bold">🏠 {town} {village}</div>
+                )}
+              </div>
+
+              {/* 가입 완료 */}
               <button className="btn btn-success w-100 py-2 fw-bold" onClick={handleSubmit} disabled={loading}>
-                {loading ? '가입 중...' : '가입 완료'}
+                {loading ? '가입 중...' : '🌳 회원가입 완료'}
               </button>
             </>
           )}
 
           <div className="text-center mt-3">
-            <button className="btn btn-sm btn-link text-muted text-decoration-none" onClick={() => step > 1 && setStep(step - 1)}>← 이전</button>
-            <span className="mx-2 text-muted small">|</span>
             <button className="btn btn-sm btn-link text-muted text-decoration-none" onClick={() => navigate('/login')}>로그인으로</button>
           </div>
         </div>
       </div>
-
     </div>
   )
 }

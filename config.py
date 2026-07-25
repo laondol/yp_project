@@ -16,7 +16,7 @@ class Config:
     SQLALCHEMY_DATABASE_URI = os.getenv('DATABASE_URL', 'postgresql://yp_dev:yp_dev_pass_2026@postgres:5432/yp_local')
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SESSION_COOKIE_SAMESITE = 'Lax'
-    SESSION_COOKIE_SECURE = bool(os.getenv('SESSION_COOKIE_SECURE', os.getenv('SITE_URL','').startswith('https')))
+    SESSION_COOKIE_SECURE = False
     UPLOAD_FOLDER = os.path.join(BASE_DIR, 'static', 'uploads')
     MAX_CONTENT_LENGTH = 50 * 1024 * 1024
     JUSO_API_KEY = os.getenv('JUSO_API_KEY', '')
@@ -27,6 +27,8 @@ class Config:
     SAFEMAP_API_KEY = os.getenv('SAFEMAP_API_KEY', '')
     EX_CONSTRUCTION_API_KEY = os.getenv('EX_CONSTRUCTION_API_KEY', '8485113604')
     GROQ_API_KEY = os.getenv('GROQ_API_KEY', '')
+    MOTIF_API_KEY = os.getenv('MOTIF_API_KEY', '')             # ← 추가
+    MOTIF_BASE_URL = os.getenv('MOTIF_BASE_URL', 'https://chat.motiftech.io/openapi/v1')  # ← 추가
     SMTP_HOST = os.getenv('SMTP_HOST', 'email-smtp.ap-northeast-2.amazonaws.com')
     SMTP_PORT = int(os.getenv('SMTP_PORT', '587'))
     SMTP_USERNAME = os.getenv('SMTP_USERNAME', '')
