@@ -4,11 +4,11 @@ from aiosmtpd.controller import Controller
 logging.basicConfig(level=logging.INFO, format='[SMTP-PROXY] %(asctime)s %(message)s')
 log = logging.getLogger('smtp.proxy')
 
-RELAY_HOST = os.getenv('SMTP_HOST', 'smtp.cafe24.com')
+RELAY_HOST = os.getenv('SMTP_HOST')
 RELAY_PORT = int(os.getenv('SMTP_PORT', '587'))
-RELAY_USER = os.getenv('SMTP_USERNAME', 'yp@unocum.kr')
-RELAY_PASS = os.getenv('SMTP_PASSWORD', '***REMOVED***')
-FROM_ADDR = os.getenv('MAIL_FROM', 'yp@unocum.kr')
+RELAY_USER = os.getenv('SMTP_USERNAME')
+RELAY_PASS = os.getenv('SMTP_PASSWORD')
+FROM_ADDR = os.getenv('MAIL_FROM')
 LISTEN_PORT = int(os.getenv('PROXY_PORT', '1027'))
 
 def authenticator(server, session, envelope, mechanism, auth_data):
