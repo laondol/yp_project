@@ -177,7 +177,7 @@ export default function UserProfilePage() {
                       👥 채팅
                     </button>
                     <button className="btn btn-sm btn-outline-secondary"
-                      onClick={() => window.open('/schedule?v=2', 'schedPopup', 'width=700,height=700,left=100,top=50')}>
+                      onClick={() => window.open('/schedule2', 'schedPopup', 'width=700,height=700,left=100,top=50')}>
                       📅 일정
                     </button>
                   </div>

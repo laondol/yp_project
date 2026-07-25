@@ -1,5 +1,4 @@
 import { useEffect, useState, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
 
 interface BotInfo {
   bot_name: string; mood: string; level: number; exp: number
@@ -30,7 +29,6 @@ const BOARD_RULES: Record<string, string> = {
 type TabId = 'write' | 'friendchat' | 'schedule' | 'task'
 
 export default function UserMyPage() {
-  const navigate = useNavigate()
   const [me, setMe] = useState<UserInfo | null>(null)
   const [bot, setBot] = useState<BotInfo | null>(null)
   const [tab, setTab] = useState<TabId>('write')
@@ -398,7 +396,7 @@ export default function UserMyPage() {
               onClick={() => {
                 setTab(t); window.location.hash = 'tab' + t
                 if (t === 'friendchat') loadFriends()
-                if (t === 'task') navigate('/schedule')
+                if (t === 'task') window.open('/schedule2', 'schedPopup', 'width=700,height=700,left=100,top=50')
               }}>
               {tabLabels[t]}
             </button>
@@ -731,7 +729,7 @@ export default function UserMyPage() {
         <div className="text-center py-4">
           <div className="fs-1 mb-2">📋</div>
           <p className="text-muted small">일정 페이지에서 관리할 수 있습니다.</p>
-          <a href="/schedule" className="btn btn-success">일정 관리 열기</a>
+          <a href="/schedule2" target="schedPopup" className="btn btn-success" onClick={e => { e.preventDefault(); window.open('/schedule2', 'schedPopup', 'width=700,height=700,left=100,top=50') }}>일정 관리 열기</a>
         </div>
       </div>
 

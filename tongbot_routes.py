@@ -471,7 +471,8 @@ def _ai_reply(bot, user, user_msg):
     try:
         from config import Config
         import requests
-        key = getattr(Config, 'GROQ_API_KEY', '')
+        key = getattr(Config, 'MOTIF_API_KEY', '')
+        base_url = getattr(Config, 'MOTIF_BASE_URL', 'https://chat.motiftech.io/openapi/v1')
         if not key:
             return f"{_m['emoji']} 안녕하세요! 저는 {bot.bot_name}입니다. {lvl_name} 단계예요."
         tone = bot.tone or 'friendly'
@@ -505,9 +506,9 @@ def _ai_reply(bot, user, user_msg):
 {_get_shared_knowledge(user_msg)}
 
 회원: {user_msg}"""
-        r = requests.post("https://api.groq.com/openai/v1/chat/completions",
+        r = requests.post(f"{base_url}/chat/completions",
             headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-            json={"model": "llama-3.1-8b-instant", "messages": [{"role": "user", "content": prompt}], "max_tokens": 300},
+            json={"model": "motif-12.7b-reasoning", "messages": [{"role": "user", "content": prompt}], "max_tokens": 300},
             timeout=20)
         if r.status_code == 200:
             reply = r.json()['choices'][0]['message']['content']
@@ -1721,24 +1722,15 @@ def bot_schedule_delete():
     return jsonify({"success":True})
 
 @tongbot_bp.route('/schedule')
+@tongbot_bp.route('/schedule2')
 def schedule_page():
     if not session.get('user_id'):
-        return redirect(url_for('auth.login', next='/schedule'))
-    import os
-    path = os.path.join(current_app.root_path, 'frontend', 'dist', 'index.html')
-    if os.path.exists(path):
-        return send_file(path)
-    return render_template('intro.html')
-
-@tongbot_bp.route('/schedule2')
-def schedule_page2():
-    if not session.get('user_id'):
-        return redirect(url_for('auth.login', next='/schedule2'))
-    import os
-    path = os.path.join(current_app.root_path, 'frontend', 'dist', 'index.html')
-    if os.path.exists(path):
-        return send_file(path)
-    return render_template('intro.html')
+        return redirect(url_for('auth.login', next=request.path))
+    resp = make_response(render_template('schedule2.html'))
+    resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    resp.headers['Pragma'] = 'no-cache'
+    resp.headers['Expires'] = '0'
+    return resp
 
 @tongbot_bp.route('/api/bot/schedule/common', methods=['POST'])
 def schedule_common():
@@ -2204,12 +2196,12 @@ def _moderate_chat(room_id):
     try:
         from config import Config
         import requests
-        key = getattr(Config, 'GROQ_API_KEY', '')
+        key = getattr(Config, 'MOTIF_API_KEY', '')
         if not key: return
         prompt = f"""당신은 채팅 중재자입니다. 다음 대화를 보고 분위기를 판단하세요.
 긍정적이면 칭찬, 부정적이면 부드럽게 조율하는 한 문장을 쓰세요.
 대화: {recent}"""
-        r = requests.post("https://api.groq.com/openai/v1/chat/completions",
+        r = requests.post(f"{base_url}/chat/completions",
             headers={"Authorization": f"Bearer {key}"}, json={"model":"llama-3.1-8b-instant","messages":[{"role":"user","content":prompt}],"max_tokens":100}, timeout=15)
         if r.status_code == 200:
             reply = r.json()["choices"][0]["message"]["content"]
