@@ -11,7 +11,6 @@ def register_send_code():
     email = request.form.get('email', '').strip()
     if not email:
         return jsonify({'status':'error','msg':'이메일을 입력해 주세요.'})
-    # 회원가입용 이메일 체크
     purpose = request.form.get('purpose', 'register')
     if purpose == 'register' and User.query.filter_by(email=email).first():
         return jsonify({'status':'error','msg':'이미 등록된 이메일입니다.'})
@@ -22,8 +21,15 @@ def register_send_code():
     session['verify_code_time'] = time.time()
     session['verify_purpose'] = purpose
     from services.email_service import EmailService
-    EmailService.send(email, '[양평마을] 이메일 인증 코드', f'인증 코드: {code}\n\n5분간 유효합니다.')
-    return jsonify({'status':'success','msg':'인증 코드를 이메일로 발송했습니다.'})
+    sent = EmailService.send(email, '[양평마을] 이메일 인증 코드', f'인증 코드: {code}\n\n5분간 유효합니다.')
+    if sent:
+        return jsonify({'status':'success','msg':'인증 코드를 이메일로 발송했습니다.'})
+    else:
+        from flask import current_app
+        debug = current_app.config.get('DEBUG', False)
+        if debug:
+            return jsonify({'status':'success','msg':f'[DEV] 인증 코드: {code} (이메일 발송 실패, 콘솔 확인)'})
+        return jsonify({'status':'error','msg':'이메일 발송에 실패했습니다. 관리자에게 문의하거나 잠시 후 다시 시도해 주세요.'})
 
 @auth_bp.route('/register/verify-code', methods=['POST'])
 def register_verify_code():

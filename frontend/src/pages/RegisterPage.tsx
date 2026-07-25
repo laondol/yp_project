@@ -125,7 +125,7 @@ export default function RegisterPage() {
       const fd = new FormData(); fd.append('email', email)
       const res = await fetch('/register/send-code', { method: 'POST', body: fd })
       const data = await res.json()
-      if (!res.ok) { setError(data.error || data.msg || '인증코드 전송 실패'); return }
+      if (data.status === 'error') { setError(data.msg || '인증코드 전송 실패'); return }
       setCodeSent(true)
       window.open(`https://mail.google.com`, '_blank', 'noopener')
     } catch { setError('서버 연결 실패') }
@@ -139,7 +139,7 @@ export default function RegisterPage() {
       const fd = new FormData(); fd.append('code', code)
       const res = await fetch('/register/verify-code', { method: 'POST', body: fd })
       const data = await res.json()
-      if (!res.ok) { setError(data.error || data.msg || '인증 실패'); return }
+      if (data.status === 'error') { setError(data.msg || '인증 실패'); return }
       setStep(3)
     } catch { setError('서버 연결 실패') }
     finally { setLoading(false) }

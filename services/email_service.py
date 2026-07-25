@@ -35,7 +35,7 @@ class EmailService:
         try:
             use_ssl = (smtp_port == 465)
             if use_ssl:
-                server = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=10)
+                server = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=5)
             else:
                 ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
                 ctx.check_hostname = False
@@ -43,7 +43,7 @@ class EmailService:
                 if hasattr(ssl, 'OP_LEGACY_SERVER_CONNECT'):
                     ctx.options |= ssl.OP_LEGACY_SERVER_CONNECT
                 ctx.set_ciphers('DEFAULT:@SECLEVEL=0')
-                server = smtplib.SMTP(smtp_host, smtp_port, timeout=10)
+                server = smtplib.SMTP(smtp_host, smtp_port, timeout=5)
                 server.starttls(context=ctx)
             server.login(smtp_user, smtp_pass)
             server.sendmail(from_addr, [to], msg.as_string())
