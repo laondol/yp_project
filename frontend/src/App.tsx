@@ -84,6 +84,8 @@ import EditProfilePage from './pages/EditProfilePage'
 import SchedulePopupPage from './pages/SchedulePopupPage'
 import VillageAdminPage from './pages/VillageAdminPage'
 import VillageQrPage from './pages/VillageQrPage'
+import VillageQrDisplay from './pages/VillageQrDisplay'
+import VillageQrApprovals from './pages/VillageQrApprovals'
 import VillageEventCreatePage from './pages/VillageEventCreatePage'
 import VillageEventQrPage from './pages/VillageEventQrPage'
 import VillageJinConsentPage from './pages/VillageJinConsentPage'
@@ -218,6 +220,8 @@ export default function App() {
             {/* Village (마을) - specific routes before parameterized */}
             <Route path="/village/admin" element={<VillageAdminPage />} />
             <Route path="/village/qr" element={<VillageQrPage />} />
+            <Route path="/village/qr-display" element={<VillageQrDisplay />} />
+            <Route path="/village/qr-approvals" element={<VillageQrApprovals />} />
             <Route path="/village/event/create" element={<VillageEventCreatePage />} />
             <Route path="/village/event/:eventId/qr" element={<VillageEventQrPage />} />
             <Route path="/village/invite/:target" element={<VillageJinConsentPage />} />

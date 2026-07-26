@@ -253,6 +253,7 @@ class ShareReport(db.Model):
     smartplace_url = db.Column(db.String(500))
     store_suggestion_id = db.Column(db.Integer, db.ForeignKey('store_suggestion.id'), nullable=True)
     sub_category = db.Column(db.String(50), default='')
+    promotion_allowed = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now)
 
@@ -735,6 +736,29 @@ class VillageWish(db.Model):
     replied_by = db.Column(db.Integer, db.ForeignKey('user.id'))
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+class VillageBroadcast(db.Model):
+    __tablename__ = 'village_broadcast'
+    id = db.Column(db.Integer, primary_key=True)
+    myeon = db.Column(db.String(50), nullable=False)
+    ri = db.Column(db.String(50), nullable=False)
+    sender_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    subject = db.Column(db.String(200), default='')
+    content = db.Column(db.Text, nullable=False)
+    attachment = db.Column(db.String(300))
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+class ContentPermission(db.Model):
+    __tablename__ = 'content_permission'
+    id = db.Column(db.Integer, primary_key=True)
+    share_id = db.Column(db.Integer, db.ForeignKey('share_report.id'), nullable=True)
+    post_id = db.Column(db.Integer, db.ForeignKey('post.id'), nullable=True)
+    requester_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    author_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    status = db.Column(db.String(20), default='pending')
+    message = db.Column(db.Text, default='')
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    responded_at = db.Column(db.DateTime)
 
 class BlockedEmail(db.Model):
     __tablename__ = 'blocked_email'

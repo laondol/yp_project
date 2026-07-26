@@ -97,7 +97,8 @@ def api_user_notification_summary():
         return jsonify({'memos': 0, 'notices': 0, 'friend_requests': 0, 'ai_broadcasts': 0})
     from models import Friend, TongBotMemo, VillageAlert, AiBroadcast
     memos = TongBotMemo.query.filter_by(user_id=uid, seen=False).count()
-    notices = VillageAlert.query.filter_by(is_active=True).count()
+    unread_msgs = Message.query.filter_by(receiver_id=uid, is_read=False).count()
+    notices = VillageAlert.query.filter_by(is_active=True).count() + unread_msgs
     friend_requests = Friend.query.filter_by(receiver_id=uid, status='pending').count()
     ai_broadcasts = AiBroadcast.query.filter_by(is_active=True).count()
     return jsonify({'memos': memos, 'notices': notices, 'friend_requests': friend_requests, 'ai_broadcasts': ai_broadcasts})

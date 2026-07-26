@@ -89,6 +89,7 @@ export default function NavBar() {
   }
 
   const [myVillage, setMyVillage] = useState<{exists:boolean;title?:string;myeon?:string;ri?:string}>({exists:false})
+  const [managedPageExists, setManagedPageExists] = useState(false)
   const hasVillage = user?.managed_pages?.some(p => p.startsWith('vi_') || p === 'village') || user?.role === 'leader'
   const villageParts = (() => {
     for (const p of (user?.managed_pages || [])) {
@@ -102,6 +103,10 @@ export default function NavBar() {
   useEffect(() => {
     if (!user?.id) return
     fetch('/api/village/my-page', { credentials: 'include' }).then(r => r.json()).then(d => setMyVillage(d)).catch(() => {})
+    if (villageParts.myeon && villageParts.ri) {
+      fetch(`/api/village/page?myeon=${villageParts.myeon}&ri=${villageParts.ri}`, { credentials: 'include' })
+        .then(r => r.json()).then(d => setManagedPageExists(!!d.id)).catch(() => {})
+    }
   }, [user?.id])
 
   const totalMemos = notif.memos
@@ -129,13 +134,10 @@ export default function NavBar() {
                 <div className="position-absolute bg-white border rounded shadow-sm p-2 d-none" id="villageMenu"
                   style={{ zIndex: 1050, minWidth: 140, top: '100%', left: 0 }}>
                   <a className="d-block small py-1 px-2 text-dark text-decoration-none rounded" href="/village">📝 봉사</a>
-                  {myVillage.exists ? (
-                    <a className="d-block small py-1 px-2 text-dark text-decoration-none rounded"
-                      href={`/village/view/${myVillage.myeon}/${myVillage.ri}`}>📖 {myVillage.title || '마을 홍보'}</a>
-                  ) : villageParts.ri ? (
+                  {managedPageExists && villageParts.ri && (
                     <a className="d-block small py-1 px-2 text-dark text-decoration-none rounded"
                       href={`/village/view/${villageParts.myeon}/${villageParts.ri}`}>📖 마을 홍보</a>
-                  ) : null}
+                  )}
                 </div>
               </div>
             )}

@@ -122,10 +122,11 @@ def reset_password():
 @auth_bp.route('/reset-password/send', methods=['POST'])
 def reset_password_send():
     data = request.get_json()
-    email = data.get('email','').strip()
+    email = data.get('email','').strip().lower()
     if not email:
         return jsonify({"status":"error","msg":"이메일을 입력하세요."})
-    user = User.query.filter_by(email=email).first()
+    from sqlalchemy import func
+    user = User.query.filter(func.lower(User.email) == email).first()
     if not user:
         return jsonify({"status":"error","msg":"등록되지 않은 이메일입니다."})
     import secrets, time
@@ -501,7 +502,7 @@ def api_login():
         session.update({'user_id': u.id, 'username': u.username, 'role': u.role, 'email': u.email or '', 'real_name': u.real_name or '', 'managed_pages': u.managed_pages or ''})
         u.last_login = datetime.now()
         db.session.commit()
-        return jsonify({'status': 'success', 'user': {'id': u.id, 'username': u.username, 'role': u.role, 'email': u.email, 'real_name': u.real_name, 'managed_pages': u.managed_pages, 'points': u.points, 'town': u.town, 'village': u.village}})
+        return jsonify({'status': 'success', 'user': {'id': u.id, 'username': u.username, 'role': u.role, 'email': u.email, 'real_name': u.real_name, 'managed_pages': u.managed_pages, 'points': u.points, 'town': u.town, 'village': u.village}, 'unread_count': Message.query.filter_by(receiver_id=u.id, is_read=False).count()})
     return jsonify({'status': 'error', 'msg': '로그인 정보가 올바르지 않습니다.'}), 401
 
 @auth_bp.route('/login/send-link', methods=['POST'])

@@ -34,6 +34,9 @@ export default function LoginPage() {
         return
       }
       await refresh()
+      if (data.unread_count > 0) {
+        alert(`📨 읽지 않은 편지가 ${data.unread_count}통 있습니다.`)
+      }
       const next = searchParams.get('next') || '/intro'
       navigate(next)
     } catch {

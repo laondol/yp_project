@@ -155,6 +155,23 @@ def create_qr_session():
     db.session.commit()
     return jsonify({'sessionId': session_id, 'expiresIn': 180})
 
+def _get_issuer_village(issuer_id):
+    issuer = User.query.get(issuer_id)
+    if not issuer: return None, None
+    mp = (issuer.managed_pages or '').split(',')
+    for p in mp:
+        if p.startswith('vi_'):
+            parts = p[3:].split('_')
+            if len(parts) >= 2:
+                return parts[0], parts[1]
+    return None, None
+
+def _user_in_village(user_id, myeon, ri):
+    if not myeon or not ri: return False
+    user = User.query.get(user_id)
+    if not user: return False
+    return user.town == myeon and user.village == ri
+
 @did_bp.route('/qr-session/claim', methods=['POST'])
 def claim_qr_session():
     uid = session.get('user_id')
@@ -165,10 +182,107 @@ def claim_qr_session():
     qs = QRSession.query.filter_by(session_id=session_id, status='pending').first()
     if not qs: return jsonify({'error': '세션 없음'}), 404
     if qs.expires_at < datetime.now(): return jsonify({'error': '세션 만료'}), 410
+    myeon, ri = _get_issuer_village(qs.issuer_user_id)
+    if not _user_in_village(uid, myeon, ri):
+        return jsonify({'error': '해당 마을 회원만 발급받을 수 있습니다'}), 403
     qs.subject_user_id = uid
-    qs.status = 'claimed'
+    qs.status = 'pending_approval'
     db.session.commit()
-    return jsonify({'success': True})
+    return jsonify({'success': True, 'status': 'pending_approval'})
+
+@did_bp.route('/qr-session/pending', methods=['GET'])
+def pending_qr_sessions():
+    uid = session.get('user_id')
+    if not uid: return jsonify({'error': '로그인'}), 401
+    user = User.query.get(uid)
+    if user.role not in ('admin', 'leader'):
+        return jsonify({'error': '권한 없음'}), 403
+    sessions = QRSession.query.filter_by(issuer_user_id=uid, status='pending_approval')\
+        .order_by(QRSession.created_at.desc()).all()
+    result = []
+    for s in sessions:
+        subject = User.query.get(s.subject_user_id) if s.subject_user_id else None
+        doc = DIDDocument.query.filter_by(user_id=s.subject_user_id).first() if s.subject_user_id else None
+        result.append({
+            'sessionId': s.session_id,
+            'subjectUserId': s.subject_user_id,
+            'subjectName': subject.real_name or subject.username if subject else '알 수 없음',
+            'subjectEmail': subject.email if subject else '',
+            'hasDid': bool(doc),
+            'createdAt': s.created_at.isoformat() if s.created_at else None,
+        })
+    return jsonify(result)
+
+@did_bp.route('/qr-session/approve', methods=['POST'])
+def approve_qr_session():
+    uid = session.get('user_id')
+    if not uid: return jsonify({'error': '로그인'}), 401
+    user = User.query.get(uid)
+    if user.role not in ('admin', 'leader'):
+        return jsonify({'error': '권한 없음'}), 403
+    data = request.get_json()
+    session_id = data.get('sessionId')
+    if not session_id: return jsonify({'error': 'sessionId 필요'}), 400
+    qs = QRSession.query.filter_by(session_id=session_id, status='pending_approval').first()
+    if not qs: return jsonify({'error': '세션 없음'}), 404
+    if qs.expires_at < datetime.now(): return jsonify({'error': '세션 만료'}), 410
+    myeon, ri = _get_issuer_village(qs.issuer_user_id)
+    if not _user_in_village(qs.subject_user_id, myeon, ri):
+        return jsonify({'error': '마을 회원이 아닙니다'}), 403
+    qs.status = 'approved'
+    subject = User.query.get(qs.subject_user_id)
+    if subject:
+        doc = DIDDocument.query.filter_by(user_id=subject.id).first()
+        if doc:
+            issuer_did = f'did:yp:{uid}'
+            vc_id = f'vc:yp:{secrets.token_hex(16)}'
+            vc_payload = {
+                '@context': ['https://www.w3.org/2018/credentials/v1'],
+                'id': vc_id,
+                'type': ['VerifiableCredential', 'ResidentCredential'],
+                'issuer': issuer_did,
+                'issuanceDate': datetime.utcnow().isoformat() + 'Z',
+                'credentialSubject': {
+                    'id': doc.did,
+                    'resident': subject.is_verified_resident,
+                    'town': subject.town or '',
+                    'village': subject.village or '',
+                },
+            }
+            master_key = _load_master_key()
+            canonical = json.dumps(vc_payload, sort_keys=True, ensure_ascii=False).encode()
+            signature = master_key.sign(canonical, ec.ECDSA(hashes.SHA256()))
+            vc_payload['proof'] = {
+                'type': 'EcdsaSecp256r1Signature2019',
+                'created': vc_payload['issuanceDate'],
+                'proofPurpose': 'assertionMethod',
+                'verificationMethod': f'{issuer_did}#keys-1',
+                'jws': base64.urlsafe_b64encode(signature).decode(),
+            }
+            vc = VerifiableCredential(
+                vc_id=vc_id, issuer_did=issuer_did,
+                subject_did=doc.did, subject_user_id=subject.id,
+                vc_json=json.dumps(vc_payload, ensure_ascii=False),
+            )
+            db.session.add(vc)
+    db.session.commit()
+    return jsonify({'success': True, 'status': 'approved'})
+
+@did_bp.route('/qr-session/reject', methods=['POST'])
+def reject_qr_session():
+    uid = session.get('user_id')
+    if not uid: return jsonify({'error': '로그인'}), 401
+    user = User.query.get(uid)
+    if user.role not in ('admin', 'leader'):
+        return jsonify({'error': '권한 없음'}), 403
+    data = request.get_json()
+    session_id = data.get('sessionId')
+    if not session_id: return jsonify({'error': 'sessionId 필요'}), 400
+    qs = QRSession.query.filter_by(session_id=session_id, status='pending_approval').first()
+    if not qs: return jsonify({'error': '세션 없음'}), 404
+    qs.status = 'rejected'
+    db.session.commit()
+    return jsonify({'success': True, 'status': 'rejected'})
 
 @did_bp.route('/auto-issue', methods=['POST'])
 def auto_issue_vc():
