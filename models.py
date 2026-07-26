@@ -346,6 +346,20 @@ class VillageAlert(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now)
 
+class AiBroadcast(db.Model):
+    """양평AI 전체공지 (담당자 작성 → 책임자 승인 → 발행)"""
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(200), nullable=False)
+    content = db.Column(db.Text, nullable=False)
+    author_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    author_name = db.Column(db.String(50))
+    status = db.Column(db.String(20), default='draft')  # draft, pending, approved, published, rejected
+    approver_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    approved_at = db.Column(db.DateTime, nullable=True)
+    is_active = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    updated_at = db.Column(db.DateTime, default=datetime.now)
+
 class HeritageStamp(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
@@ -388,6 +402,9 @@ class TongBot(db.Model):
     chat_count = db.Column(db.Integer, default=0)
     memory = db.Column(db.Text, default='')
     tone = db.Column(db.String(20), default='friendly')
+    is_active = db.Column(db.Boolean, default=True)
+    recalled_at = db.Column(db.DateTime, nullable=True)
+    recall_reason = db.Column(db.Text, default='')
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now)
 
@@ -402,6 +419,24 @@ class TongBotDraft(db.Model):
     status = db.Column(db.String(20), default='draft')
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now)
+
+class TongBotMemo(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    content = db.Column(db.Text, nullable=False)
+    author = db.Column(db.String(10), default='user')
+    is_shared = db.Column(db.Boolean, default=False)
+    done = db.Column(db.Boolean, default=False)
+    seen = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    updated_at = db.Column(db.DateTime, default=datetime.now)
+
+class TongBotMemoComment(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    memo_id = db.Column(db.Integer, db.ForeignKey('tong_bot_memo.id', ondelete='CASCADE'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    content = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.now)
 
 class TongBotSchedule(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -476,6 +511,14 @@ class BotKnowledge(db.Model):
     content = db.Column(db.Text)
     source_bot = db.Column(db.String(30))
     useful_count = db.Column(db.Integer, default=1)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+class BotFeedback(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    bot_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    is_positive = db.Column(db.Boolean, nullable=False)
+    memo_id = db.Column(db.Integer, db.ForeignKey('tong_bot_memo.id'), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.now)
 
 class LegalPost(db.Model):
@@ -693,19 +736,6 @@ class VillageWish(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
 
-class AiFeedback(db.Model):
-    __tablename__ = 'ai_feedback'
-    id = db.Column(db.Integer, primary_key=True)
-    post_type = db.Column(db.String(20), nullable=False)
-    post_id = db.Column(db.Integer, nullable=False)
-    admin_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
-    admin_decision = db.Column(db.String(10), nullable=False)
-    ai_score = db.Column(db.Integer, default=0)
-    ai_reason = db.Column(db.Text)
-    title = db.Column(db.Text)
-    content = db.Column(db.Text)
-    created_at = db.Column(db.DateTime, default=datetime.now)
-
 class BlockedEmail(db.Model):
     __tablename__ = 'blocked_email'
     id = db.Column(db.Integer, primary_key=True)
@@ -841,24 +871,6 @@ class EpubTemplate(db.Model):
     style_guide = db.Column(db.Text, default="{}")  # JSON object
     is_default = db.Column(db.Boolean, default=False)
     is_active = db.Column(db.Boolean, default=True)
-    created_at = db.Column(db.DateTime, default=datetime.now)
-
-
-class EpubStyleGuide(db.Model):
-    __tablename__ = "epub_style_guide"
-    id = db.Column(db.Integer, primary_key=True)
-    template_id = db.Column(db.Integer, db.ForeignKey("epub_template.id"), nullable=True)
-    font_family = db.Column(db.String(100), default="Noto Sans KR, sans-serif")
-    font_size_h1 = db.Column(db.String(20), default="24px")
-    font_size_h2 = db.Column(db.String(20), default="18px")
-    font_size_h3 = db.Column(db.String(20), default="16px")
-    font_size_body = db.Column(db.String(20), default="15px")
-    color_primary = db.Column(db.String(20), default="#2c5f2d")
-    color_secondary = db.Column(db.String(20), default="#97bc62")
-    line_height = db.Column(db.Float, default=1.8)
-    margin = db.Column(db.String(20), default="16px")
-    image_width = db.Column(db.String(20), default="100%")
-    image_border_radius = db.Column(db.String(20), default="12px")
     created_at = db.Column(db.DateTime, default=datetime.now)
 
 

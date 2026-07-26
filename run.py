@@ -4,7 +4,6 @@ load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'))
 from flask import Flask
 from config import Config
 from models import db, User
-from routes import register_routes
 from tongbot_routes import tongbot_bp
 from route_modules.construction_bp import construction_bp
 from route_modules.share_bp import share_bp
@@ -21,7 +20,6 @@ from route_modules.message_bp import message_bp
 from route_modules.service_bp import service_bp
 from route_modules.auth_bp import auth_bp
 from route_modules.page_bp import page_bp
-from route_modules.legal_bp import legal_bp
 from route_modules.psycho_bp import psycho_bp
 from route_modules.epub_bp import epub_bp
 from route_modules.guide_bp import guide_bp
@@ -62,7 +60,6 @@ def create_app():
     app.jinja_env.globals['nip'] = lambda: '닢'
 
     # 웹 경로 등록
-    register_routes(app)
     app.register_blueprint(tongbot_bp)
     app.register_blueprint(construction_bp)
     app.register_blueprint(share_bp)

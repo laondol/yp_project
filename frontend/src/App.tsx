@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { AuthProvider } from './contexts/AuthContext'
 import NavBar from './components/NavBar'
@@ -37,8 +38,8 @@ import AdminShareReports from './pages/AdminShareReports'
 import AdminStores from './pages/AdminStores'
 import AdminAlerts from './pages/AdminAlerts'
 import AdminAiChat from './pages/AdminAiChat'
-import AdminAiFeedback from './pages/AdminAiFeedback'
 import AdminAiTrain from './pages/AdminAiTrain'
+import AdminAiBroadcasts from './pages/AdminAiBroadcasts'
 import AdminPendingLetters from './pages/AdminPendingLetters'
 import AdminPageManagers from './pages/AdminPageManagers'
 import AdminMessage from './pages/AdminMessage'
@@ -65,6 +66,7 @@ import ServiceRampPage from './pages/ServiceRampPage'
 import StoreDetailPage from './pages/StoreDetailPage'
 import AiChatPage from './pages/AiChatPage'
 import ChatPage from './pages/ChatPage'
+import TongBotChatPage from './pages/TongBotChatPage'
 import ViewPage from './pages/ViewPage'
 import SearchPage from './pages/SearchPage'
 import LegalIssuesPage from './pages/LegalIssuesPage'
@@ -111,52 +113,19 @@ function Footer() {
   )
 }
 
+function usePopup() {
+  const [params] = useState(() => new URLSearchParams(window.location.search))
+  return params.get('popup') === '1'
+}
+
 export default function App() {
+  const isPopup = usePopup()
   return (
     <AuthProvider>
       <BrowserRouter>
-        <NavBar />
-        <div className="container pb-5">
+        {!isPopup && <NavBar />}
+        <div className={isPopup ? '' : 'container pb-5'}>
           <Routes>
-            {/* Share (공유마당) */}
-            <Route path="/share" element={<ShareList />} />
-            <Route path="/share/detail/:id" element={<ShareDetail />} />
-            <Route path="/share/report" element={<ShareReport />} />
-            <Route path="/share/edit/:id" element={<ShareEdit />} />
-
-            {/* Epub */}
-            <Route path="/epub" element={<EpubList />} />
-            <Route path="/epub/list" element={<EpubList />} />
-            <Route path="/epub/new" element={<EpubList />} />
-            <Route path="/epub/edit/:id" element={<EpubEditor />} />
-
-            {/* Guide */}
-            <Route path="/guide" element={<GuideList />} />
-            <Route path="/guide/templates" element={<GuideTemplates />} />
-
-            {/* User */}
-            <Route path="/user/my" element={<UserMyPage />} />
-            <Route path="/user/edit-profile" element={<EditProfilePage />} />
-            <Route path="/user/:userId" element={<UserProfilePage />} />
-            <Route path="/user/:userId/profile" element={<UserMyPage />} />
-
-            {/* News (소식) */}
-            <Route path="/news" element={<NewsList />} />
-            <Route path="/news/:id" element={<NewsDetail />} />
-            <Route path="/world-news" element={<NewsTabsPage />} />
-            <Route path="/yp-news" element={<NewsTabsPage />} />
-            <Route path="/kr-yp-news" element={<NewsTabsPage />} />
-
-            {/* Legal (법률상담) */}
-            <Route path="/legal" element={<LegalList />} />
-            <Route path="/legal/:id" element={<LegalDetail />} />
-            <Route path="/legal/write" element={<LegalWrite />} />
-            <Route path="/legal/schedule" element={<LegalSchedule />} />
-            {/* Psycho (심리상담) */}
-            <Route path="/psycho" element={<PsychoList />} />
-            <Route path="/psycho/:id" element={<PsychoDetail />} />
-            <Route path="/psycho/write" element={<PsychoWrite />} />
-            <Route path="/psycho/schedule" element={<PsychoSchedule />} />
             {/* Intro / Landing */}
             <Route path="/" element={<IntroPage />} />
             <Route path="/intro" element={<IntroPage />} />
@@ -188,6 +157,7 @@ export default function App() {
 
             {/* Chat */}
             <Route path="/chat" element={<ChatPage />} />
+            <Route path="/bot/chat" element={<TongBotChatPage />} />
 
             {/* Board (freeboard) */}
             <Route path="/post/:postId" element={<ViewPage />} />
@@ -302,8 +272,8 @@ export default function App() {
             <Route path="/admin/alerts/new" element={<AdminAlertEdit />} />
             <Route path="/admin/alerts/edit/:id" element={<AdminAlertEdit />} />
             <Route path="/admin/ai-chat" element={<AdminAiChat />} />
-            <Route path="/admin/ai-feedback" element={<AdminAiFeedback />} />
             <Route path="/admin/ai-train" element={<AdminAiTrain />} />
+            <Route path="/admin/ai-broadcasts" element={<AdminAiBroadcasts />} />
             <Route path="/admin/pending-letters" element={<AdminPendingLetters />} />
             <Route path="/admin/page-managers" element={<AdminPageManagers />} />
             <Route path="/admin/message" element={<AdminMessage />} />
@@ -316,7 +286,7 @@ export default function App() {
             <Route path="*" element={<IntroPage />} />
           </Routes>
         </div>
-        <Footer />
+        {!isPopup && <Footer />}
       </BrowserRouter>
     </AuthProvider>
   )

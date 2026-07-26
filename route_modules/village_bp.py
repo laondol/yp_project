@@ -189,33 +189,42 @@ def village_register_member():
 
 @village_bp.route('/village/page', methods=['GET','POST'])
 def village_page_edit():
-    if not has_page_access('village'):
-        return "권한 없음", 403
     uid = session.get('user_id')
-    user = User.query.get(uid)
-    mp = (user.managed_pages or '').split(',') if user else []
-    # 첫 번째 담당 리 찾기
-    myeon = ri = None
-    for p in mp:
-        if p.startswith('vi_'):
-            parts = p[3:].split('_')
-            if len(parts) >= 2:
-                myeon, ri = parts[0], parts[1]
-                break
-    if not myeon:
-        return "담당 마을이 지정되지 않았습니다.", 400
-    page = VillagePage.query.filter_by(myeon=myeon, ri=ri).first()
-    if not page:
-        page = VillagePage(myeon=myeon, ri=ri, title=ri+' 마을', content='', visibility='members', created_by=uid)
-        db.session.add(page)
-        db.session.flush()
-    if request.method == 'POST':
-        page.title = request.form.get('title', page.title)
-        page.content = request.form.get('content', page.content)
-        page.visibility = request.form.get('visibility', page.visibility)
-        db.session.commit()
-        return "<script>alert('저장되었습니다.'); location.reload();</script>"
-    return _serve_spa()
+    if has_page_access('village'):
+        # 마을지기: 편집 모드
+        user = User.query.get(uid)
+        mp = (user.managed_pages or '').split(',') if user else []
+        myeon = ri = None
+        for p in mp:
+            if p.startswith('vi_'):
+                parts = p[3:].split('_')
+                if len(parts) >= 2:
+                    myeon, ri = parts[0], parts[1]
+                    break
+        if not myeon:
+            return "담당 마을이 지정되지 않았습니다.", 400
+        page = VillagePage.query.filter_by(myeon=myeon, ri=ri).first()
+        if not page:
+            page = VillagePage(myeon=myeon, ri=ri, title=ri+' 마을', content='', visibility='members', created_by=uid)
+            db.session.add(page)
+            db.session.flush()
+        if request.method == 'POST':
+            page.title = request.form.get('title', page.title)
+            page.content = request.form.get('content', page.content)
+            page.visibility = request.form.get('visibility', page.visibility)
+            db.session.commit()
+            return "<script>alert('저장되었습니다.'); location.reload();</script>"
+        return _serve_spa()
+    # 일반 회원: 자신의 위치에 맞는 공개 마을 페이지 보기
+    user = User.query.get(uid) if uid else None
+    if user:
+        ri = user.curr_village or user.login_village or user.village or user.reg_village or ''
+        town = user.curr_town or user.town or user.reg_town or ''
+        if ri:
+            page = VillagePage.query.filter_by(myeon=town, ri=ri).first()
+            if page and page.visibility != 'off':
+                return redirect(url_for('village.village_page_view', tmyeon=town, tri=ri))
+    return "<script>alert('해당하는 마을 페이지가 없습니다.'); history.back();</script>"
 
 @village_bp.route('/api/village/page')
 def api_village_page():
@@ -249,6 +258,25 @@ def api_village_page():
         'created_at': page.created_at.isoformat() if page.created_at else None,
     })
 
+@village_bp.route('/api/village/my-page')
+def api_village_my_page():
+    """현재 로그인한 회원의 위치에 해당하는 마을 페이지 정보"""
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({"exists": False})
+    user = User.query.get(uid)
+    if not user:
+        return jsonify({"exists": False})
+    # 우선순위: curr_village > login_village > village > reg_village
+    ri = user.curr_village or user.login_village or user.village or user.reg_village or ''
+    town = user.curr_town or user.town or user.reg_town or ''
+    if not ri:
+        return jsonify({"exists": False})
+    page = VillagePage.query.filter_by(myeon=town, ri=ri).first()
+    if not page or page.visibility == 'off':
+        return jsonify({"exists": False, "myeon": town, "ri": ri})
+    return jsonify({"exists": True, "id": page.id, "title": page.title, "myeon": town, "ri": ri})
+
 @village_bp.route('/village/view/<string:tmyeon>/<string:tri>')
 def village_page_view(tmyeon, tri):
     page = VillagePage.query.filter_by(myeon=tmyeon, ri=tri).first()
@@ -272,7 +300,7 @@ def village_page_view(tmyeon, tri):
             if uid in mp_users:
                 is_member = True
                 break
-    if page.visibility == 'members' and not is_member:
+    if page.visibility == 'members' and not is_member and not at_location:
         return "<script>alert('마을 주민만 볼 수 있습니다.'); history.back();</script>"
     # 쇼트코드 처리
     content = page.content or ''

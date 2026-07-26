@@ -26,12 +26,11 @@ const BOARD_RULES: Record<string, string> = {
   news: '마을 소식을 전합니다', legal: '법률 상담을 요청합니다', psycho: '심리 상담을 요청합니다',
 }
 
-type TabId = 'write' | 'friendchat' | 'schedule' | 'task'
+type TabId = 'chat' | 'write' | 'friendchat' | 'schedule' | 'task'
 
 export default function UserMyPage() {
   const [me, setMe] = useState<UserInfo | null>(null)
   const [bot, setBot] = useState<BotInfo | null>(null)
-  const [tab, setTab] = useState<TabId>('write')
   const [greeting, setGreeting] = useState('')
 
   // chat
@@ -97,8 +96,6 @@ export default function UserMyPage() {
       }
     })
     loadSchedules(); loadDrafts(); loadChatRooms()
-    const hh = window.location.hash.replace('#tab', '')
-    if (hh && ['write', 'friendchat', 'schedule', 'task'].includes(hh)) setTab(hh as TabId)
   }, [])
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [chatLog, sending])
@@ -335,11 +332,15 @@ export default function UserMyPage() {
   const moodInfo = bot ? MOODS[bot.mood] || MOODS.warm : MOODS.warm
   const levelInfo = bot ? LEVELS[bot.level] || LEVELS[1] : LEVELS[1]
   const expPercent = bot ? (bot.exp % 100) : 0
-  const tabLabels: Record<TabId, string> = { write: '✍️ 글쓰기', friendchat: '👥 벗 채팅', schedule: '📅 일정', task: '📋 일' }
+  const searchParams = new URLSearchParams(window.location.search)
+  const initialTab = searchParams.get('tab')
+  const [tab, setTab] = useState<TabId>(initialTab === 'write' ? 'write' : 'chat')
+  const [soundEnabled, setSoundEnabled] = useState(() => localStorage.getItem('yp_sound_enabled') !== 'false')
+  const tabLabels: Record<string, string> = { chat: '💬 채팅', write: '✍️ 글쓰기', friendchat: '👥 벗채팅', schedule: '📅 일정', task: '📋 일' }
 
   return (
-    <div className="container mt-4" style={{ maxWidth: 800 }}>
-      <div className="d-flex justify-content-between align-items-center mb-4">
+    <div className="p-3" style={{ maxWidth: 800, margin: '0 auto' }}>
+      <div className="d-flex justify-content-between align-items-center mb-3">
         <h3 className="fw-bold mb-0">
           <span id="botNameDisplay">{bot?.bot_name || '통벗'}</span>
           <button className="btn btn-sm btn-outline-secondary ms-2" onClick={() => { setShowRename(!showRename); setNewName(bot?.bot_name || '') }}>✏️</button>
@@ -347,10 +348,22 @@ export default function UserMyPage() {
         <a href={`/user/${me?.id}`} className="btn btn-sm btn-outline-secondary">내 프로필</a>
       </div>
 
-      <div className="row g-3 mb-3">
+      <div className="d-flex align-items-center gap-2 mb-2 small">
+        <span className="text-muted">🔊 소리</span>
+        <div className="form-check form-switch mb-0">
+          <input className="form-check-input" type="checkbox" role="switch" id="soundToggle"
+            checked={soundEnabled} onChange={e => {
+              const v = e.target.checked
+              localStorage.setItem('yp_sound_enabled', String(v))
+              setSoundEnabled(v)
+            }} />
+        </div>
+      </div>
+
+      <div className="row g-2 mb-3">
         <div className="col-4 text-center">
           <div className="fs-2" id="moodEmoji">{moodInfo.emoji}</div>
-          <small className="text-muted" id="moodLabel">{moodInfo.label}</small>
+          <small className="text-muted">{moodInfo.label}</small>
         </div>
         <div className="col-4 text-center">
           <div className="fs-2">{levelInfo.emoji}</div>
@@ -360,9 +373,6 @@ export default function UserMyPage() {
           <div className="fs-2">💬</div>
           <small className="text-muted">친밀도 {bot?.intimacy || 0}</small>
         </div>
-      </div>
-      <div className="progress mb-3" style={{ height: 6 }}>
-        <div className="progress-bar bg-warning" style={{ width: `${expPercent}%` }} />
       </div>
 
       {showRename && (
@@ -390,11 +400,11 @@ export default function UserMyPage() {
       </div>
 
       <ul className="nav nav-tabs mb-4" id="botTabs">
-        {(['write', 'friendchat', 'schedule', 'task'] as TabId[]).map(t => (
+        {(['chat', 'write', 'friendchat', 'schedule', 'task'] as const).map(t => (
           <li className="nav-item" key={t}>
             <button className={`nav-link ${tab === t ? 'active fw-bold' : ''}`}
               onClick={() => {
-                setTab(t); window.location.hash = 'tab' + t
+                setTab(t)
                 if (t === 'friendchat') loadFriends()
                 if (t === 'task') window.open('/schedule2', 'schedPopup', 'width=700,height=700,left=100,top=50')
               }}>
@@ -404,334 +414,287 @@ export default function UserMyPage() {
         ))}
       </ul>
 
-      {/* ── CHAT (always visible) ── */}
-      <div id="tabChat">
-        <div id="chatMessages" className="mb-3" style={{ maxHeight: 400, overflowY: 'auto', border: '1px solid #dee2e6', borderRadius: 12, padding: 12, background: '#f8f9fa' }}>
-          {chatLog.length === 0 && (
-            <div className="text-center text-muted small py-3">
-              {greeting}<br />저는 <strong>{bot?.bot_name || '통벗'}</strong>입니다. 함께사는양평에서 도와드릴게요.
-            </div>
-          )}
-          {chatLog.map((c, i) => (
-            <div key={i} className={`mb-2 ${c.role === 'user' ? 'text-end' : 'text-start'}`}>
-              <span className={`badge ${c.role === 'user' ? 'bg-primary' : c.name === '제안' ? 'bg-info text-dark' : 'bg-success'}`}>{c.name}</span>
-              <span className="ms-1">{c.text}</span>
-            </div>
-          ))}
-          {sending && <div className="text-start text-muted small">🤖 입력 중...</div>}
-          <div ref={chatEndRef} />
-        </div>
-        <div className="d-flex gap-2 mb-2">
-          <input type="text" id="chatInput" className="form-control" placeholder="메시지..."
-            value={chatMsg} onChange={e => setChatMsg(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') sendChat() }} />
-          <button className="btn btn-primary" onClick={sendChat} disabled={sending}>전송</button>
-          <button className="btn btn-sm btn-outline-secondary" onClick={loadHistory}>📜 기록</button>
-        </div>
-        {showHistory && (
-          <div id="historyPanel" className="card p-2 mb-2 small" style={{ maxHeight: 300, overflowY: 'auto' }}>
-            <strong>📜 대화 기록 ({bot?.chat_count || 0}회)</strong><hr className="my-1" />
-            {historyData.length === 0 && <div className="text-muted">대화 기록이 없습니다.</div>}
-            {historyData.map((h, i) => (
-              <div key={i} className={`mb-1 ${h.role === 'user' ? 'text-end' : 'text-start'}`}>
-                <span className={`badge bg-${h.role === 'user' ? 'primary' : 'success'}`}>{h.role === 'user' ? '나' : '통벗'}</span> {h.text}
+      {/* ── CHAT TAB ── */}
+      {tab === 'chat' && (
+        <div id="tabChat">
+          <div id="chatMessages" className="mb-3" style={{ maxHeight: 500, overflowY: 'auto', border: '1px solid #dee2e6', borderRadius: 12, padding: 12, background: '#f8f9fa' }}>
+            {chatLog.length === 0 && (
+              <div className="text-center text-muted small py-3">
+                {greeting}<br />저는 <strong>{bot?.bot_name || '통벗'}</strong>입니다. 함께사는양평에서 도와드릴게요.
+              </div>
+            )}
+            {chatLog.map((c, i) => (
+              <div key={i} className={`mb-2 ${c.role === 'user' ? 'text-end' : 'text-start'}`}>
+                <span className={`badge ${c.role === 'user' ? 'bg-primary' : c.name === '제안' ? 'bg-info text-dark' : 'bg-success'}`}>{c.name}</span>
+                <span className="ms-1">{c.text}</span>
               </div>
             ))}
+            {sending && <div className="text-start text-muted small">🤖 입력 중...</div>}
+            <div ref={chatEndRef} />
           </div>
-        )}
-      </div>
+          <div className="d-flex gap-2 mb-2">
+            <input type="text" id="chatInput" className="form-control" placeholder="메시지..."
+              value={chatMsg} onChange={e => setChatMsg(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') sendChat() }} />
+            <button className="btn btn-primary" onClick={sendChat} disabled={sending}>전송</button>
+            <button className="btn btn-sm btn-outline-secondary" onClick={loadHistory}>📜 기록</button>
+          </div>
+          {showHistory && (
+            <div id="historyPanel" className="card p-2 mb-2 small" style={{ maxHeight: 300, overflowY: 'auto' }}>
+              <strong>📜 대화 기록 ({bot?.chat_count || 0}회)</strong><hr className="my-1" />
+              {historyData.length === 0 && <div className="text-muted">대화 기록이 없습니다.</div>}
+              {historyData.map((h, i) => (
+                <div key={i} className={`mb-1 ${h.role === 'user' ? 'text-end' : 'text-start'}`}>
+                  <span className={`badge bg-${h.role === 'user' ? 'primary' : 'success'}`}>{h.role === 'user' ? '나' : '통벗'}</span> {h.text}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── WRITE TAB ── */}
-      <div id="tabWrite" style={{ display: tab === 'write' ? '' : 'none' }}>
-        <div className="row g-3">
-          <div className="col-md-8">
-            <div className="d-flex gap-2 mb-3">
-              <select id="draftCategory" className="form-select form-select-sm" style={{ width: 'auto' }}
-                value={draftCategory} onChange={e => setDraftCategory(e.target.value)}>
-                <option value="">게시판 선택</option>
-                <option value="share">공유마당</option>
-                <option value="dream">꿈꾸기</option>
-                <option value="news">소식</option>
-                <option value="legal">법률상담</option>
-                <option value="psycho">심리상담</option>
-              </select>
-              <span id="boardRule" className="small text-muted align-self-center">
-                {BOARD_RULES[draftCategory] || ''}
-              </span>
-            </div>
-            <input type="text" id="draftTitle" className="form-control mb-2" placeholder="제목"
-              value={draftTitle} onChange={e => setDraftTitle(e.target.value)} />
-            <div className="btn-group btn-group-sm mb-2" id="toolbar">
-              <button className="btn btn-outline-secondary" onClick={() => execCmd('bold')} title="굵게"><b>B</b></button>
-              <button className="btn btn-outline-secondary" onClick={() => execCmd('italic')} title="기울임"><i>I</i></button>
-              <button className="btn btn-outline-secondary" onClick={() => execCmd('underline')} title="밑줄"><u>U</u></button>
-              <button className="btn btn-outline-secondary" onClick={() => execCmd('insertUnorderedList')} title="목록">•</button>
-              <button className="btn btn-outline-secondary" onClick={() => execCmd('insertOrderedList')} title="번호">1.</button>
-              <button className="btn btn-outline-secondary" onClick={() => document.getElementById('photoInput')?.click()}>📷</button>
-              <button className="btn btn-outline-secondary" onClick={() => document.getElementById('fileInput')?.click()}>📎</button>
-              <button className="btn btn-outline-secondary" onClick={openDraw}>✏️</button>
-            </div>
-            <input type="file" id="photoInput" accept="image/*" style={{ display: 'none' }}
-              onChange={e => { const f = e.target.files?.[0]; if (f) insertPhoto(f); e.target.value = '' }} />
-            <input type="file" id="fileInput" style={{ display: 'none' }}
-              onChange={e => { const f = e.target.files?.[0]; if (f) uploadFile(f); e.target.value = '' }} />
-            <div id="editor" ref={editorRef} contentEditable
-              className="form-control mb-2"
-              style={{ minHeight: 200, maxHeight: 400, overflowY: 'auto', whiteSpace: 'pre-wrap' }} />
-            {drawOpen && (
-              <div id="drawPanel" className="card p-2 mb-2">
-                <canvas ref={canvasRef} width={400} height={300}
-                  style={{ border: '1px solid #ddd', borderRadius: 8, cursor: 'crosshair' }} />
-                <div className="d-flex gap-2 mt-2">
-                  <input type="color" id="drawColor" defaultValue="#000000" />
-                  <input type="range" id="drawSize" min={1} max={10} defaultValue={3} />
-                  <button className="btn btn-sm btn-outline-danger" onClick={clearDraw}>지우기</button>
-                  <button className="btn btn-sm btn-primary" onClick={insertDrawing}>삽입</button>
-                  <button className="btn btn-sm btn-outline-secondary" onClick={() => setDrawOpen(false)}>닫기</button>
-                </div>
+      {tab === 'write' && (
+        <div id="tabWrite">
+          <div className="row g-3">
+            <div className="col-md-8">
+              <div className="d-flex gap-2 mb-3">
+                <select id="draftCategory" className="form-select form-select-sm" style={{ width: 'auto' }}
+                  value={draftCategory} onChange={e => setDraftCategory(e.target.value)}>
+                  <option value="">게시판 선택</option>
+                  <option value="share">공유마당</option>
+                  <option value="dream">꿈꾸기</option>
+                  <option value="news">소식</option>
+                  <option value="legal">법률상담</option>
+                  <option value="psycho">심리상담</option>
+                </select>
+                <span id="boardRule" className="small text-muted align-self-center">
+                  {BOARD_RULES[draftCategory] || ''}
+                </span>
               </div>
-            )}
-            <div id="attachedFiles" className="small mb-2" />
-            <div className="d-flex gap-2">
-              <button className="btn btn-outline-secondary" onClick={saveDraft}>💾 임시저장</button>
-              <button className="btn btn-outline-primary" onClick={requestReview}>🤖 {bot?.bot_name || '통벗'}교정부탁</button>
-              <button className="btn btn-success" onClick={() => postToBoard(editorRef.current?.innerHTML || '')}>📤 게시하기</button>
-            </div>
-          </div>
-          <div className="col-md-4">
-            <h6 className="small text-muted">📝 임시저장</h6>
-            <div id="draftList" className="small">
-              {drafts.length === 0 && <div className="text-muted">저장된 글이 없습니다.</div>}
-              {drafts.map(d => (
-                <div key={d.id} className="border rounded p-2 mb-1" style={{ cursor: 'pointer' }} onClick={() => loadDraft(d)}>
-                  <div className="fw-bold">{d.title || '(제목없음)'}</div>
-                  <span className={`badge bg-${d.status === 'reviewed' ? 'success' : 'secondary'}`}>
-                    {{ draft: '임시', reviewed: '교정완료', posted: '게시됨' }[d.status] || d.status}
-                  </span>
-                  <small className="text-muted ms-1">
-                    {d.updated_at ? new Date(d.updated_at).toLocaleDateString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}
-                  </small>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-        {showReview && (
-          <div id="reviewResult" className="mt-3">
-            <hr /><h6>🤖 {bot?.bot_name || '통벗'}의 교정 결과</h6>
-            <div className="row g-3">
-              <div className="col-6">
-                <small className="text-muted">✍️ 내 원본</small>
-                <div id="originalView" className="p-2 bg-light rounded small" style={{ whiteSpace: 'pre-wrap', maxHeight: 300, overflowY: 'auto' }}
-                  dangerouslySetInnerHTML={{ __html: reviewOrig }} />
+              <input type="text" id="draftTitle" className="form-control mb-2" placeholder="제목"
+                value={draftTitle} onChange={e => setDraftTitle(e.target.value)} />
+              <div className="btn-group btn-group-sm mb-2" id="toolbar">
+                <button className="btn btn-outline-secondary" onClick={() => execCmd('bold')} title="굵게"><b>B</b></button>
+                <button className="btn btn-outline-secondary" onClick={() => execCmd('italic')} title="기울임"><i>I</i></button>
+                <button className="btn btn-outline-secondary" onClick={() => execCmd('underline')} title="밑줄"><u>U</u></button>
+                <button className="btn btn-outline-secondary" onClick={() => execCmd('insertUnorderedList')} title="목록">•</button>
+                <button className="btn btn-outline-secondary" onClick={() => execCmd('insertOrderedList')} title="번호">1.</button>
+                <button className="btn btn-outline-secondary" onClick={() => document.getElementById('photoInput')?.click()}>📷</button>
+                <button className="btn btn-outline-secondary" onClick={() => document.getElementById('fileInput')?.click()}>📎</button>
+                <button className="btn btn-outline-secondary" onClick={openDraw}>✏️</button>
               </div>
-              <div className="col-6">
-                <small className="text-muted">🤖 교정 제안</small>
-                <div id="reviewView" className="p-2 bg-warning bg-opacity-10 rounded small" style={{ whiteSpace: 'pre-wrap', maxHeight: 300, overflowY: 'auto' }}>
-                  {reviewText}
-                </div>
-              </div>
-            </div>
-            {reviewSugg && <div id="reviewSuggestion" className="small text-primary mt-1">📌 추천 게시판: <strong>{reviewSugg}</strong></div>}
-            <div className="mt-2 d-flex gap-2">
-              <button className="btn btn-sm btn-success" onClick={() => postToBoard(reviewText)}>✅ 교정본으로 게시</button>
-              <button className="btn btn-sm btn-outline-secondary" onClick={() => setShowReview(false)}>숨기기</button>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* ── FRIEND CHAT TAB ── */}
-      <div id="tabFriendchat" style={{ display: tab === 'friendchat' ? '' : 'none' }}>
-        <div className="row g-3">
-          <div className="col-md-5">
-            <h6 className="small text-muted">👥 내 벗 목록</h6>
-            <div id="friendList" className="list-group small" style={{ maxHeight: 300, overflowY: 'auto' }}>
-              {friends.length === 0 && (
-                <div className="text-muted py-2">아직 벗이 없습니다.<br /><small>다른 회원님 프로필에서 벗 신청을 해보세요!</small></div>
-              )}
-              {friends.map(f => (
-                <label key={f.id} className="list-group-item" style={{ cursor: 'pointer' }}>
-                  <input type="checkbox" className="friend-check me-2" checked={selectedFriendIds.includes(f.id)}
-                    onChange={() => toggleFriend(f.id)} />
-                  {f.name} <small className="text-muted">@{f.username}</small><br />
-                  <small className="text-muted">{f.town} {f.village}</small>
-                </label>
-              ))}
-            </div>
-          </div>
-          <div className="col-md-7">
-            <div id="chatRoomList">
-              {chatRooms.length === 0 && (
-                <div className="text-muted text-center py-3">
-                  참여 중인 채팅방이 없습니다.<br />
-                  <small>벗을 선택하고 채팅방을 만들어보세요!</small>
+              <input type="file" id="photoInput" accept="image/*" style={{ display: 'none' }}
+                onChange={e => { const f = e.target.files?.[0]; if (f) insertPhoto(f); e.target.value = '' }} />
+              <input type="file" id="fileInput" style={{ display: 'none' }}
+                onChange={e => { const f = e.target.files?.[0]; if (f) uploadFile(f); e.target.value = '' }} />
+              <div id="editor" ref={editorRef} contentEditable
+                className="form-control mb-2"
+                style={{ minHeight: 200, maxHeight: 400, overflowY: 'auto', whiteSpace: 'pre-wrap' }} />
+              {drawOpen && (
+                <div id="drawPanel" className="card p-2 mb-2">
+                  <canvas ref={canvasRef} width={400} height={300}
+                    style={{ border: '1px solid #ddd', borderRadius: 8, cursor: 'crosshair' }} />
+                  <div className="d-flex gap-2 mt-2">
+                    <input type="color" id="drawColor" defaultValue="#000000" />
+                    <input type="range" id="drawSize" min={1} max={10} defaultValue={3} />
+                    <button className="btn btn-sm btn-outline-danger" onClick={clearDraw}>지우기</button>
+                    <button className="btn btn-sm btn-primary" onClick={insertDrawing}>삽입</button>
+                    <button className="btn btn-sm btn-outline-secondary" onClick={() => setDrawOpen(false)}>닫기</button>
+                  </div>
                 </div>
               )}
-              {chatRooms.map(r => (
-                <div key={r.id} className="card mb-2" style={{ cursor: 'pointer' }} onClick={() => openRoom(r.id)}>
-                  <div className="card-body p-2 small">
-                    <strong>{r.name}</strong>
-                    <small className="text-muted float-end">
-                      {r.created_at ? new Date(r.created_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }) : ''}
+              <div id="attachedFiles" className="small mb-2" />
+              <div className="d-flex gap-2">
+                <button className="btn btn-outline-secondary" onClick={saveDraft}>💾 임시저장</button>
+                <button className="btn btn-outline-primary" onClick={requestReview}>🤖 {bot?.bot_name || '통벗'}교정부탁</button>
+                <button className="btn btn-success" onClick={() => postToBoard(editorRef.current?.innerHTML || '')}>📤 게시하기</button>
+              </div>
+            </div>
+            <div className="col-md-4">
+              <h6 className="small text-muted">📝 임시저장</h6>
+              <div id="draftList" className="small">
+                {drafts.length === 0 && <div className="text-muted">저장된 글이 없습니다.</div>}
+                {drafts.map(d => (
+                  <div key={d.id} className="border rounded p-2 mb-1" style={{ cursor: 'pointer' }} onClick={() => loadDraft(d)}>
+                    <div className="fw-bold">{d.title || '(제목없음)'}</div>
+                    <span className={`badge bg-${d.status === 'reviewed' ? 'success' : 'secondary'}`}>
+                      {{ draft: '임시', reviewed: '교정완료', posted: '게시됨' }[d.status] || d.status}
+                    </span>
+                    <small className="text-muted ms-1">
+                      {d.updated_at ? new Date(d.updated_at).toLocaleDateString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}
                     </small>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
-            <button className="btn btn-sm btn-primary mt-2" id="chatCreateBtn" onClick={createRoom}
-              disabled={selectedFriendIds.length === 0}>+ 선택한 벗과 채팅</button>
-            {activeRoomId && (
-              <div id="activeChat" className="card mt-2">
-                <div className="card-header d-flex justify-content-between p-2">
-                  <strong className="small" id="activeChatName">채팅방 #{activeRoomId}</strong>
-                  <button className="btn btn-sm btn-outline-secondary" onClick={closeRoom}>✕</button>
+          </div>
+          {showReview && (
+            <div id="reviewResult" className="mt-3">
+              <hr /><h6>🤖 {bot?.bot_name || '통벗'}의 교정 결과</h6>
+              <div className="row g-3">
+                <div className="col-6">
+                  <small className="text-muted">✍️ 내 원본</small>
+                  <div id="originalView" className="p-2 bg-light rounded small" style={{ whiteSpace: 'pre-wrap', maxHeight: 300, overflowY: 'auto' }}
+                    dangerouslySetInnerHTML={{ __html: reviewOrig }} />
                 </div>
-                <div id="activeChatMsgs" className="card-body p-2" style={{ maxHeight: 250, overflowY: 'auto' }}>
-                  {activeRoomMsgs.map(m => (
-                    <div key={m.id} className={`mb-1 ${m.is_bot ? 'text-center text-muted fst-italic' : ''}`}>
-                      <span className={`badge bg-${m.is_bot ? 'warning' : 'primary'} small`}>{m.username}</span>
-                      {' '}{m.message} <small className="text-muted">{m.time}</small>
-                    </div>
-                  ))}
-                </div>
-                <div className="card-footer p-2">
-                  <div className="input-group input-group-sm">
-                    <input type="text" id="chatMsgInput" className="form-control" placeholder="메시지..."
-                      value={chatRoomMsg} onChange={e => setChatRoomMsg(e.target.value)}
-                      onKeyDown={e => { if (e.key === 'Enter') sendRoomMsg() }} />
-                    <button className="btn btn-primary" onClick={sendRoomMsg}>전송</button>
+                <div className="col-6">
+                  <small className="text-muted">🤖 교정 제안</small>
+                  <div id="reviewView" className="p-2 bg-warning bg-opacity-10 rounded small" style={{ whiteSpace: 'pre-wrap', maxHeight: 300, overflowY: 'auto' }}>
+                    {reviewText}
                   </div>
                 </div>
               </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* ── SCHEDULE TAB ── */}
-      <div id="tabSchedule" style={{ display: tab === 'schedule' ? '' : 'none' }}>
-        <button className="btn btn-sm btn-primary mb-3" onClick={() => setShowSchedForm(!showSchedForm)}>
-          {showSchedForm ? '✕ 닫기' : '+ 새 일정'}
-        </button>
-          {showSchedForm && (
-          <div id="addScheduleForm" className="card p-3 mb-3">
-            <input type="text" className="form-control form-control-sm mb-2" placeholder="일정 제목"
-              value={schedTitle} onChange={e => setSchedTitle(e.target.value)} />
-            <textarea className="form-control form-control-sm mb-2" rows={2} placeholder="설명"
-              value={schedDesc} onChange={e => setSchedDesc(e.target.value)} />
-            <input type="datetime-local" className="form-control form-control-sm mb-2"
-              value={schedDate} onChange={e => { setSchedDate(e.target.value); if (!schedEndDate || schedEndDate === schedDate) setSchedEndDate(e.target.value) }} />
-            <input type="text" className="form-control form-control-sm mb-2" placeholder="장소"
-              value={schedLocation} onChange={e => setSchedLocation(e.target.value)} />
-            <input type="datetime-local" className="form-control form-control-sm mb-2" placeholder="종료 시간"
-              value={schedEndDate} onChange={e => setSchedEndDate(e.target.value)} />
-            <button className="btn btn-sm btn-primary" onClick={addSchedule}>저장</button>
-            <button className="btn btn-sm btn-outline-secondary" onClick={() => setShowSchedForm(false)}>취소</button>
-          </div>
-        )}
-        <div id="scheduleList">
-          {schedules.length === 0 && <div className="text-muted text-center py-3">등록된 일정이 없습니다.</div>}
-          {schedules.map(s => {
-            const sc = s.color || 'gray'
-            const borderClass = sc === 'red' ? 'border-danger' : sc === 'blue' ? 'border-primary' : sc === 'green' ? 'border-success' : sc === 'info' ? 'border-info' : 'border-secondary'
-            const icon = sc === 'red' ? '🔴' : sc === 'blue' ? '🔵' : sc === 'green' ? '🟢' : sc === 'info' ? 'ℹ️' : '⚪'
-            const dateStr = s.event_date || ''
-            const isMove = s.title?.includes('이동') || s.title?.includes('귀가')
-            return (
-              <div key={s.id} className={`card mb-2 border-start border-3 ${borderClass}`} style={isMove ? {cursor:'pointer'} : {}}
-                   onClick={() => isMove && openRouteModal(s.id)}>
-                <div className="card-body p-2 small">
-                  <div className="d-flex justify-content-between">
-                    <strong>{icon} {s.title}</strong>
-                    <button className="btn btn-sm btn-outline-danger py-0" onClick={(e) => { e.stopPropagation(); deleteSchedule(s.id) }}>🗑️</button>
-                  </div>
-                  <span className="text-muted">{dateStr}</span>
-                  {s.location && <div><small>📍</small> {s.location}</div>}
-                  {isMove && s.departure_time && <div className="text-primary small">🚶 출발 {s.departure_time}</div>}
-                  {isMove && <div className="text-info small mt-1">👆 클릭하여 경로 보기</div>}
-                </div>
+              {reviewSugg && <div id="reviewSuggestion" className="small text-primary mt-1">📌 추천 게시판: <strong>{reviewSugg}</strong></div>}
+              <div className="mt-2 d-flex gap-2">
+                <button className="btn btn-sm btn-success" onClick={() => postToBoard(reviewText)}>✅ 교정본으로 게시</button>
+                <button className="btn btn-sm btn-outline-secondary" onClick={() => setShowReview(false)}>숨기기</button>
               </div>
-            )
-          })}
-        </div>
-
-        <hr className="my-4" />
-        <div className="mb-2">
-          <button className="btn btn-sm btn-outline-warning" onClick={() => setShowTempForm(!showTempForm)}>
-            {showTempForm ? '✕ 닫기' : '🏠 임시숙소 설정'}
-          </button>
-          {showTempForm && (
-            <div className="card p-2 mt-2 bg-light small">
-              <input type="text" className="form-control form-control-sm mb-1" placeholder="임시숙소 주소"
-                value={tempAddr} onChange={e => setTempAddr(e.target.value)} />
-              <div className="d-flex gap-1 mb-1">
-                <input type="date" className="form-control form-control-sm" placeholder="시작일"
-                  value={tempStart} onChange={e => setTempStart(e.target.value)} />
-                <input type="date" className="form-control form-control-sm" placeholder="종료일"
-                  value={tempEnd} onChange={e => setTempEnd(e.target.value)} />
-              </div>
-              <button className="btn btn-sm btn-warning" onClick={async () => {
-                const r = await fetch('/api/user/temp', { method:'POST', headers:{'Content-Type':'application/json'},
-                  body:JSON.stringify({temp_address:tempAddr,temp_start_date:tempStart,temp_end_date:tempEnd}) })
-                const d = await r.json()
-                if (d.status === 'success') { setShowTempForm(false); alert('✅ 임시숙소 저장됨') }
-                else alert(d.error || '실패')
-              }}>저장</button>
-              {tempAddr && <div className="mt-1 text-muted small">현재: {tempAddr} ({tempStart || '?'} ~ {tempEnd || '?'})</div>}
             </div>
           )}
         </div>
-        <h6 className="fw-bold mb-2">🚗 AI 일정짜기</h6>
-        <p className="text-muted small">자연어로 하루 일정을 입력하면 AI가 경로를 분석하여 이동/귀가 일정을 자동 생성합니다.</p>
-        <textarea className="form-control form-control-sm mb-2" rows={3}
-          placeholder="예: 7월11일에 양평읍 리얼리스트에서 오전 10시 미팅 후 옥천 심재운집 오후2시, 용문 제일정육고기 저녁7시"
-          value={tripInput} onChange={e => setTripInput(e.target.value)} />
-        <button className="btn btn-sm btn-success mb-3" disabled={tripPlanning || !tripInput.trim()}
-          onClick={async () => {
-            setTripPlanning(true); setTripResult(null)
-            try {
-              const r = await fetch('/api/bot/trip/plan', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({message:tripInput}) })
-              const d = await r.json()
-              setTripResult(d)
-              if (d.status === 'success') loadSchedules()
-            } catch { setTripResult({error:'일정짜기 실패'}) }
-            setTripPlanning(false)
-          }}>
-          {tripPlanning ? '⏳ 일정 짜는 중...' : '🤖 자동 일정 짜기'}
-        </button>
-        {tripResult?.error && <div className="alert alert-danger small py-2">{tripResult.error}</div>}
-        {tripResult?.status === 'success' && (
-          <div className="card bg-light p-2 small mb-3">
-            <strong>📋 생성된 일정 ({tripResult.entries?.length || 0}개)</strong>
-            {tripResult.parsed_stops && (
-              <div className="mt-1 text-muted small">
-                🗺️ {tripResult.parsed_stops.map((s:any) => s.name).join(' → ')}
+      )}
+
+      {/* ── FRIEND CHAT TAB ── */}
+      {tab === 'friendchat' && (
+        <div id="tabFriendchat" className="text-center py-5">
+          <div className="fs-1 mb-3">👥</div>
+          <h5 className="fw-bold mb-2">벗 채팅</h5>
+          <p className="text-muted small mb-4">전용 채팅창에서 벗들과 대화해보세요.</p>
+          <button className="btn btn-success px-4 py-2"
+            onClick={() => window.open('/chat?popup=1', 'chatPopup', 'width=800,height=600,left=100,top=50')}>
+            채팅창 열기
+          </button>
+        </div>
+      )}
+
+      {/* ── SCHEDULE TAB ── */}
+      {tab === 'schedule' && (
+        <div id="tabSchedule">
+          <button className="btn btn-sm btn-primary mb-3" onClick={() => setShowSchedForm(!showSchedForm)}>
+            {showSchedForm ? '✕ 닫기' : '+ 새 일정'}
+          </button>
+          {showSchedForm && (
+            <div id="addScheduleForm" className="card p-3 mb-3">
+              <input type="text" className="form-control form-control-sm mb-2" placeholder="일정 제목"
+                value={schedTitle} onChange={e => setSchedTitle(e.target.value)} />
+              <textarea className="form-control form-control-sm mb-2" rows={2} placeholder="설명"
+                value={schedDesc} onChange={e => setSchedDesc(e.target.value)} />
+              <input type="datetime-local" className="form-control form-control-sm mb-2"
+                value={schedDate} onChange={e => { setSchedDate(e.target.value); if (!schedEndDate || schedEndDate === schedDate) setSchedEndDate(e.target.value) }} />
+              <input type="text" className="form-control form-control-sm mb-2" placeholder="장소"
+                value={schedLocation} onChange={e => setSchedLocation(e.target.value)} />
+              <input type="datetime-local" className="form-control form-control-sm mb-2" placeholder="종료 시간"
+                value={schedEndDate} onChange={e => setSchedEndDate(e.target.value)} />
+              <button className="btn btn-sm btn-primary" onClick={addSchedule}>저장</button>
+              <button className="btn btn-sm btn-outline-secondary" onClick={() => setShowSchedForm(false)}>취소</button>
+            </div>
+          )}
+          <div id="scheduleList">
+            {schedules.length === 0 && <div className="text-muted text-center py-3">등록된 일정이 없습니다.</div>}
+            {schedules.map(s => {
+              const sc = s.color || 'gray'
+              const borderClass = sc === 'red' ? 'border-danger' : sc === 'blue' ? 'border-primary' : sc === 'green' ? 'border-success' : sc === 'info' ? 'border-info' : 'border-secondary'
+              const icon = sc === 'red' ? '🔴' : sc === 'blue' ? '🔵' : sc === 'green' ? '🟢' : sc === 'info' ? 'ℹ️' : '⚪'
+              const dateStr = s.event_date || ''
+              const isMove = s.title?.includes('이동') || s.title?.includes('귀가')
+              return (
+                <div key={s.id} className={`card mb-2 border-start border-3 ${borderClass}`} style={isMove ? {cursor:'pointer'} : {}}
+                     onClick={() => isMove && openRouteModal(s.id)}>
+                  <div className="card-body p-2 small">
+                    <div className="d-flex justify-content-between">
+                      <strong>{icon} {s.title}</strong>
+                      <button className="btn btn-sm btn-outline-danger py-0" onClick={(e) => { e.stopPropagation(); deleteSchedule(s.id) }}>🗑️</button>
+                    </div>
+                    <span className="text-muted">{dateStr}</span>
+                    {s.location && <div><small>📍</small> {s.location}</div>}
+                    {isMove && s.departure_time && <div className="text-primary small">🚶 출발 {s.departure_time}</div>}
+                    {isMove && <div className="text-info small mt-1">👆 클릭하여 경로 보기</div>}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+
+          <hr className="my-4" />
+          <div className="mb-2">
+            <button className="btn btn-sm btn-outline-warning" onClick={() => setShowTempForm(!showTempForm)}>
+              {showTempForm ? '✕ 닫기' : '🏠 임시숙소 설정'}
+            </button>
+            {showTempForm && (
+              <div className="card p-2 mt-2 bg-light small">
+                <input type="text" className="form-control form-control-sm mb-1" placeholder="임시숙소 주소"
+                  value={tempAddr} onChange={e => setTempAddr(e.target.value)} />
+                <div className="d-flex gap-1 mb-1">
+                  <input type="date" className="form-control form-control-sm" placeholder="시작일"
+                    value={tempStart} onChange={e => setTempStart(e.target.value)} />
+                  <input type="date" className="form-control form-control-sm" placeholder="종료일"
+                    value={tempEnd} onChange={e => setTempEnd(e.target.value)} />
+                </div>
+                <button className="btn btn-sm btn-warning" onClick={async () => {
+                  const r = await fetch('/api/user/temp', { method:'POST', headers:{'Content-Type':'application/json'},
+                    body:JSON.stringify({temp_address:tempAddr,temp_start_date:tempStart,temp_end_date:tempEnd}) })
+                  const d = await r.json()
+                  if (d.status === 'success') { setShowTempForm(false); alert('✅ 임시숙소 저장됨') }
+                  else alert(d.error || '실패')
+                }}>저장</button>
+                {tempAddr && <div className="mt-1 text-muted small">현재: {tempAddr} ({tempStart || '?'} ~ {tempEnd || '?'})</div>}
               </div>
             )}
-            {tripResult.entries?.map((e:any, i:number) => (
-              <div key={i} className="border-bottom py-1">
-                <span className={`badge me-1 ${e.title?.includes('이동') || e.title?.includes('귀가') ? 'bg-info text-dark' : e.type === 'return' ? 'bg-danger' : 'bg-success'}`}>{e.time || e.arrival || ''}</span>
-                <strong>{e.title}</strong>
-                {e.total_min && <small className="text-muted ms-1">({e.total_min}분)</small>}
-                {e.memo && <pre className="mb-0 mt-1 text-muted" style={{fontSize:'0.75rem',whiteSpace:'pre-wrap',maxHeight:120,overflowY:'auto'}}>{e.memo}</pre>}
-              </div>
-            ))}
-            <button className="btn btn-sm btn-outline-primary mt-2" onClick={() => exportICS(tripResult)}>
-              📅 구글/아웃룩에 추가
-            </button>
           </div>
-        )}
-      </div>
+          <h6 className="fw-bold mb-2">🚗 AI 일정짜기</h6>
+          <p className="text-muted small">자연어로 하루 일정을 입력하면 AI가 경로를 분석하여 이동/귀가 일정을 자동 생성합니다.</p>
+          <textarea className="form-control form-control-sm mb-2" rows={3}
+            placeholder="예: 7월11일에 양평읍 리얼리스트에서 오전 10시 미팅 후 옥천 심재운집 오후2시, 용문 제일정육고기 저녁7시"
+            value={tripInput} onChange={e => setTripInput(e.target.value)} />
+          <button className="btn btn-sm btn-success mb-3" disabled={tripPlanning || !tripInput.trim()}
+            onClick={async () => {
+              setTripPlanning(true); setTripResult(null)
+              try {
+                const r = await fetch('/api/bot/trip/plan', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({message:tripInput}) })
+                const d = await r.json()
+                setTripResult(d)
+                if (d.status === 'success') loadSchedules()
+              } catch { setTripResult({error:'일정짜기 실패'}) }
+              setTripPlanning(false)
+            }}>
+            {tripPlanning ? '⏳ 일정 짜는 중...' : '🤖 자동 일정 짜기'}
+          </button>
+          {tripResult?.error && <div className="alert alert-danger small py-2">{tripResult.error}</div>}
+          {tripResult?.status === 'success' && (
+            <div className="card bg-light p-2 small mb-3">
+              <strong>📋 생성된 일정 ({tripResult.entries?.length || 0}개)</strong>
+              {tripResult.parsed_stops && (
+                <div className="mt-1 text-muted small">
+                  🗺️ {tripResult.parsed_stops.map((s:any) => s.name).join(' → ')}
+                </div>
+              )}
+              {tripResult.entries?.map((e:any, i:number) => (
+                <div key={i} className="border-bottom py-1">
+                  <span className={`badge me-1 ${e.title?.includes('이동') || e.title?.includes('귀가') ? 'bg-info text-dark' : e.type === 'return' ? 'bg-danger' : 'bg-success'}`}>{e.time || e.arrival || ''}</span>
+                  <strong>{e.title}</strong>
+                  {e.total_min && <small className="text-muted ms-1">({e.total_min}분)</small>}
+                  {e.memo && <pre className="mb-0 mt-1 text-muted" style={{fontSize:'0.75rem',whiteSpace:'pre-wrap',maxHeight:120,overflowY:'auto'}}>{e.memo}</pre>}
+                </div>
+              ))}
+              <button className="btn btn-sm btn-outline-primary mt-2" onClick={() => exportICS(tripResult)}>
+                📅 구글/아웃룩에 추가
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── TASK TAB ── */}
-      <div id="tabTask" style={{ display: tab === 'task' ? '' : 'none' }}>
-        <div className="text-center py-4">
-          <div className="fs-1 mb-2">📋</div>
-          <p className="text-muted small">일정 페이지에서 관리할 수 있습니다.</p>
-          <a href="/schedule2" target="schedPopup" className="btn btn-success" onClick={e => { e.preventDefault(); window.open('/schedule2', 'schedPopup', 'width=700,height=700,left=100,top=50') }}>일정 관리 열기</a>
+      {tab === 'task' && (
+        <div id="tabTask">
+          <div className="text-center py-4">
+            <div className="fs-1 mb-2">📋</div>
+            <p className="text-muted small">일정 페이지에서 관리할 수 있습니다.</p>
+            <a href="/schedule2" target="schedPopup" className="btn btn-success" onClick={e => { e.preventDefault(); window.open('/schedule2', 'schedPopup', 'width=700,height=700,left=100,top=50') }}>일정 관리 열기</a>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* ── ROUTE MODAL ── */}
       {routeModal && (

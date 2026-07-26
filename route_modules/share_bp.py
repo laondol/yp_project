@@ -842,6 +842,9 @@ def api_me():
             bot = _get_bot(user.id)
             return jsonify({
                 "id": user.id, "username": user.username, "role": user.role,
+                "town": user.town or '', "village": user.village or '',
+                "curr_town": user.curr_town or '', "curr_village": user.curr_village or '',
+                "login_village": user.login_village or '',
                 "managed_pages": (user.managed_pages or '').split(','),
                 "office_latitude": user.office_latitude,
                 "office_longitude": user.office_longitude,
@@ -856,7 +859,10 @@ def api_me():
                     "bot_name": bot.bot_name, "mood": bot.mood or 'warm',
                     "level": bot.level or 1, "exp": bot.exp or 0,
                     "intimacy": bot.intimacy or 0, "tone": bot.tone or 'friendly',
-                    "chat_count": bot.chat_count or 0, "bot_id": bot.bot_id
+                    "chat_count": bot.chat_count or 0, "bot_id": bot.bot_id,
+                    "is_active": bot.is_active,
+                    "recalled_at": bot.recalled_at.isoformat() if bot.recalled_at else None,
+                    "recall_reason": bot.recall_reason or ''
                 }
             })
     return jsonify({"id": None})

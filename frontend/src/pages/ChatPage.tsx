@@ -28,6 +28,7 @@ export default function ChatPage() {
   const [schedDate, setSchedDate] = useState('')
   const [schedTime, setSchedTime] = useState('')
   const [showFriendModal, setShowFriendModal] = useState(false)
+  const isPopup = searchParams.get('popup') === '1'
   const bottomRef = useRef<HTMLDivElement>(null)
 
   const loadFriends = useCallback(async () => {
@@ -146,7 +147,7 @@ export default function ChatPage() {
   if (loading) return <Loading />
 
   return (
-    <div className="d-flex" style={{ height: 'calc(100vh - 56px)', overflow: 'hidden' }}>
+    <div className="d-flex" style={{ height: isPopup ? '100vh' : 'calc(100vh - 56px)', overflow: 'hidden' }}>
       <div className="d-flex flex-column border-end" style={{ width: 300, minWidth: 300 }}>
         <div className="p-3 border-bottom">
           <h5 className="fw-bold mb-2">채팅</h5>

@@ -237,9 +237,6 @@ def reverse_geocode():
     town, village = gps_to_town_village(lat, lon)
     return jsonify({"status": "success", "town": town or '', "village": village or ''})
 
-
-    return jsonify({'status':'success','msg':'주소가 수정되었습니다.'})
-
 @page_bp.route('/api/page/intro')
 def api_intro():
     yp_news = NewsArticle.query.filter(NewsArticle.is_selected == True, NewsArticle.world_admin_approved == True, ~NewsArticle.category.in_(['세계뉴스', '해외뉴스'])).order_by(NewsArticle.updated_at.desc()).limit(5).all()

@@ -7,6 +7,7 @@ let _blinkTimers = {};   // id -> interval handle
 
 function beep(){
   try{
+    if(localStorage.getItem('yp_sound_enabled') === 'false') return;
     var Ctx = window.AudioContext || window.webkitAudioContext;
     if(!Ctx) return;
     if(!_beepCtx) _beepCtx = new Ctx();
