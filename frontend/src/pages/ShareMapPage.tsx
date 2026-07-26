@@ -42,7 +42,7 @@ export default function ShareMapPage() {
     setLoading(true)
     setError('')
     try {
-      const res = await fetch('/api/admin/share-reports')
+      const res = await fetch('/api/share/reports')
       if (!res.ok) throw new Error('불러오기 실패')
       const data = await res.json()
       const approved = data.filter((r: ShareReport) => r.status === 'approved' && r.latitude && r.longitude)
