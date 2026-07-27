@@ -254,7 +254,7 @@ def admin_debate(post_id):
     except Exception as e:
         return jsonify({"status": "error", "msg": f"AI 응답 오류: {e}"}), 500
     logs = json.loads(post.ai_debate_log) if post.ai_debate_log else []
-    logs.append({"time": datetime.now().strftime('%H:%M'), "admin": admin_opinion, "ai": res.get('ai_reply', 'AI 분석 오류')})
+    logs.append({"time": datetime.now(timezone.utc).strftime('%H:%M'), "admin": admin_opinion, "ai": res.get('ai_reply', 'AI 분석 오류')})
     post.ai_debate_log = json.dumps(logs, ensure_ascii=False)
     post.ai_score = res.get('final_ai_score', post.ai_score)
     post.total_score = post.ai_score + post.admin_score + post.leader_score + post.member_score
@@ -536,7 +536,7 @@ def admin_ai_broadcasts_status(b_id):
     if not uid or session.get('role') not in ('admin', 'leader'):
         return jsonify({"error": "권한이 없습니다."}), 403
     from models import AiBroadcast
-    from datetime import datetime
+    from datetime import datetime, timezone
     b = AiBroadcast.query.get_or_404(b_id)
     data = request.get_json() or {}
     new_status = data.get('status', '')
@@ -550,12 +550,12 @@ def admin_ai_broadcasts_status(b_id):
     if new_status == 'approved':
         b.is_active = False
         b.approver_id = uid
-        b.approved_at = datetime.now()
+        b.approved_at = datetime.now(timezone.utc)
     elif new_status == 'published':
         b.is_active = True
     elif new_status in ('draft', 'rejected'):
         b.is_active = False
-    b.updated_at = datetime.now()
+    b.updated_at = datetime.now(timezone.utc)
     db.session.commit()
     return jsonify({"success": True, "id": b.id, "status": b.status})
 

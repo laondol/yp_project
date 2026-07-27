@@ -1,5 +1,5 @@
 from flask import Blueprint, render_template, request, redirect, url_for, jsonify, session, current_app, send_file
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import or_
 from models import db, User, ShareReport, VillageWish, VillageBroadcast, ContentPermission, Post, Message, VillageCache, VillagePage, VillageEvent, VillageEventAttendee, VillageEventChat, StoreInfo, NewsArticle
 from route_modules.common import has_page_access
@@ -154,7 +154,7 @@ def village_jin_verify(member_id):
         return jsonify({"error":"권한 없음"}), 403
     member = User.query.get_or_404(member_id)
     member.is_verified_resident = True
-    member.jin_verified_at = datetime.now()
+    member.jin_verified_at = datetime.now(timezone.utc)
     db.session.commit()
     return jsonify({"status":"success","msg":f"{member.real_name or member.username}님 진 인증 완료"})
 
@@ -396,7 +396,7 @@ def village_event_create():
             description=request.form.get('description',''),
             location=request.form.get('location',''),
             video_url=request.form.get('video_url',''),
-            event_date=datetime.strptime(request.form['event_date'],'%Y-%m-%dT%H:%M') if request.form.get('event_date') else datetime.now(),
+            event_date=datetime.strptime(request.form['event_date'],'%Y-%m-%dT%H:%M') if request.form.get('event_date') else datetime.now(timezone.utc),
             created_by=uid
         )
         db.session.add(ev)
@@ -569,10 +569,10 @@ def village_event_ping(event_id):
         return jsonify({"error":"로그인 필요"}), 401
     att = VillageEventAttendee.query.filter_by(event_id=event_id, user_id=uid).first()
     if att:
-        att.last_ping = datetime.now()
+        att.last_ping = datetime.now(timezone.utc)
         db.session.commit()
     attendees = VillageEventAttendee.query.filter_by(event_id=event_id).all()
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     away = []
     for a in attendees:
         if a.last_ping and (now - a.last_ping).total_seconds() > 30:
@@ -751,7 +751,7 @@ def content_permission_respond():
     if not cp or cp.author_id != uid:
         return jsonify({"error":"권한 없음"}), 403
     cp.status = 'approved' if action == 'approve' else 'rejected'
-    cp.responded_at = datetime.now()
+    cp.responded_at = datetime.now(timezone.utc)
     if action == 'approve' and cp.share_id:
         share = ShareReport.query.get(cp.share_id)
         if share:
@@ -778,7 +778,7 @@ def village_invite(target):
         return redirect(url_for('auth.login', next=request.path))
     user = User.query.get(uid)
     # 진 인증 체크 (6개월)
-    if not user.jin_verified_at or (datetime.now() - user.jin_verified_at).days > 150:
+    if not user.jin_verified_at or (datetime.now(timezone.utc) - user.jin_verified_at).days > 150:
         return _serve_spa()
     # target에 따라 이동
     if target == 'join':
@@ -796,7 +796,7 @@ def village_invite_jin():
     if not uid:
         return jsonify({"error":"로그인 필요"})
     user = User.query.get(uid)
-    user.jin_verified_at = datetime.now()
+    user.jin_verified_at = datetime.now(timezone.utc)
     user.is_verified_resident = True
     db.session.commit()
     target = request.json.get('target','')
@@ -934,7 +934,7 @@ def village_join():
                 import os as _os
                 upload_dir = _os.path.join(current_app.config['UPLOAD_FOLDER'], 'village_members')
                 _os.makedirs(upload_dir, exist_ok=True)
-                fname = f'{uid}_{datetime.now().strftime("%Y%m%d%H%M%S")}.jpg'
+                fname = f'{uid}_{datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")}.jpg'
                 fpath = _os.path.join(upload_dir, fname)
                 photo.save(fpath)
                 member.photo_path = '/static/uploads/village_members/' + fname

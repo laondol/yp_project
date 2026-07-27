@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify, session
 from models import db, User, DIDDocument, VerifiableCredential, QRSession
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 import json, base64, secrets
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -149,7 +149,7 @@ def create_qr_session():
         session_id=session_id,
         issuer_user_id=uid,
         purpose='issue_vc',
-        expires_at=datetime.now() + timedelta(minutes=3),
+        expires_at=datetime.now(timezone.utc) + timedelta(minutes=3),
     )
     db.session.add(qs)
     db.session.commit()
@@ -181,7 +181,7 @@ def claim_qr_session():
     if not session_id: return jsonify({'error': 'sessionId 필요'}), 400
     qs = QRSession.query.filter_by(session_id=session_id, status='pending').first()
     if not qs: return jsonify({'error': '세션 없음'}), 404
-    if qs.expires_at < datetime.now(): return jsonify({'error': '세션 만료'}), 410
+    if qs.expires_at < datetime.now(timezone.utc): return jsonify({'error': '세션 만료'}), 410
     myeon, ri = _get_issuer_village(qs.issuer_user_id)
     if not _user_in_village(uid, myeon, ri):
         return jsonify({'error': '해당 마을 회원만 발급받을 수 있습니다'}), 403
@@ -225,7 +225,7 @@ def approve_qr_session():
     if not session_id: return jsonify({'error': 'sessionId 필요'}), 400
     qs = QRSession.query.filter_by(session_id=session_id, status='pending_approval').first()
     if not qs: return jsonify({'error': '세션 없음'}), 404
-    if qs.expires_at < datetime.now(): return jsonify({'error': '세션 만료'}), 410
+    if qs.expires_at < datetime.now(timezone.utc): return jsonify({'error': '세션 만료'}), 410
     myeon, ri = _get_issuer_village(qs.issuer_user_id)
     if not _user_in_village(qs.subject_user_id, myeon, ri):
         return jsonify({'error': '마을 회원이 아닙니다'}), 403

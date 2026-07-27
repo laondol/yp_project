@@ -102,7 +102,7 @@ def service_ramp_apply():
     ownership = request.form['ownership']
     agree_removal = request.form.get('agree_removal') == 'on'
     agree_damage = request.form.get('agree_damage') == 'on'
-    from datetime import datetime
+    from datetime import datetime, timezone
 
     photo_path = None
     if 'photo' in request.files:
@@ -121,7 +121,7 @@ def service_ramp_apply():
         name=name, email=email, phone=phone, location=location,
         photo_path=photo_path, step_height=step_height,
         ownership=ownership, agree_removal=agree_removal,
-        agree_damage=agree_damage, signed_at=datetime.now(),
+        agree_damage=agree_damage, signed_at=datetime.now(timezone.utc),
         status='pending'
     )
     db.session.add(appt)

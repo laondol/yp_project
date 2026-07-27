@@ -170,8 +170,8 @@ def create_app():
     try:
         with app.app_context():
             from models import Post
-            from datetime import datetime, timedelta
-            expired = Post.query.filter(Post.total_score <= -50, Post.deadline != None, Post.deadline < datetime.now()).all()
+            from datetime import datetime, timezone, timedelta
+            expired = Post.query.filter(Post.total_score <= -50, Post.deadline != None, Post.deadline < datetime.now(timezone.utc)).all()
             for p in expired:
                 db.session.delete(p)
             if expired:
@@ -185,7 +185,7 @@ def create_app():
         with app.app_context():
             from models import LegalPost, PsychoPost
             from sqlalchemy import or_
-            cutoff = datetime.now() - timedelta(days=1)
+            cutoff = datetime.now(timezone.utc) - timedelta(days=1)
             flagged_legal = LegalPost.query.filter(
                 LegalPost.status == 'flagged',
                 LegalPost.created_at < cutoff,
@@ -408,7 +408,7 @@ def create_app():
                 db.session.add(u)
             db.session.commit()
             for u in demo_users:
-                u.last_payout = datetime.now()
+                u.last_payout = datetime.now(timezone.utc)
             db.session.commit()
             print("[OK] Demo accounts created (pw: pw1234)")
         try:

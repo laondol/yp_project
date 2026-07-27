@@ -8,7 +8,7 @@ from services.route_recalc import _is_occurrence, _gen_occurrences
 from services.route_recalc import recalc_user_routes
 from services.route_worker import enqueue_recalc
 from services.rag import build_context
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone, timedelta, timezone
 import os, uuid
 
 tongbot_bp = Blueprint('tongbot', __name__)
@@ -100,7 +100,7 @@ def bot_rename():
         return jsonify({"error": "이미 다른 회원이 사용 중인 이름입니다."})
     bot = _get_bot(uid)
     bot.bot_name = new_name
-    bot.updated_at = datetime.now()
+    bot.updated_at = datetime.now(timezone.utc)
     db.session.commit()
     return jsonify({"success": True, "name": new_name})
 
@@ -123,7 +123,7 @@ def bot_llm_settings():
     if data.get('api_key'):
         settings['llm_api_key'] = data['api_key']
     bot.personality = json.dumps(settings)
-    bot.updated_at = datetime.now()
+    bot.updated_at = datetime.now(timezone.utc)
     db.session.commit()
     return jsonify({"success": True})
 
@@ -137,12 +137,12 @@ def bot_tone():
         return jsonify({"error": "올바른 말투를 선택하세요."})
     bot = _get_bot(uid)
     bot.tone = tone
-    bot.updated_at = datetime.now()
+    bot.updated_at = datetime.now(timezone.utc)
     db.session.commit()
     return jsonify({"success": True, "tone": tone})
 
 def _time_greeting(user):
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timezone, timedelta, timezone
     h = (datetime.now(timezone.utc) + timedelta(hours=9)).hour
     if h < 6: return "깊은 밤"
     if h < 9: return "상쾌한 아침"
@@ -153,7 +153,7 @@ def _time_greeting(user):
     return "조용한 밤"
 
 def _weather_hint(user):
-    m = datetime.now().month
+    m = datetime.now(timezone.utc).month
     if m in (3,4,5): return "봄꽃이 피는 계절"
     if m in (6,7,8): return "여름 더위"
     if m in (9,10,11): return "가을 바람"
@@ -250,7 +250,7 @@ def bot_chat():
         try:
             groq_key = current_app.config.get('GROQ_API_KEY', os.getenv('GROQ_API_KEY', ''))
             if groq_key:
-                from datetime import datetime as _dt
+                from datetime import datetime, timezone as _dt
                 now = _dt.now()
                 reminder_prompt = f"""사용자의 알림 요청을 분석하여 아래 JSON만 출력하세요:
 {{
@@ -359,7 +359,7 @@ def bot_memo_detail(memo_id):
         memo.is_shared = data['is_shared']
     if 'done' in data:
         memo.done = data['done']
-    memo.updated_at = datetime.now()
+    memo.updated_at = datetime.now(timezone.utc)
     db.session.commit()
     return jsonify({"success": True, "id": memo.id})
 
@@ -443,7 +443,7 @@ def bot_feedback():
     from models import BotFeedback, TongBot
     # 중복 방지: 같은 사용자가 같은 통벗에 24시간 내 재투표 방지
     recent = BotFeedback.query.filter_by(user_id=uid, bot_user_id=target_bot_user_id).order_by(BotFeedback.created_at.desc()).first()
-    if recent and (datetime.now() - recent.created_at).total_seconds() < 86400:
+    if recent and (datetime.now(timezone.utc) - recent.created_at).total_seconds() < 86400:
         return jsonify({"error": "24시간 후에 다시 평가할 수 있습니다."})
     fb = BotFeedback(user_id=uid, bot_user_id=target_bot_user_id, is_positive=is_positive)
     db.session.add(fb)
@@ -465,7 +465,7 @@ def bot_recall():
     if not bot:
         return jsonify({"error": "통벗이 없습니다."}), 404
     bot.is_active = False
-    bot.recalled_at = datetime.now()
+    bot.recalled_at = datetime.now(timezone.utc)
     bot.recall_reason = reason
     db.session.commit()
     return jsonify({"success": True, "bot_name": bot.bot_name})
@@ -804,8 +804,8 @@ def _ai_reply(bot, user, user_msg):
         tone_guide = {'friendly':'친근하고 편안한 말투로, 반말과 이모티콘을 자유롭게 사용하세요.',
                       'respectful':'존중하고 예의 바른 말투로, ~합니다/～요 체를 사용하세요.',
                       'strict':'엄격하고 간결한 말투로, 핵심만 전달하며 군더더기 없이 답변하세요.'}.get(tone, '')
-        from datetime import datetime
-        today = datetime.now().strftime('%Y년 %m월 %d일 %A')
+        from datetime import datetime, timezone
+        today = datetime.now(timezone.utc).strftime('%Y년 %m월 %d일 %A')
         prompt = f"""당신은 '{bot.bot_name}'입니다. '{user.username}'님의 개인 AI 도우미입니다.
 말투: {tone_guide} | 성장: {lvl_name} Lv.{bot.level} | 친밀도: {bot.intimacy} | 오늘: {today}
 
@@ -967,7 +967,7 @@ def bot_draft():
         draft.content = data.get('content', draft.content)
         draft.category = data.get('category', draft.category)
         draft.status = data.get('status', draft.status)
-        draft.updated_at = datetime.now()
+        draft.updated_at = datetime.now(timezone.utc)
     else:
         draft = TongBotDraft(user_id=uid, title=data.get('title',''), content=data.get('content',''), category=data.get('category',''), status='draft')
         db.session.add(draft)
@@ -1014,7 +1014,7 @@ def bot_review(draft_id):
         draft.bot_review = review
         draft.bot_suggestion = suggestion
         draft.status = 'reviewed'
-        draft.updated_at = datetime.now()
+        draft.updated_at = datetime.now(timezone.utc)
         db.session.commit()
         return jsonify({"success": True, "review": review, "suggestion": suggestion})
     except Exception as e:
@@ -1694,7 +1694,7 @@ def bot_messages_unread():
     out = []
     for m in unread:
         if m.id not in already_notified:
-            log = MessageReminderLog(user_id=uid, message_id=m.id, sender_name=m.sender_name, subject=m.subject or '(제목 없음)', sent_at=datetime.now(), seen=False)
+            log = MessageReminderLog(user_id=uid, message_id=m.id, sender_name=m.sender_name, subject=m.subject or '(제목 없음)', sent_at=datetime.now(timezone.utc), seen=False)
             db.session.add(log)
             out.append({"id": log.id, "sender": m.sender_name or '알 수 없음', "subject": m.subject or '(제목 없음)', "created_at": m.created_at.strftime('%Y-%m-%d %H:%M') if m.created_at else ''})
     if out:
@@ -1766,7 +1766,7 @@ def push_unsubscribe():
     return jsonify({"success": True})
 
 def run_notification_check():
-    from datetime import datetime, timedelta
+    from datetime import datetime, timezone, timedelta
     import calendar as _cal
     from run import app
     from models import TongBotSchedule, ScheduleReminderLog
@@ -2234,7 +2234,7 @@ def _rebuild_friend_cache(uid):
     cache = FriendCache.query.get(uid)
     if cache:
         cache.friend_ids = json.dumps(list(friend_ids))
-        cache.updated_at = datetime.now()
+        cache.updated_at = datetime.now(timezone.utc)
     else:
         db.session.add(FriendCache(user_id=uid, friend_ids=json.dumps(list(friend_ids))))
     db.session.commit()
@@ -2255,7 +2255,7 @@ def chat_rooms():
         for f in friends: status_map[str(f)] = 'invited'
         room = ChatRoom(name=name, creator_id=uid, participants=json.dumps(pids),
                        status_map=json.dumps(status_map),
-                       expires_at=datetime.now() + _dt.timedelta(hours=2))
+                       expires_at=datetime.now(timezone.utc) + _dt.timedelta(hours=2))
         db.session.add(room)
         db.session.flush()
         # 일정 연결
@@ -2281,7 +2281,7 @@ def chat_rooms():
         return jsonify({"id": room.id, "name": name})
     import json
     # 만료된 방 정리
-    ChatRoom.query.filter(ChatRoom.is_active==True, ChatRoom.expires_at < datetime.now()).update({"is_active":False}, synchronize_session=False)
+    ChatRoom.query.filter(ChatRoom.is_active==True, ChatRoom.expires_at < datetime.now(timezone.utc)).update({"is_active":False}, synchronize_session=False)
     db.session.commit()
     rooms = ChatRoom.query.filter(ChatRoom.is_active==True, ChatRoom.participants.contains(str(uid))).order_by(ChatRoom.created_at.desc()).limit(20).all()
     result = []
