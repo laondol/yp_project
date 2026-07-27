@@ -8,7 +8,7 @@ function notifBeep(freq: number, pattern: number[]) {
     const Ctx = (window as any).AudioContext || (window as any).webkitAudioContext
     if (!Ctx) return
     if (!_notifBeepCtx) _notifBeepCtx = new Ctx()
-    _notifBeepCtx.resume()
+    _notifBeepCtx!.resume()
     const ac = _notifBeepCtx
     pattern.forEach((dur, i) => {
       const o = ac!.createOscillator()

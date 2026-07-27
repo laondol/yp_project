@@ -310,28 +310,12 @@ export default function UserMyPage() {
 
   // Friend Chat
   function loadFriends() { fetch('/api/chat/friends').then(r => r.json()).then(d => setFriends(d.friends || [])).catch(() => {}) }
-  function _toggleFriend(id: number) { setSelectedFriendIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]) }
-  function _createRoom() {
-    if (selectedFriendIds.length === 0) return alert('벗을 선택해 주세요.')
-    const name = prompt('채팅방 제목:', '우리들의 대화')
-    if (!name) return
-    fetch('/api/chat/rooms', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, friends: selectedFriendIds }) })
-      .then(r => r.json()).then(d => { if (d.id) { alert('채팅방 개설! 2시간 유지됩니다.'); loadChatRooms(); openRoom(d.id) } else alert(d.error || '실패') })
-  }
   function openRoom(id: number) { setActiveRoomId(id); loadRoomMsgs(id) }
-  function _closeRoom() { setActiveRoomId(null); setActiveRoomMsgs([]) }
   function loadRoomMsgs(id: number) { fetch('/api/chat/messages/' + id).then(r => r.json()).then(d => setActiveRoomMsgs(d.messages || [])).catch(() => {}) }
-  function _sendRoomMsg() {
-    const msg = chatRoomMsg.trim()
-    if (!msg || !activeRoomId) return
-    setChatRoomMsg('')
-    fetch('/api/chat/messages/' + activeRoomId, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: msg }) })
-      .then(r => r.json()).then(() => loadRoomMsgs(activeRoomId)).catch(() => {})
-  }
 
   const moodInfo = bot ? MOODS[bot.mood] || MOODS.warm : MOODS.warm
   const levelInfo = bot ? LEVELS[bot.level] || LEVELS[1] : LEVELS[1]
-  const _expPercent = bot ? (bot.exp % 100) : 0
+  void (bot ? (bot.exp % 100) : 0)
   const searchParams = new URLSearchParams(window.location.search)
   const initialTab = searchParams.get('tab')
   const [tab, setTab] = useState<TabId>(initialTab === 'write' ? 'write' : 'chat')
