@@ -80,10 +80,8 @@ export default function UserMyPage() {
   // friend chat
   const [_friends, setFriends] = useState<Friend[]>([])
   const [_chatRooms, setChatRooms] = useState<ChatRoomT[]>([])
-  const [activeRoomId, setActiveRoomId] = useState<number | null>(null)
+  const [activeRoomId, _setActiveRoomId] = useState<number | null>(null)
   const [_activeRoomMsgs, setActiveRoomMsgs] = useState<ChatMsg[]>([])
-  const [chatRoomMsg, setChatRoomMsg] = useState('')
-  const [selectedFriendIds, setSelectedFriendIds] = useState<number[]>([])
 
   useEffect(() => {
     fetch('/api/me').then(r => r.json()).then(d => {
@@ -310,7 +308,6 @@ export default function UserMyPage() {
 
   // Friend Chat
   function loadFriends() { fetch('/api/chat/friends').then(r => r.json()).then(d => setFriends(d.friends || [])).catch(() => {}) }
-  function openRoom(id: number) { setActiveRoomId(id); loadRoomMsgs(id) }
   function loadRoomMsgs(id: number) { fetch('/api/chat/messages/' + id).then(r => r.json()).then(d => setActiveRoomMsgs(d.messages || [])).catch(() => {}) }
 
   const moodInfo = bot ? MOODS[bot.mood] || MOODS.warm : MOODS.warm
