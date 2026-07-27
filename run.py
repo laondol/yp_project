@@ -363,6 +363,38 @@ def create_app():
     except Exception as e:
         print(f'[SKIP] temp_email_verify sequence migration: {e}')
 
+    # 모든 테이블 id auto-increment 시퀀스 복구 (pgloader 마이그레이션 갭)
+    try:
+        with app.app_context():
+            from sqlalchemy import text as _sqlt
+            tables_to_fix = ['share_report', 'message', 'tong_bot', 'user', 'audit_log', 'email_verify', 'notification', 'payment', 'message_report', 'story', 'story_comment']
+            with db.engine.connect() as conn:
+                for tbl in tables_to_fix:
+                    r = conn.execute(_sqlt(f"SELECT pg_get_serial_sequence('{tbl}','id')")).scalar()
+                    if not r:
+                        seq = f"{tbl}_id_seq"
+                        conn.execute(_sqlt(f"CREATE SEQUENCE IF NOT EXISTS {seq} OWNED BY {tbl}.id"))
+                        max_id = conn.execute(_sqlt(f"SELECT COALESCE(MAX(id), 0) + 1 FROM {tbl}")).scalar()
+                        conn.execute(_sqlt(f"SELECT setval('{seq}', {max_id}, false)"))
+                        conn.execute(_sqlt(f"ALTER TABLE {tbl} ALTER COLUMN id SET DEFAULT nextval('{seq}')"))
+                        print(f'[OK] {tbl}.id sequence created (next id: {max_id})')
+                conn.commit()
+    except Exception as e:
+        print(f'[SKIP] all sequences migration: {e}')
+
+    # user.last_payout nullable 보장
+    try:
+        with app.app_context():
+            from sqlalchemy import text as _sqlt2
+            with db.engine.connect() as conn:
+                r = conn.execute(_sqlt2("SELECT is_nullable FROM information_schema.columns WHERE table_name='user' AND column_name='last_payout'")).scalar()
+                if r == 'NO':
+                    conn.execute(_sqlt2("ALTER TABLE \"user\" ALTER COLUMN last_payout DROP NOT NULL"))
+                    conn.commit()
+                    print('[OK] user.last_payout set to nullable')
+    except Exception as e:
+        print(f'[SKIP] user.last_payout nullable fix: {e}')
+
     # 이동/귀가 기존 메모 → format_memo_compact 백필
     try:
         with app.app_context():
