@@ -231,9 +231,9 @@ def register():
                     new_user.profile_image = path
                 except Exception:
                     pass
+        new_user.last_payout = now
         db.session.add(new_user)
         db.session.flush()
-        new_user.last_payout = now
         history = PointHistory(
             user_id=new_user.id, change_type='signup', amount=1000,
             balance_after=1000, description='회원가입 지급'
@@ -616,9 +616,9 @@ def api_register():
                 new_user.profile_image = path
             except Exception:
                 pass
+    new_user.last_payout = now
     db.session.add(new_user)
     db.session.flush()
-    new_user.last_payout = now
     history = PointHistory(user_id=new_user.id, change_type='signup', amount=1000, balance_after=1000, description='회원가입 지급')
     db.session.add(history)
     db.session.commit()
