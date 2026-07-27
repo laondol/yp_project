@@ -273,20 +273,28 @@ def create_app():
     except Exception as e:
         print(f'[SKIP] message_reminder_log migration: {e}')
 
-    # share_report.promotion_allowed 컬럼 마이그레이션
+    # share_report.promotion_allowed / store_suggestion_id / sub_category 컬럼 마이그레이션
     try:
         with app.app_context():
             from sqlalchemy import inspect as _insp_pa
             insp_pa = _insp_pa(db.engine)
             if 'share_report' in insp_pa.get_table_names():
                 sr_cols = [c['name'] for c in insp_pa.get_columns('share_report')]
-                if 'promotion_allowed' not in sr_cols:
-                    with db.engine.connect() as conn:
+                with db.engine.connect() as conn:
+                    if 'promotion_allowed' not in sr_cols:
                         conn.execute(db.text('ALTER TABLE share_report ADD COLUMN promotion_allowed BOOLEAN DEFAULT FALSE'))
                         conn.commit()
                         print('[OK] share_report.promotion_allowed column added')
+                    if 'store_suggestion_id' not in sr_cols:
+                        conn.execute(db.text('ALTER TABLE share_report ADD COLUMN store_suggestion_id INTEGER REFERENCES store_suggestion(id)'))
+                        conn.commit()
+                        print('[OK] share_report.store_suggestion_id column added')
+                    if 'sub_category' not in sr_cols:
+                        conn.execute(db.text("ALTER TABLE share_report ADD COLUMN sub_category VARCHAR(50) DEFAULT ''"))
+                        conn.commit()
+                        print('[OK] share_report.sub_category column added')
     except Exception as e:
-        print(f'[SKIP] share_report.promotion_allowed migration: {e}')
+        print(f'[SKIP] share_report migration: {e}')
 
     # 이동/귀가 기존 메모 → format_memo_compact 백필
     try:
