@@ -296,7 +296,7 @@ def create_app():
     except Exception as e:
         print(f'[SKIP] share_report migration: {e}')
 
-    # message.is_public 컬럼 마이그레이션
+    # message 테이블 누락 컬럼 마이그레이션
     try:
         with app.app_context():
             from sqlalchemy import inspect as _insp_msg
@@ -304,12 +304,22 @@ def create_app():
             if 'message' in insp_msg.get_table_names():
                 msg_cols = [c['name'] for c in insp_msg.get_columns('message')]
                 with db.engine.connect() as conn:
-                    if 'is_public' not in msg_cols:
-                        conn.execute(db.text('ALTER TABLE message ADD COLUMN is_public BOOLEAN DEFAULT FALSE'))
-                        conn.commit()
-                        print('[OK] message.is_public column added')
+                    _msg_migrations = [
+                        ('is_public', 'BOOLEAN DEFAULT FALSE'),
+                        ('letter_type', "VARCHAR(20) DEFAULT 'private'"),
+                        ('moderation_status', "VARCHAR(20) DEFAULT 'approved'"),
+                        ('original_receiver_type', 'VARCHAR(20)'),
+                        ('rejection_reason', 'TEXT'),
+                        ('town', 'VARCHAR(50)'),
+                        ('village', 'VARCHAR(50)'),
+                    ]
+                    for col_name, col_type in _msg_migrations:
+                        if col_name not in msg_cols:
+                            conn.execute(db.text(f'ALTER TABLE message ADD COLUMN {col_name} {col_type}'))
+                            conn.commit()
+                            print(f'[OK] message.{col_name} column added')
     except Exception as e:
-        print(f'[SKIP] message.is_public migration: {e}')
+        print(f'[SKIP] message migration: {e}')
 
     # tong_bot 누락 컬럼 마이그레이션 (is_active, recalled_at, recall_reason)
     try:
