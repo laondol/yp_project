@@ -8,7 +8,7 @@ import EmptyState from '../components/common/EmptyState'
 
 interface HeritageItem {
   name: string; lat: number; lng: number; description?: string
-  category?: string; image_url?: string; dist?: number
+  category?: string; type?: string; image_url?: string; dist?: number
   stamped?: boolean; near_home?: boolean; dist_from_home?: number
 }
 interface SceneryItem {
