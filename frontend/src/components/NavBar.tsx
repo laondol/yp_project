@@ -8,14 +8,14 @@ function notifBeep(freq: number, pattern: number[]) {
     const Ctx = (window as any).AudioContext || (window as any).webkitAudioContext
     if (!Ctx) return
     if (!_notifBeepCtx) _notifBeepCtx = new Ctx()
-    if (_notifBeepCtx.state === 'suspended') _notifBeepCtx.resume()
+    _notifBeepCtx.resume()
     const ac = _notifBeepCtx
     pattern.forEach((dur, i) => {
-      const o = ac.createOscillator()
-      const g = ac.createGain()
-      o.connect(g); g.connect(ac.destination)
+      const o = ac!.createOscillator()
+      const g = ac!.createGain()
+      o.connect(g); g.connect(ac!.destination)
       o.type = 'sine'; o.frequency.value = freq
-      const t = ac.currentTime + pattern.slice(0, i).reduce((a, b) => a + b, 0)
+      const t = ac!.currentTime + pattern.slice(0, i).reduce((a, b) => a + b, 0)
       g.gain.setValueAtTime(0.0001, t)
       g.gain.exponentialRampToValueAtTime(0.3, t + 0.01)
       g.gain.exponentialRampToValueAtTime(0.0001, t + dur - 0.01)

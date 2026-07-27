@@ -78,10 +78,10 @@ export default function UserMyPage() {
   const drawCtx = useRef<CanvasRenderingContext2D | null>(null)
 
   // friend chat
-  const [friends, setFriends] = useState<Friend[]>([])
-  const [chatRooms, setChatRooms] = useState<ChatRoomT[]>([])
+  const [_friends, setFriends] = useState<Friend[]>([])
+  const [_chatRooms, setChatRooms] = useState<ChatRoomT[]>([])
   const [activeRoomId, setActiveRoomId] = useState<number | null>(null)
-  const [activeRoomMsgs, setActiveRoomMsgs] = useState<ChatMsg[]>([])
+  const [_activeRoomMsgs, setActiveRoomMsgs] = useState<ChatMsg[]>([])
   const [chatRoomMsg, setChatRoomMsg] = useState('')
   const [selectedFriendIds, setSelectedFriendIds] = useState<number[]>([])
 
@@ -310,8 +310,8 @@ export default function UserMyPage() {
 
   // Friend Chat
   function loadFriends() { fetch('/api/chat/friends').then(r => r.json()).then(d => setFriends(d.friends || [])).catch(() => {}) }
-  function toggleFriend(id: number) { setSelectedFriendIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]) }
-  function createRoom() {
+  function _toggleFriend(id: number) { setSelectedFriendIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]) }
+  function _createRoom() {
     if (selectedFriendIds.length === 0) return alert('벗을 선택해 주세요.')
     const name = prompt('채팅방 제목:', '우리들의 대화')
     if (!name) return
@@ -319,9 +319,9 @@ export default function UserMyPage() {
       .then(r => r.json()).then(d => { if (d.id) { alert('채팅방 개설! 2시간 유지됩니다.'); loadChatRooms(); openRoom(d.id) } else alert(d.error || '실패') })
   }
   function openRoom(id: number) { setActiveRoomId(id); loadRoomMsgs(id) }
-  function closeRoom() { setActiveRoomId(null); setActiveRoomMsgs([]) }
+  function _closeRoom() { setActiveRoomId(null); setActiveRoomMsgs([]) }
   function loadRoomMsgs(id: number) { fetch('/api/chat/messages/' + id).then(r => r.json()).then(d => setActiveRoomMsgs(d.messages || [])).catch(() => {}) }
-  function sendRoomMsg() {
+  function _sendRoomMsg() {
     const msg = chatRoomMsg.trim()
     if (!msg || !activeRoomId) return
     setChatRoomMsg('')
@@ -331,7 +331,7 @@ export default function UserMyPage() {
 
   const moodInfo = bot ? MOODS[bot.mood] || MOODS.warm : MOODS.warm
   const levelInfo = bot ? LEVELS[bot.level] || LEVELS[1] : LEVELS[1]
-  const expPercent = bot ? (bot.exp % 100) : 0
+  const _expPercent = bot ? (bot.exp % 100) : 0
   const searchParams = new URLSearchParams(window.location.search)
   const initialTab = searchParams.get('tab')
   const [tab, setTab] = useState<TabId>(initialTab === 'write' ? 'write' : 'chat')

@@ -223,7 +223,7 @@ export default function SchedulePage() {
                 const isTransit = (s.title && (s.title.includes('이동') || s.title.includes('집으로'))) && s.content
                 if (isTransit) {
                   try {
-                    const r = JSON.parse(s.content)
+                    const r = JSON.parse(s.content || 'null')
                     if (r && r.from_lat && r.to_lat) {
                       const dl = encodeURIComponent(s.departure_location || '출발')
                       const al = encodeURIComponent(s.return_location || s.location || '도착')

@@ -115,7 +115,7 @@ export default function RegisterPage() {
   const [neighborChecked, setNeighborChecked] = useState(false)
   const [nickname, setNickname] = useState('')
   const [nicknameStatus, setNicknameStatus] = useState<'idle' | 'checking' | 'available' | 'unavailable'>('idle')
-  const nicknameTimer = useRef<ReturnType<typeof setTimeout>>()
+  const nicknameTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
