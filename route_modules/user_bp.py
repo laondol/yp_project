@@ -22,7 +22,9 @@ def _serve_spa():
 def api_user_profile(user_id):
     if not session.get('username'):
         return jsonify({'error': 'login'}), 401
-    user = User.query.get_or_404(user_id)
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({'error': '사용자를 찾을 수 없습니다.'}), 404
     uid = session['user_id']
     is_own = (uid == user.id)
     is_admin = session.get('role') in ('admin', 'leader')
