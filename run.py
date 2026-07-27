@@ -344,6 +344,25 @@ def create_app():
     except Exception as e:
         print(f'[SKIP] tong_bot migration: {e}')
 
+    # temp_email_verify.id auto-increment 시퀀스 마이그레이션
+    try:
+        with app.app_context():
+            from sqlalchemy import inspect as _insp_tev, text as _t
+            _i = _insp_tev(db.engine)
+            if 'temp_email_verify' in _i.get_table_names():
+                cols = [c['name'] for c in _i.get_columns('temp_email_verify')]
+                if 'id' in cols:
+                    with db.engine.connect() as conn:
+                        r = conn.execute(_t("SELECT pg_get_serial_sequence('temp_email_verify','id')")).scalar()
+                        if not r:
+                            conn.execute(_t("CREATE SEQUENCE IF NOT EXISTS temp_email_verify_id_seq OWNED BY temp_email_verify.id"))
+                            conn.execute(_t("SELECT setval('temp_email_verify_id_seq', COALESCE((SELECT MAX(id) FROM temp_email_verify), 0) + 1, false)"))
+                            conn.execute(_t("ALTER TABLE temp_email_verify ALTER COLUMN id SET DEFAULT nextval('temp_email_verify_id_seq')"))
+                            conn.commit()
+                            print('[OK] temp_email_verify.id sequence created')
+    except Exception as e:
+        print(f'[SKIP] temp_email_verify sequence migration: {e}')
+
     # 이동/귀가 기존 메모 → format_memo_compact 백필
     try:
         with app.app_context():
