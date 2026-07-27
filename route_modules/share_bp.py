@@ -604,7 +604,7 @@ def share_map():
             "summary": (r.ai_summary or r.description or "")[:80]
         })
     categories = ['사건', '풍경', '장소', '맛집', '기타']
-    return _serve_spa()
+    return _serve_react_share()
 
 @share_bp.route('/share/nearby')
 def share_nearby():
