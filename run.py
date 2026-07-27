@@ -296,6 +296,44 @@ def create_app():
     except Exception as e:
         print(f'[SKIP] share_report migration: {e}')
 
+    # message.is_public 컬럼 마이그레이션
+    try:
+        with app.app_context():
+            from sqlalchemy import inspect as _insp_msg
+            insp_msg = _insp_msg(db.engine)
+            if 'message' in insp_msg.get_table_names():
+                msg_cols = [c['name'] for c in insp_msg.get_columns('message')]
+                with db.engine.connect() as conn:
+                    if 'is_public' not in msg_cols:
+                        conn.execute(db.text('ALTER TABLE message ADD COLUMN is_public BOOLEAN DEFAULT FALSE'))
+                        conn.commit()
+                        print('[OK] message.is_public column added')
+    except Exception as e:
+        print(f'[SKIP] message.is_public migration: {e}')
+
+    # tong_bot 누락 컬럼 마이그레이션 (is_active, recalled_at, recall_reason)
+    try:
+        with app.app_context():
+            from sqlalchemy import inspect as _insp_tb
+            insp_tb = _insp_tb(db.engine)
+            if 'tong_bot' in insp_tb.get_table_names():
+                tb_cols = [c['name'] for c in insp_tb.get_columns('tong_bot')]
+                with db.engine.connect() as conn:
+                    if 'is_active' not in tb_cols:
+                        conn.execute(db.text('ALTER TABLE tong_bot ADD COLUMN is_active BOOLEAN DEFAULT TRUE'))
+                        conn.commit()
+                        print('[OK] tong_bot.is_active column added')
+                    if 'recalled_at' not in tb_cols:
+                        conn.execute(db.text('ALTER TABLE tong_bot ADD COLUMN recalled_at TIMESTAMP'))
+                        conn.commit()
+                        print('[OK] tong_bot.recalled_at column added')
+                    if 'recall_reason' not in tb_cols:
+                        conn.execute(db.text("ALTER TABLE tong_bot ADD COLUMN recall_reason VARCHAR(200) DEFAULT ''"))
+                        conn.commit()
+                        print('[OK] tong_bot.recall_reason column added')
+    except Exception as e:
+        print(f'[SKIP] tong_bot migration: {e}')
+
     # 이동/귀가 기존 메모 → format_memo_compact 백필
     try:
         with app.app_context():
