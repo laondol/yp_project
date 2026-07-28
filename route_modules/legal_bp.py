@@ -68,7 +68,7 @@ def legal_issue_comment(post_id):
     post = LegalPost.query.get_or_404(post_id)
     comments = post.comments or ''
     name = session.get('real_name') or session.get('username','익명')
-    comments += f'\n[{name}] {content} ({datetime.now().strftime("%m/%d %H:%M")})'
+    comments += f'\n[{name}] {content} ({datetime.now(timezone.utc).strftime("%m/%d %H:%M")})'
     post.comments = comments
     db.session.commit()
     from services.email_service import EmailService
@@ -258,8 +258,8 @@ def api_legal_comment(post_id):
     post = LegalPost.query.get_or_404(post_id)
     comments = post.comments or ''
     name = session.get('real_name') or session.get('username', '익명')
-    from datetime import datetime
-    comments += f'\n[{name}] {content} ({datetime.now().strftime("%m/%d %H:%M")})'
+    from datetime import datetime, timezone
+    comments += f'\n[{name}] {content} ({datetime.now(timezone.utc).strftime("%m/%d %H:%M")})'
     post.comments = comments
     db.session.commit()
     return jsonify({'status': 'success'})
@@ -335,8 +335,8 @@ def api_legal_issue_comment(post_id):
         return jsonify({'status': 'error', 'msg': '내용을 입력해주세요.'}), 400
     from services.ai_service import moderate_comment
     moderate_comment(content)
-    from datetime import datetime
-    now = datetime.now().strftime('%m/%d %H:%M')
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).strftime('%m/%d %H:%M')
     name = session.get('real_name') or session.get('username', '익명')
     entry = f'[{name}] {content} ({now})'
     post.comments = (post.comments or '') + '\n' + entry

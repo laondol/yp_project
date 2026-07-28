@@ -3,7 +3,7 @@ from models import db, Post, Comment, User, Message, PointHistory, ShareReport, 
 from services.security import save_village_file
 from services.ai_service import call_ai_judge
 import base64, os
-from datetime import datetime
+from datetime import datetime, timezone
 
 board_bp = Blueprint('board', __name__)
 
@@ -23,7 +23,7 @@ def view(post_id):
     role = session.get('role')
     is_owner = (post.user_id == uid)
     # AI 검토전: 작성자와 관리자만 접근
-    if post.ai_score == 0 and post.created_at and post.created_at > datetime.now() - timedelta(hours=48):
+    if post.ai_score == 0 and post.created_at and post.created_at > datetime.now(timezone.utc) - timedelta(hours=48):
         if not is_owner and role not in ('admin', 'leader'):
             return "검토전입니다. AI 분석 완료 후 공개됩니다.", 403
     # 낙제(-50점 이하): 작성자와 관리자만 접근
@@ -51,7 +51,7 @@ def submit_post():
     drawing = request.form.get('drawing_data')
     if drawing and len(drawing) > 2000:
         data = base64.b64decode(drawing.split(",")[1])
-        fname = f"draw_{datetime.now().strftime('%Y%m%d%H%M%S')}.png"
+        fname = f"draw_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}.png"
         target_dir = os.path.join(current_app.config['UPLOAD_FOLDER'], f"{post.author_name}_{user.town or 'unknown'}")
         if not os.path.exists(target_dir): os.makedirs(target_dir)
         with open(os.path.join(target_dir, fname), "wb") as f: f.write(data)
@@ -78,7 +78,7 @@ def edit_post(post_id):
     if request.method == 'POST':
         post.title = request.form['title']
         post.content = request.form['content']
-        post.updated_at = datetime.now()
+        post.updated_at = datetime.now(timezone.utc)
         post.is_forced_approved = False 
         
         # 파일 업로드 처리
@@ -92,7 +92,7 @@ def edit_post(post_id):
         drawing = request.form.get('drawing_data')
         if drawing and len(drawing) > 2000:
             data = base64.b64decode(drawing.split(",")[1])
-            fname = f"draw_{datetime.now().strftime('%Y%m%d%H%M%S')}.png"
+            fname = f"draw_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}.png"
             target_dir = os.path.join(current_app.config['UPLOAD_FOLDER'], f"{post.author_name}_{post.user.town if post.user else 'unknown'}")
             if not os.path.exists(target_dir): os.makedirs(target_dir)
             with open(os.path.join(target_dir, fname), "wb") as f: f.write(data)

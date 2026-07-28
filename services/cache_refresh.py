@@ -45,6 +45,15 @@ def refresh_all_caches():
     except Exception as e:
         results['utic'] = str(e)[:50]
 
+    # 3. 약관/정관 RAG 인덱스 갱신 (파일 변경 자동 반영)
+    from services.rag import index_terms_and_charter
+    try:
+        from flask import current_app
+        index_terms_and_charter(current_app)
+        results['rag_terms'] = 'ok'
+    except Exception as e:
+        results['rag_terms'] = str(e)[:50]
+
     db.session.commit()
     return results
 

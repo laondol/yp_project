@@ -1,7 +1,7 @@
 import os
 import requests
 from flask import Blueprint, render_template, request, redirect, url_for, jsonify, session, current_app, send_file
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import or_
 from models import db, NewsArticle, NewsComment, NewsRecommendation, NewsVote, Post, User, Message
 from services.ai_service import call_ai_judge
@@ -112,7 +112,7 @@ def admin_news_toggle(news_id):
         return jsonify({"status": "error", "msg": "권한 없음"}), 403
     article = NewsArticle.query.get_or_404(news_id)
     article.is_selected = not article.is_selected
-    article.updated_at = datetime.now()
+    article.updated_at = datetime.now(timezone.utc)
     db.session.commit()
     return jsonify({"status": "success", "is_selected": article.is_selected})
 
@@ -136,7 +136,7 @@ def admin_news_approve(news_id, tab, approver):
             article.kr_yp_ai_approved = not article.kr_yp_ai_approved
         elif approver == 'admin':
             article.kr_yp_admin_approved = not article.kr_yp_admin_approved
-    article.updated_at = datetime.now()
+    article.updated_at = datetime.now(timezone.utc)
     db.session.commit()
     return jsonify({"status": "success"})
 
@@ -235,7 +235,7 @@ def admin_news_edit(news_id):
         article.category = request.form.get('category', '세계뉴스')
         article.ai_reason = request.form.get('ai_reason', '')
         article.is_selected = 'is_selected' in request.form
-        article.updated_at = datetime.now()
+        article.updated_at = datetime.now(timezone.utc)
         if 'image' in request.files:
             file = request.files['image']
             from services.security import validate_upload, secure_save
@@ -287,7 +287,7 @@ def admin_news_clean_cjk():
                 a.summary = cleaned_summary
             if cleaned_content and cleaned_content != a.content:
                 a.content = cleaned_content
-            a.updated_at = datetime.now()
+            a.updated_at = datetime.now(timezone.utc)
             count += 1
         except:
             pass
@@ -577,7 +577,7 @@ def admin_news_recommendation_approve(rec_id):
     rec = NewsRecommendation.query.get_or_404(rec_id)
     rec.is_approved = True
     rec.approved_by = session.get('user_id')
-    rec.approved_at = datetime.now()
+    rec.approved_at = datetime.now(timezone.utc)
     db.session.commit()
     return redirect(url_for('.admin_news_recommendations'))
 

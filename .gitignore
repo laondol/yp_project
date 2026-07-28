@@ -44,3 +44,6 @@ ollama.txt
 .vscode/
 .DS_Store
 *.log
+
+# frontend build output
+frontend/dist/

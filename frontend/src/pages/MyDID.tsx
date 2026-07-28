@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '../contexts/AuthContext'
-import { generateDIDKey, saveDIDKey, listDIDs, deleteDIDKey, signPayload, getDIDKey } from '../lib/did'
+import { generateDIDKey, saveDIDKey, listDIDs, deleteDIDKey, getDIDKey } from '../lib/did'
 import Loading from '../components/common/Loading'
 
 interface DIDInfo {

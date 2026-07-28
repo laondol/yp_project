@@ -7,7 +7,8 @@ from services.route_recalc import _ensure_day_routes
 from services.route_recalc import _is_occurrence, _gen_occurrences
 from services.route_recalc import recalc_user_routes
 from services.route_worker import enqueue_recalc
-from datetime import datetime, timedelta, timezone
+from services.rag import build_context
+from datetime import datetime, timezone, timedelta, timezone
 import os, uuid
 
 tongbot_bp = Blueprint('tongbot', __name__)
@@ -78,6 +79,12 @@ def chat_page():
     open_room = room_id if room_id else 0
     return _serve_spa()
 
+@tongbot_bp.route('/bot/chat')
+def tongbot_chat():
+    if not session.get('user_id'):
+        return redirect(url_for('auth.login', next='/bot/chat'))
+    return _serve_spa()
+
 @tongbot_bp.route('/api/bot/rename', methods=['POST'])
 def bot_rename():
     uid = session.get('user_id')
@@ -93,9 +100,32 @@ def bot_rename():
         return jsonify({"error": "이미 다른 회원이 사용 중인 이름입니다."})
     bot = _get_bot(uid)
     bot.bot_name = new_name
-    bot.updated_at = datetime.now()
+    bot.updated_at = datetime.now(timezone.utc)
     db.session.commit()
     return jsonify({"success": True, "name": new_name})
+
+@tongbot_bp.route('/api/bot/llm-settings', methods=['POST'])
+def bot_llm_settings():
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({"error": "로그인이 필요합니다."}), 401
+    bot = _get_bot(uid)
+    if not bot:
+        return jsonify({"error": "통벗이 없습니다."}), 404
+    data = request.json or {}
+    import json
+    settings = {}
+    try:
+        if bot.personality:
+            settings = json.loads(bot.personality)
+    except: pass
+    settings['llm_provider'] = data.get('provider', 'motif')
+    if data.get('api_key'):
+        settings['llm_api_key'] = data['api_key']
+    bot.personality = json.dumps(settings)
+    bot.updated_at = datetime.now(timezone.utc)
+    db.session.commit()
+    return jsonify({"success": True})
 
 @tongbot_bp.route('/api/bot/tone', methods=['POST'])
 def bot_tone():
@@ -107,12 +137,12 @@ def bot_tone():
         return jsonify({"error": "올바른 말투를 선택하세요."})
     bot = _get_bot(uid)
     bot.tone = tone
-    bot.updated_at = datetime.now()
+    bot.updated_at = datetime.now(timezone.utc)
     db.session.commit()
     return jsonify({"success": True, "tone": tone})
 
 def _time_greeting(user):
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timezone, timedelta, timezone
     h = (datetime.now(timezone.utc) + timedelta(hours=9)).hour
     if h < 6: return "깊은 밤"
     if h < 9: return "상쾌한 아침"
@@ -123,7 +153,7 @@ def _time_greeting(user):
     return "조용한 밤"
 
 def _weather_hint(user):
-    m = datetime.now().month
+    m = datetime.now(timezone.utc).month
     if m in (3,4,5): return "봄꽃이 피는 계절"
     if m in (6,7,8): return "여름 더위"
     if m in (9,10,11): return "가을 바람"
@@ -150,8 +180,23 @@ def bot_chat():
     if not msg:
         return jsonify({"error": "메시지를 입력하세요."})
     bot = _get_bot(uid)
+    if bot and not bot.is_active:
+        return jsonify({"error": "통벗이 회수되어 사용할 수 없습니다. 관리자에게 문의하세요."}), 403
     user = User.query.get(uid)
-    reply = _ai_reply(bot, user, msg)
+    raw_reply = _ai_reply(bot, user, msg)
+    # AI가 <memo>태그로 기록한 내용 → 자동 메모 저장
+    memo_match = re.search(r'<memo>(.*?)</memo>', raw_reply, re.DOTALL)
+    memo_saved = None
+    if memo_match:
+        memo_content = memo_match.group(1).strip()
+        if memo_content:
+            from models import TongBotMemo
+            m = TongBotMemo(user_id=uid, content=memo_content, author='bot')
+            db.session.add(m)
+            db.session.flush()
+            memo_saved = m.id
+    # <memo>태그 제거한 순수 답변
+    reply = re.sub(r'\s*<memo>.*?</memo>\s*', '', raw_reply, flags=re.DOTALL).strip()
     bot.memory = (bot.memory or '')[-800:] + f'\n통벗: {reply[:150]}'
     db.session.commit()
     talent = None
@@ -200,6 +245,47 @@ def bot_chat():
         except Exception as e:
             current_app.logger.error(f'일정AI 오류: {e}')
 
+    # 알림 의도 감지 (알려줘·알림·울려줘·벨·진동 등)
+    if not schedule_info and any(kw in msg for kw in ['알려줘','알림','울려줘','벨','진동','리마인드','remind']):
+        try:
+            groq_key = current_app.config.get('GROQ_API_KEY', os.getenv('GROQ_API_KEY', ''))
+            if groq_key:
+                from datetime import datetime, timezone as _dt
+                now = _dt.now()
+                reminder_prompt = f"""사용자의 알림 요청을 분석하여 아래 JSON만 출력하세요:
+{{
+  "title": "짧은 제목",
+  "description": "설명",
+  "event_date": "ISO datetime (2026-07-25T18:00)",
+  "is_recurring": true/false,
+  "repeat_type": "monthly"/"daily"/"weekly"/"yearly"/"",
+  "repeat_interval": 1,
+  "reminder_minutes": -1,
+  "holiday_adjust": true/false
+}}
+오늘: {now.strftime('%Y-%m-%d %H:%M')} ({['월','화','수','목','금','토','일'][now.weekday()]}요일)
+사용자: {msg}"""
+                r = requests.post('https://api.groq.com/openai/v1/chat/completions',
+                    headers={'Authorization': f'Bearer {groq_key}', 'Content-Type': 'application/json'},
+                    json={'model': 'llama-3.1-8b-instant', 'messages': [{'role': 'user', 'content': reminder_prompt}], 'temperature': 0.1, 'max_tokens': 300}, timeout=10)
+                if r.status_code == 200:
+                    import json as _json
+                    rd = _json.loads(r.json()['choices'][0]['message']['content'])
+                    evt = _dt.fromisoformat(rd['event_date']) if rd.get('event_date') else None
+                    if evt:
+                        if rd.get('holiday_adjust'):
+                            evt = _nearest_weekday(evt)
+                        s = TongBotSchedule(user_id=uid, title=rd.get('title','알림'), description=rd.get('description',''),
+                            event_date=evt, is_recurring=rd.get('is_recurring', False),
+                            repeat_type=rd.get('repeat_type',''), repeat_interval=rd.get('repeat_interval',1),
+                            reminder_minutes=rd.get('reminder_minutes', -1), memo=f'통벗 알림: {msg[:100]}')
+                        db.session.add(s)
+                        db.session.commit()
+                        schedule_info = {"id": s.id, "title": s.title, "date": evt.strftime('%m/%d %H:%M')}
+                        reply = f"✅ 알림이 등록되었습니다! ({evt.strftime('%m/%d %H:%M')} {s.title})"
+        except Exception as e:
+            current_app.logger.error(f'알림 생성 오류: {e}')
+
     # 통벗 추천: 문맥에 맞는 기능 제안
     suggestions = None
     if not schedule_info and not shopping_info and not counselor:
@@ -223,9 +309,248 @@ def bot_history():
             history.append({"role": "bot", "text": line[3:].strip()})
     return jsonify({"history": history, "total": bot.chat_count or 0})
 
+@tongbot_bp.route('/api/bot/memos', methods=['GET', 'POST'])
+def bot_memos():
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({"error": "로그인이 필요합니다."}), 401
+    if request.method == 'POST':
+        data = request.get_json() or {}
+        content = (data.get('content', '') or '').strip()
+        if not content:
+            return jsonify({"error": "내용을 입력하세요."})
+        from models import TongBotMemo
+        memo = TongBotMemo(user_id=uid, content=content, author=data.get('author', 'user'), is_shared=data.get('is_shared', False))
+        db.session.add(memo)
+        db.session.commit()
+        return jsonify({"success": True, "id": memo.id})
+    from models import TongBotMemo
+    memos = TongBotMemo.query.filter_by(user_id=uid).order_by(TongBotMemo.created_at.desc()).all()
+    # mark all as seen
+    unseen = [m for m in memos if not m.seen]
+    for m in unseen:
+        m.seen = True
+    if unseen:
+        db.session.commit()
+    return jsonify({"memos": [{
+        "id": m.id, "content": m.content, "author": m.author,
+        "is_shared": m.is_shared, "done": m.done,
+        "created_at": m.created_at.isoformat() if m.created_at else '',
+        "updated_at": m.updated_at.isoformat() if m.updated_at else '',
+    } for m in memos]})
+
+@tongbot_bp.route('/api/bot/memos/<int:memo_id>', methods=['PUT', 'DELETE'])
+def bot_memo_detail(memo_id):
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({"error": "로그인이 필요합니다."}), 401
+    from models import TongBotMemo
+    memo = TongBotMemo.query.filter_by(id=memo_id, user_id=uid).first()
+    if not memo:
+        return jsonify({"error": "메모를 찾을 수 없습니다."}), 404
+    if request.method == 'DELETE':
+        db.session.delete(memo)
+        db.session.commit()
+        return jsonify({"success": True})
+    data = request.get_json() or {}
+    if 'content' in data:
+        memo.content = (data['content'] or '').strip()
+    if 'is_shared' in data:
+        memo.is_shared = data['is_shared']
+    if 'done' in data:
+        memo.done = data['done']
+    memo.updated_at = datetime.now(timezone.utc)
+    db.session.commit()
+    return jsonify({"success": True, "id": memo.id})
+
+@tongbot_bp.route('/api/bot/memos/shared')
+def bot_memos_shared():
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({"error": "로그인이 필요합니다."}), 401
+    from models import TongBotMemo
+    from models import Friend
+    friend_ids = set()
+    for f in Friend.query.filter_by(requester_id=uid, status='accepted').all():
+        friend_ids.add(f.receiver_id)
+    for f in Friend.query.filter_by(receiver_id=uid, status='accepted').all():
+        friend_ids.add(f.requester_id)
+    if not friend_ids:
+        return jsonify({"memos": []})
+    shared = TongBotMemo.query.filter(
+        TongBotMemo.user_id.in_(friend_ids),
+        TongBotMemo.is_shared == True
+    ).order_by(TongBotMemo.created_at.desc()).limit(20).all()
+    from models import User
+    return jsonify({"memos": [{
+        "id": m.id, "content": m.content, "author": m.author,
+        "user_name": (User.query.get(m.user_id).real_name or User.query.get(m.user_id).username) if User.query.get(m.user_id) else '',
+        "created_at": m.created_at.isoformat() if m.created_at else '',
+    } for m in shared]})
+
+@tongbot_bp.route('/api/bot/memos/<int:memo_id>/comments', methods=['GET', 'POST'])
+def bot_memo_comments(memo_id):
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({"error": "로그인이 필요합니다."}), 401
+    from models import TongBotMemo, TongBotMemoComment
+    memo = TongBotMemo.query.get(memo_id)
+    if not memo:
+        return jsonify({"error": "메모를 찾을 수 없습니다."}), 404
+    if memo.user_id != uid and not memo.is_shared:
+        return jsonify({"error": "접근 권한이 없습니다."}), 403
+    if request.method == 'POST':
+        data = request.get_json() or {}
+        content = (data.get('content', '') or '').strip()
+        if not content:
+            return jsonify({"error": "내용을 입력하세요."})
+        c = TongBotMemoComment(memo_id=memo_id, user_id=uid, content=content)
+        db.session.add(c)
+        db.session.commit()
+        return jsonify({"success": True, "id": c.id})
+    comments = TongBotMemoComment.query.filter_by(memo_id=memo_id).order_by(TongBotMemoComment.created_at.asc()).all()
+    from models import User
+    return jsonify({"comments": [{
+        "id": c.id, "content": c.content,
+        "user_name": (User.query.get(c.user_id).real_name or User.query.get(c.user_id).username) if User.query.get(c.user_id) else '익명',
+        "is_own": c.user_id == uid,
+        "created_at": c.created_at.isoformat() if c.created_at else '',
+    } for c in comments]})
+
+@tongbot_bp.route('/api/bot/memos/<int:memo_id>/comments/<int:comment_id>', methods=['DELETE'])
+def bot_memo_comment_delete(memo_id, comment_id):
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({"error": "로그인이 필요합니다."}), 401
+    from models import TongBotMemoComment
+    c = TongBotMemoComment.query.filter_by(id=comment_id, memo_id=memo_id, user_id=uid).first()
+    if not c:
+        return jsonify({"error": "댓글을 찾을 수 없습니다."}), 404
+    db.session.delete(c)
+    db.session.commit()
+    return jsonify({"success": True})
+
+@tongbot_bp.route('/api/bot/feedback', methods=['POST'])
+def bot_feedback():
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({"error": "로그인이 필요합니다."}), 401
+    data = request.get_json() or {}
+    is_positive = data.get('positive', True)
+    target_bot_user_id = data.get('bot_user_id')
+    if not target_bot_user_id:
+        return jsonify({"error": "대상 통벗이 없습니다."}), 400
+    from models import BotFeedback, TongBot
+    # 중복 방지: 같은 사용자가 같은 통벗에 24시간 내 재투표 방지
+    recent = BotFeedback.query.filter_by(user_id=uid, bot_user_id=target_bot_user_id).order_by(BotFeedback.created_at.desc()).first()
+    if recent and (datetime.now(timezone.utc) - recent.created_at).total_seconds() < 86400:
+        return jsonify({"error": "24시간 후에 다시 평가할 수 있습니다."})
+    fb = BotFeedback(user_id=uid, bot_user_id=target_bot_user_id, is_positive=is_positive)
+    db.session.add(fb)
+    db.session.commit()
+    praise = BotFeedback.query.filter_by(bot_user_id=target_bot_user_id, is_positive=True).count()
+    return jsonify({"success": True, "praise_count": praise})
+
+@tongbot_bp.route('/api/bot/recall', methods=['POST'])
+def bot_recall():
+    """통벗 회수 (관리자/리더 전용)"""
+    if session.get('role') not in ('admin', 'leader'):
+        return jsonify({"error": "권한이 없습니다."}), 403
+    data = request.get_json() or {}
+    target_user_id = data.get('user_id')
+    reason = (data.get('reason', '') or '').strip()
+    if not target_user_id:
+        return jsonify({"error": "대상 회원이 없습니다."}), 400
+    bot = TongBot.query.filter_by(user_id=target_user_id).first()
+    if not bot:
+        return jsonify({"error": "통벗이 없습니다."}), 404
+    bot.is_active = False
+    bot.recalled_at = datetime.now(timezone.utc)
+    bot.recall_reason = reason
+    db.session.commit()
+    return jsonify({"success": True, "bot_name": bot.bot_name})
+
+@tongbot_bp.route('/api/bot/recall/restore', methods=['POST'])
+def bot_recall_restore():
+    """통벗 회수 해제 (관리자/리더 전용)"""
+    if session.get('role') not in ('admin', 'leader'):
+        return jsonify({"error": "권한이 없습니다."}), 403
+    data = request.get_json() or {}
+    target_user_id = data.get('user_id')
+    if not target_user_id:
+        return jsonify({"error": "대상 회원이 없습니다."}), 400
+    bot = TongBot.query.filter_by(user_id=target_user_id).first()
+    if not bot:
+        return jsonify({"error": "통벗이 없습니다."}), 404
+    bot.is_active = True
+    bot.recalled_at = None
+    bot.recall_reason = ''
+    db.session.commit()
+    return jsonify({"success": True, "bot_name": bot.bot_name})
+
+@tongbot_bp.route('/api/bot/leaderboard')
+def bot_leaderboard():
+    from models import TongBot, BotKnowledge, BotFeedback, TongBotMemo
+    from sqlalchemy import func
+    bots = TongBot.query.filter(TongBot.user_id.isnot(None), TongBot.is_active == True).order_by(TongBot.level.desc()).limit(50).all()
+    result = []
+    for b in bots:
+        user = User.query.get(b.user_id)
+        if not user:
+            continue
+        knowledge_count = BotKnowledge.query.filter_by(source_bot=b.bot_name).count()
+        memo_count = TongBotMemo.query.filter_by(user_id=b.user_id).count()
+        praise_count = BotFeedback.query.filter_by(bot_user_id=b.user_id, is_positive=True).count()
+        score = (int(b.level or 1) * 10) + (int(b.intimacy or 0)) + (knowledge_count * 5) + (praise_count * 3)
+        result.append({
+            "user_id": b.user_id, "bot_name": b.bot_name or b.bot_id or '통벗',
+            "username": user.real_name or user.username,
+            "level": b.level or 1, "intimacy": b.intimacy or 0,
+            "knowledge_count": knowledge_count, "memo_count": memo_count,
+            "praise_count": praise_count, "score": score,
+            "mood": b.mood or 'neutral',
+        })
+    result.sort(key=lambda x: x['score'], reverse=True)
+    return jsonify({"leaderboard": result[:30]})
+
 MOODS = ['neutral','happy','excited','thoughtful','caring','playful']
 MOOD_EMOJI = {'neutral':'😊','happy':'😄','excited':'🤩','thoughtful':'🤔','caring':'🥰','playful':'😜'}
 LEVEL_NAMES = {1:'🥚 알',2:'🐣 새싹',3:'🌱 묘목',4:'🪴 나무',5:'🌸 꽃',6:'🌟 별',7:'👑 수호자'}
+
+# 한국 공휴일 (날짜 고정 + 2026년 기준)
+FIXED_HOLIDAYS = [(1,1),(3,1),(5,5),(6,6),(8,15),(10,3),(10,9),(12,25)]
+# 2026년 주요 공휴일 (음력 기반, 대체공휴일 포함)
+YEARLY_HOLIDAYS = {
+    2026: [
+        (2,15),  # 설날
+        (2,16),  # 설날
+        (2,17),  # 설날 (대체)
+        (5,5),   # 어린이날
+        (5,27),  # 부처님오신날
+        (9,6),   # 추석
+        (9,7),   # 추석
+        (9,8),   # 추석
+    ]
+}
+
+def _is_holiday(d):
+    """주어진 날짜가 공휴일인지 확인"""
+    if d.weekday() >= 5:  # 토/일
+        return True
+    if (d.month, d.day) in FIXED_HOLIDAYS:
+        return True
+    year_holidays = YEARLY_HOLIDAYS.get(d.year, [])
+    if (d.month, d.day) in year_holidays:
+        return True
+    return False
+
+def _nearest_weekday(d):
+    """공휴일이면 가장 가까운 평일로 이동"""
+    while _is_holiday(d):
+        d -= timedelta(days=1)
+        if d.weekday() >= 5:
+            d -= timedelta(days=2)
+    return d
 
 SCHEDULE_KEYWORDS = ['일정', '약속', '캘린더', '예약', '스케줄', '추가해', '등록해', '만들어줘', '생성해', '넣어줘', '기록해', '잡아줘', '저장해', '등록', '추가', '일정추가', '일정등록', '만나자', '보자', '가자', '갈까', '만날까']
 
@@ -471,15 +796,18 @@ def _ai_reply(bot, user, user_msg):
     try:
         from config import Config
         import requests
-        key = getattr(Config, 'GROQ_API_KEY', '')
+        key = getattr(Config, 'MOTIF_API_KEY', '')
+        base_url = getattr(Config, 'MOTIF_BASE_URL', 'https://chat.motiftech.io/openapi/v1')
         if not key:
             return f"{_m['emoji']} 안녕하세요! 저는 {bot.bot_name}입니다. {lvl_name} 단계예요."
         tone = bot.tone or 'friendly'
         tone_guide = {'friendly':'친근하고 편안한 말투로, 반말과 이모티콘을 자유롭게 사용하세요.',
                       'respectful':'존중하고 예의 바른 말투로, ~합니다/～요 체를 사용하세요.',
                       'strict':'엄격하고 간결한 말투로, 핵심만 전달하며 군더더기 없이 답변하세요.'}.get(tone, '')
+        from datetime import datetime, timezone
+        today = datetime.now(timezone.utc).strftime('%Y년 %m월 %d일 %A')
         prompt = f"""당신은 '{bot.bot_name}'입니다. '{user.username}'님의 개인 AI 도우미입니다.
-말투: {tone_guide} | 성장: {lvl_name} Lv.{bot.level} | 친밀도: {bot.intimacy}
+말투: {tone_guide} | 성장: {lvl_name} Lv.{bot.level} | 친밀도: {bot.intimacy} | 오늘: {today}
 
 [대원칙]
 1. 절대 거짓말 하지 않습니다. 모르면 모른다고 솔직히 말합니다.
@@ -497,17 +825,24 @@ def _ai_reply(bot, user, user_msg):
 - 안내에 없는 기능은 "아직 그런 기능은 없습니다"라고 답하세요.
 - 최종 답변만 2~3문장으로 출력하세요. 사고 과정은 출력하지 마세요.
 
+[메모 기록]
+대화 중 회원의 중요한 정보(생일·주소·연락처·약속·선호도·정기적인 할일 등)를 알게 되면
+반드시 답변末尾에 아래 형식으로 기록하세요:
+<memo>중요한 내용 요약</memo>
+예: 회원이 "매월 25일 전기요금 내는 걸 알려줘"라고 하면 →
+<memo>매월 25일 오후 6시 전기요금 납부 알림</memo>
+
 [플랫폼 안내 - 플랫폼 기능 질문시에만 참고]
 {PLATFORM_GUIDE}
 
-[통벗 지식 공유]
-다른 통벗들이 공유한 아래 지식이 있다면 참고하세요:
-{_get_shared_knowledge(user_msg)}
+        [플랫폼 게시글 검색 결과]
+아래는 '{user_msg}'와 관련된 게시글입니다. 회원 질문에 도움이 된다면 참고하세요:
+{build_context(user_msg)}
 
 회원: {user_msg}"""
-        r = requests.post("https://api.groq.com/openai/v1/chat/completions",
+        r = requests.post(f"{base_url}/chat/completions",
             headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-            json={"model": "llama-3.1-8b-instant", "messages": [{"role": "user", "content": prompt}], "max_tokens": 300},
+            json={"model": "motif-12.7b-reasoning", "messages": [{"role": "user", "content": prompt}], "max_tokens": 300},
             timeout=20)
         if r.status_code == 200:
             reply = r.json()['choices'][0]['message']['content']
@@ -632,7 +967,7 @@ def bot_draft():
         draft.content = data.get('content', draft.content)
         draft.category = data.get('category', draft.category)
         draft.status = data.get('status', draft.status)
-        draft.updated_at = datetime.now()
+        draft.updated_at = datetime.now(timezone.utc)
     else:
         draft = TongBotDraft(user_id=uid, title=data.get('title',''), content=data.get('content',''), category=data.get('category',''), status='draft')
         db.session.add(draft)
@@ -679,7 +1014,7 @@ def bot_review(draft_id):
         draft.bot_review = review
         draft.bot_suggestion = suggestion
         draft.status = 'reviewed'
-        draft.updated_at = datetime.now()
+        draft.updated_at = datetime.now(timezone.utc)
         db.session.commit()
         return jsonify({"success": True, "review": review, "suggestion": suggestion})
     except Exception as e:
@@ -1359,7 +1694,7 @@ def bot_messages_unread():
     out = []
     for m in unread:
         if m.id not in already_notified:
-            log = MessageReminderLog(user_id=uid, message_id=m.id, sender_name=m.sender_name, subject=m.subject or '(제목 없음)', sent_at=datetime.now(), seen=False)
+            log = MessageReminderLog(user_id=uid, message_id=m.id, sender_name=m.sender_name, subject=m.subject or '(제목 없음)', sent_at=datetime.now(timezone.utc), seen=False)
             db.session.add(log)
             out.append({"id": log.id, "sender": m.sender_name or '알 수 없음', "subject": m.subject or '(제목 없음)', "created_at": m.created_at.strftime('%Y-%m-%d %H:%M') if m.created_at else ''})
     if out:
@@ -1431,7 +1766,7 @@ def push_unsubscribe():
     return jsonify({"success": True})
 
 def run_notification_check():
-    from datetime import datetime, timedelta
+    from datetime import datetime, timezone, timedelta
     import calendar as _cal
     from run import app
     from models import TongBotSchedule, ScheduleReminderLog
@@ -1721,24 +2056,15 @@ def bot_schedule_delete():
     return jsonify({"success":True})
 
 @tongbot_bp.route('/schedule')
+@tongbot_bp.route('/schedule2')
 def schedule_page():
     if not session.get('user_id'):
-        return redirect(url_for('auth.login', next='/schedule'))
-    import os
-    path = os.path.join(current_app.root_path, 'frontend', 'dist', 'index.html')
-    if os.path.exists(path):
-        return send_file(path)
-    return render_template('intro.html')
-
-@tongbot_bp.route('/schedule2')
-def schedule_page2():
-    if not session.get('user_id'):
-        return redirect(url_for('auth.login', next='/schedule2'))
-    import os
-    path = os.path.join(current_app.root_path, 'frontend', 'dist', 'index.html')
-    if os.path.exists(path):
-        return send_file(path)
-    return render_template('intro.html')
+        return redirect(url_for('auth.login', next=request.path))
+    resp = make_response(render_template('schedule2.html'))
+    resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    resp.headers['Pragma'] = 'no-cache'
+    resp.headers['Expires'] = '0'
+    return resp
 
 @tongbot_bp.route('/api/bot/schedule/common', methods=['POST'])
 def schedule_common():
@@ -1908,7 +2234,7 @@ def _rebuild_friend_cache(uid):
     cache = FriendCache.query.get(uid)
     if cache:
         cache.friend_ids = json.dumps(list(friend_ids))
-        cache.updated_at = datetime.now()
+        cache.updated_at = datetime.now(timezone.utc)
     else:
         db.session.add(FriendCache(user_id=uid, friend_ids=json.dumps(list(friend_ids))))
     db.session.commit()
@@ -1929,7 +2255,7 @@ def chat_rooms():
         for f in friends: status_map[str(f)] = 'invited'
         room = ChatRoom(name=name, creator_id=uid, participants=json.dumps(pids),
                        status_map=json.dumps(status_map),
-                       expires_at=datetime.now() + _dt.timedelta(hours=2))
+                       expires_at=datetime.now(timezone.utc) + _dt.timedelta(hours=2))
         db.session.add(room)
         db.session.flush()
         # 일정 연결
@@ -1955,7 +2281,7 @@ def chat_rooms():
         return jsonify({"id": room.id, "name": name})
     import json
     # 만료된 방 정리
-    ChatRoom.query.filter(ChatRoom.is_active==True, ChatRoom.expires_at < datetime.now()).update({"is_active":False}, synchronize_session=False)
+    ChatRoom.query.filter(ChatRoom.is_active==True, ChatRoom.expires_at < datetime.now(timezone.utc)).update({"is_active":False}, synchronize_session=False)
     db.session.commit()
     rooms = ChatRoom.query.filter(ChatRoom.is_active==True, ChatRoom.participants.contains(str(uid))).order_by(ChatRoom.created_at.desc()).limit(20).all()
     result = []
@@ -2204,12 +2530,12 @@ def _moderate_chat(room_id):
     try:
         from config import Config
         import requests
-        key = getattr(Config, 'GROQ_API_KEY', '')
+        key = getattr(Config, 'MOTIF_API_KEY', '')
         if not key: return
         prompt = f"""당신은 채팅 중재자입니다. 다음 대화를 보고 분위기를 판단하세요.
 긍정적이면 칭찬, 부정적이면 부드럽게 조율하는 한 문장을 쓰세요.
 대화: {recent}"""
-        r = requests.post("https://api.groq.com/openai/v1/chat/completions",
+        r = requests.post(f"{base_url}/chat/completions",
             headers={"Authorization": f"Bearer {key}"}, json={"model":"llama-3.1-8b-instant","messages":[{"role":"user","content":prompt}],"max_tokens":100}, timeout=15)
         if r.status_code == 200:
             reply = r.json()["choices"][0]["message"]["content"]

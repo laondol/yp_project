@@ -10,6 +10,7 @@ const MENUS = [
   { path: '/admin/ai-chat', label: 'AI 채팅', icon: '🤖' },
   { path: '/admin/ai-feedback', label: 'AI 피드백', icon: '📋' },
   { path: '/admin/ai-train', label: 'AI 가르치기', icon: '📚' },
+  { path: '/admin/ai-broadcasts', label: 'AI 전체공지', icon: '📢' },
   { path: '/admin/pending-letters', label: '보류편지', icon: '📨' },
   { path: '/admin/page-managers', label: '페이지관리자', icon: '🔑' },
   { path: '/admin/postgresql', label: 'DB관리', icon: '🗄️' },

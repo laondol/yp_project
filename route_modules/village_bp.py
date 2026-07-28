@@ -1,7 +1,7 @@
 from flask import Blueprint, render_template, request, redirect, url_for, jsonify, session, current_app, send_file
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import or_
-from models import db, User, ShareReport, VillageWish, Post, Message, VillageCache, VillagePage, VillageEvent, VillageEventAttendee, VillageEventChat, StoreInfo, NewsArticle
+from models import db, User, ShareReport, VillageWish, VillageBroadcast, ContentPermission, Post, Message, VillageCache, VillagePage, VillageEvent, VillageEventAttendee, VillageEventChat, StoreInfo, NewsArticle
 from route_modules.common import has_page_access
 from services.geocode import haversine
 
@@ -58,13 +58,28 @@ def village_message_all():
         return jsonify({"error":"권한 없음"}), 403
     uid = session.get('user_id')
     user = User.query.get(uid)
+    if not user:
+        return jsonify({"error":"사용자 정보 없음"}), 404
     mp = (user.managed_pages or '').split(',') if user else []
-    village_ris = [p[3:].split('_')[1] for p in mp if p.startswith('vi_') and '_' in p[3:]]
-    subject = request.form.get('subject','')
-    content = request.form.get('content','')
-    if not subject or not content:
-        return jsonify({"error":"제목과 내용을 입력하세요."})
-    # 파일 첨부 처리
+    myeon_list = []
+    ri_list = []
+    for p in mp:
+        if p.startswith('vi_'):
+            parts = p[3:].split('_')
+            if len(parts) >= 2:
+                myeon_list.append(parts[0])
+                ri_list.append(parts[1])
+            elif len(parts) == 1:
+                ri_list.append(parts[0])
+                if user.town:
+                    myeon_list.append(user.town)
+    if not ri_list:
+        ri_list = [user.village or user.curr_village or '']
+        myeon_list = [user.town or user.curr_town or '']
+    subject = request.form.get('subject','').strip()
+    content = request.form.get('content','').strip()
+    if not content:
+        return jsonify({"error":"내용을 입력하세요."})
     attachment_path = None
     file = request.files.get('attachment')
     if file and file.filename:
@@ -78,8 +93,8 @@ def village_message_all():
                 attachment_path = secure_save(file, upload_dir)
             except Exception:
                 pass
-    from sqlalchemy import or_
-    conditions = [User.village == ri for ri in village_ris]
+    from sqlalchemy import or_, and_
+    conditions = [and_(User.town == m, User.village == r) for m, r in zip(myeon_list, ri_list)]
     receivers = User.query.filter(User.id != uid, or_(*conditions)).all() if conditions else []
     count = 0
     for r in receivers:
@@ -92,7 +107,14 @@ def village_message_all():
         except:
             pass
     db.session.commit()
-    return jsonify({"status":"success","msg":f"{count}명에게 쪽지 발송 완료"})
+    for m, r in zip(myeon_list, ri_list):
+        try:
+            bc = VillageBroadcast(myeon=m, ri=r, sender_id=uid, subject=subject, content=content, attachment=attachment_path)
+            db.session.add(bc)
+        except:
+            pass
+    db.session.commit()
+    return jsonify({"status":"success","msg":f"{count}명에게 편지 발송 완료"})
 
 @village_bp.route('/village/qr')
 def village_qr():
@@ -132,7 +154,7 @@ def village_jin_verify(member_id):
         return jsonify({"error":"권한 없음"}), 403
     member = User.query.get_or_404(member_id)
     member.is_verified_resident = True
-    member.jin_verified_at = datetime.now()
+    member.jin_verified_at = datetime.now(timezone.utc)
     db.session.commit()
     return jsonify({"status":"success","msg":f"{member.real_name or member.username}님 진 인증 완료"})
 
@@ -189,33 +211,42 @@ def village_register_member():
 
 @village_bp.route('/village/page', methods=['GET','POST'])
 def village_page_edit():
-    if not has_page_access('village'):
-        return "권한 없음", 403
     uid = session.get('user_id')
-    user = User.query.get(uid)
-    mp = (user.managed_pages or '').split(',') if user else []
-    # 첫 번째 담당 리 찾기
-    myeon = ri = None
-    for p in mp:
-        if p.startswith('vi_'):
-            parts = p[3:].split('_')
-            if len(parts) >= 2:
-                myeon, ri = parts[0], parts[1]
-                break
-    if not myeon:
-        return "담당 마을이 지정되지 않았습니다.", 400
-    page = VillagePage.query.filter_by(myeon=myeon, ri=ri).first()
-    if not page:
-        page = VillagePage(myeon=myeon, ri=ri, title=ri+' 마을', content='', visibility='members', created_by=uid)
-        db.session.add(page)
-        db.session.flush()
-    if request.method == 'POST':
-        page.title = request.form.get('title', page.title)
-        page.content = request.form.get('content', page.content)
-        page.visibility = request.form.get('visibility', page.visibility)
-        db.session.commit()
-        return "<script>alert('저장되었습니다.'); location.reload();</script>"
-    return _serve_spa()
+    if has_page_access('village'):
+        # 마을지기: 편집 모드
+        user = User.query.get(uid)
+        mp = (user.managed_pages or '').split(',') if user else []
+        myeon = ri = None
+        for p in mp:
+            if p.startswith('vi_'):
+                parts = p[3:].split('_')
+                if len(parts) >= 2:
+                    myeon, ri = parts[0], parts[1]
+                    break
+        if not myeon:
+            return "담당 마을이 지정되지 않았습니다.", 400
+        page = VillagePage.query.filter_by(myeon=myeon, ri=ri).first()
+        if not page:
+            page = VillagePage(myeon=myeon, ri=ri, title=ri+' 마을', content='', visibility='members', created_by=uid)
+            db.session.add(page)
+            db.session.flush()
+        if request.method == 'POST':
+            page.title = request.form.get('title', page.title)
+            page.content = request.form.get('content', page.content)
+            page.visibility = request.form.get('visibility', page.visibility)
+            db.session.commit()
+            return "<script>alert('저장되었습니다.'); location.reload();</script>"
+        return _serve_spa()
+    # 일반 회원: 자신의 위치에 맞는 공개 마을 페이지 보기
+    user = User.query.get(uid) if uid else None
+    if user:
+        ri = user.curr_village or user.login_village or user.village or user.reg_village or ''
+        town = user.curr_town or user.town or user.reg_town or ''
+        if ri:
+            page = VillagePage.query.filter_by(myeon=town, ri=ri).first()
+            if page and page.visibility != 'off':
+                return redirect(url_for('village.village_page_view', tmyeon=town, tri=ri))
+    return "<script>alert('해당하는 마을 페이지가 없습니다.'); history.back();</script>"
 
 @village_bp.route('/api/village/page')
 def api_village_page():
@@ -249,6 +280,25 @@ def api_village_page():
         'created_at': page.created_at.isoformat() if page.created_at else None,
     })
 
+@village_bp.route('/api/village/my-page')
+def api_village_my_page():
+    """현재 로그인한 회원의 위치에 해당하는 마을 페이지 정보"""
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({"exists": False})
+    user = User.query.get(uid)
+    if not user:
+        return jsonify({"exists": False})
+    # 우선순위: curr_village > login_village > village > reg_village
+    ri = user.curr_village or user.login_village or user.village or user.reg_village or ''
+    town = user.curr_town or user.town or user.reg_town or ''
+    if not ri:
+        return jsonify({"exists": False})
+    page = VillagePage.query.filter_by(myeon=town, ri=ri).first()
+    if not page or page.visibility == 'off':
+        return jsonify({"exists": False, "myeon": town, "ri": ri})
+    return jsonify({"exists": True, "id": page.id, "title": page.title, "myeon": town, "ri": ri})
+
 @village_bp.route('/village/view/<string:tmyeon>/<string:tri>')
 def village_page_view(tmyeon, tri):
     page = VillagePage.query.filter_by(myeon=tmyeon, ri=tri).first()
@@ -272,7 +322,7 @@ def village_page_view(tmyeon, tri):
             if uid in mp_users:
                 is_member = True
                 break
-    if page.visibility == 'members' and not is_member:
+    if page.visibility == 'members' and not is_member and not at_location:
         return "<script>alert('마을 주민만 볼 수 있습니다.'); history.back();</script>"
     # 쇼트코드 처리
     content = page.content or ''
@@ -346,7 +396,7 @@ def village_event_create():
             description=request.form.get('description',''),
             location=request.form.get('location',''),
             video_url=request.form.get('video_url',''),
-            event_date=datetime.strptime(request.form['event_date'],'%Y-%m-%dT%H:%M') if request.form.get('event_date') else datetime.now(),
+            event_date=datetime.strptime(request.form['event_date'],'%Y-%m-%dT%H:%M') if request.form.get('event_date') else datetime.now(timezone.utc),
             created_by=uid
         )
         db.session.add(ev)
@@ -519,15 +569,207 @@ def village_event_ping(event_id):
         return jsonify({"error":"로그인 필요"}), 401
     att = VillageEventAttendee.query.filter_by(event_id=event_id, user_id=uid).first()
     if att:
-        att.last_ping = datetime.now()
+        att.last_ping = datetime.now(timezone.utc)
         db.session.commit()
     attendees = VillageEventAttendee.query.filter_by(event_id=event_id).all()
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     away = []
     for a in attendees:
         if a.last_ping and (now - a.last_ping).total_seconds() > 30:
             away.append({'id':a.id,'name':a.name or a.email or '익명','seconds':int((now - a.last_ping).total_seconds())})
     return jsonify({"status":"ok","away":away})
+
+@village_bp.route('/api/village/dashboard')
+def api_village_dashboard():
+    uid = session.get('user_id')
+    if not uid or not has_page_access('village'):
+        return jsonify({"error":"권한 없음"}), 403
+    user = User.query.get(uid)
+    if not user:
+        return jsonify({"error":"사용자 없음"}), 404
+    mp = (user.managed_pages or '').split(',') if user else []
+    village_ris = []
+    for p in mp:
+        if p.startswith('vi_'):
+            parts = p[3:].split('_')
+            if len(parts) >= 2:
+                village_ris.append({"myeon": parts[0], "ri": parts[1]})
+    myeon_list = [v["myeon"] for v in village_ris]
+    ri_list = [v["ri"] for v in village_ris]
+    members = User.query.filter(
+        User.town.in_(myeon_list) if myeon_list else False,
+        User.village.in_(ri_list) if ri_list else True
+    ).all() if myeon_list else []
+    member_ids = [m.id for m in members]
+    member_count = len(member_ids)
+    posts = Post.query.filter(Post.user_id.in_(member_ids)).order_by(Post.created_at.desc()).limit(50).all() if member_ids else []
+    shares = ShareReport.query.filter(ShareReport.user_id.in_(member_ids)).order_by(ShareReport.created_at.desc()).limit(50).all() if member_ids else []
+    ri_names = [v["ri"] for v in village_ris]
+    wishes = VillageWish.query.filter(VillageWish.village_ri.in_(ri_names)).order_by(VillageWish.created_at.desc()).limit(50).all() if ri_names else []
+    return jsonify({
+        "village_ris": village_ris,
+        "member_count": member_count,
+        "members": [{
+            "id": m.id, "real_name": m.real_name or '-', "email": m.email,
+            "town": m.town or '', "village": m.village or '',
+            "is_verified_resident": m.is_verified_resident,
+            "jin_verified_at": m.jin_verified_at.isoformat() if m.jin_verified_at else None,
+            "photo_path": m.photo_path or ''
+        } for m in members],
+        "posts": [{
+            "id": p.id, "title": p.title, "content": (p.content or '')[:200],
+            "created_at": p.created_at.isoformat() if p.created_at else None,
+            "user_id": p.user_id
+        } for p in posts],
+        "shares": [{
+            "id": s.id, "title": s.title, "description": (s.description or '')[:200],
+            "created_at": s.created_at.isoformat() if s.created_at else None,
+            "user_id": s.user_id, "image_path": s.image_path or ''
+        } for s in shares],
+        "wishes": [{
+            "id": w.id, "content": w.content, "status": w.status or 'pending',
+            "reply": w.reply, "user_id": w.user_id,
+            "created_at": w.created_at.isoformat() if w.created_at else None
+        } for w in wishes],
+    })
+
+@village_bp.route('/api/village/feed')
+def api_village_feed():
+    uid = session.get('user_id')
+    if not uid or not has_page_access('village'):
+        return jsonify({"error":"권한 없음"}), 403
+    user = User.query.get(uid)
+    if not user:
+        return jsonify({"error":"사용자 없음"}), 404
+    mp = (user.managed_pages or '').split(',') if user else []
+    village_ris = []
+    for p in mp:
+        if p.startswith('vi_'):
+            parts = p[3:].split('_')
+            if len(parts) >= 2:
+                village_ris.append({"myeon": parts[0], "ri": parts[1]})
+    myeon_list = [v["myeon"] for v in village_ris]
+    ri_list = [v["ri"] for v in village_ris]
+    broadcast_list = []
+    for v in village_ris:
+        bcs = VillageBroadcast.query.filter_by(myeon=v["myeon"], ri=v["ri"])\
+            .order_by(VillageBroadcast.created_at.desc()).limit(30).all()
+        for bc in bcs:
+            sender = User.query.get(bc.sender_id)
+            broadcast_list.append({
+                "type": "broadcast",
+                "id": bc.id,
+                "subject": bc.subject,
+                "content": bc.content,
+                "sender_name": sender.real_name or sender.username if sender else '',
+                "attachment": bc.attachment,
+                "created_at": bc.created_at.isoformat() if bc.created_at else None,
+            })
+    member_ids = [m.id for m in User.query.filter(
+        User.town.in_(myeon_list) if myeon_list else False,
+        User.village.in_(ri_list) if ri_list else True
+    ).all()] if myeon_list else []
+    posts = Post.query.filter(Post.user_id.in_(member_ids)).order_by(Post.created_at.desc()).limit(30).all() if member_ids else []
+    shares = ShareReport.query.filter(
+        ShareReport.town.in_(myeon_list),
+        ShareReport.village.in_(ri_list)
+    ).order_by(ShareReport.created_at.desc()).limit(30).all() if myeon_list else []
+    ri_names = [v["ri"] for v in village_ris]
+    wishes = VillageWish.query.filter(VillageWish.village_ri.in_(ri_names)).order_by(VillageWish.created_at.desc()).limit(30).all() if ri_names else []
+    items = []
+    for p in posts:
+        items.append({"type": "post", "id": p.id, "title": p.title, "content": (p.content or '')[:300], "created_at": p.created_at.isoformat() if p.created_at else None, "user_id": p.user_id})
+    for s in shares:
+        items.append({"type": "share", "id": s.id, "title": s.title, "description": (s.description or '')[:300], "created_at": s.created_at.isoformat() if s.created_at else None, "user_id": s.user_id, "image_path": s.image_path or ''})
+    for w in wishes:
+        items.append({"type": "wish", "id": w.id, "content": w.content, "status": w.status or 'pending', "reply": w.reply, "created_at": w.created_at.isoformat() if w.created_at else None, "user_id": w.user_id})
+    items.extend(broadcast_list)
+    items.sort(key=lambda x: x.get("created_at") or '', reverse=True)
+    return jsonify(items[:50])
+
+@village_bp.route('/api/village/content/permission-request', methods=['POST'])
+def content_permission_request():
+    uid = session.get('user_id')
+    if not uid or not has_page_access('village'):
+        return jsonify({"error":"권한 없음"}), 403
+    share_id = request.form.get('share_id', type=int)
+    post_id = request.form.get('post_id', type=int)
+    message = request.form.get('message', '')
+    if not share_id and not post_id:
+        return jsonify({"error":"콘텐츠를 지정해주세요."}), 400
+    content = None
+    author_id = None
+    if share_id:
+        content = ShareReport.query.get(share_id)
+        if content: author_id = content.user_id
+    if not author_id:
+        return jsonify({"error":"작성자를 찾을 수 없습니다."}), 404
+    existing = ContentPermission.query.filter_by(
+        share_id=share_id, requester_id=uid, status='pending'
+    ).first()
+    if existing:
+        return jsonify({"error":"이미 승인 요청이 있습니다."}), 409
+    cp = ContentPermission(share_id=share_id, post_id=post_id,
+        requester_id=uid, author_id=author_id, message=message)
+    db.session.add(cp)
+    msg = Message(sender_id=uid, sender_name='마을지기',
+        receiver_id=author_id,
+        subject=f'콘텐츠 사용 허가 요청',
+        content=f'회원님의 콘텐츠를 마을 홍보에 사용하고자 합니다. 허가해 주시면 감사하겠습니다.\n\n요청 메시지: {message}\n\n승인 링크: {request.host_url}village/content-permissions')
+    db.session.add(msg)
+    db.session.commit()
+    return jsonify({"status":"success","msg":"사용 허가 요청을 보냈습니다."})
+
+@village_bp.route('/api/village/content/permissions/pending', methods=['GET'])
+def content_permissions_pending():
+    uid = session.get('user_id')
+    if not uid: return jsonify({"error":"로그인 필요"}), 401
+    perms = ContentPermission.query.filter_by(author_id=uid, status='pending')\
+        .order_by(ContentPermission.created_at.desc()).all()
+    result = []
+    for cp in perms:
+        share = ShareReport.query.get(cp.share_id) if cp.share_id else None
+        requester = User.query.get(cp.requester_id)
+        result.append({
+            "id": cp.id, "share_id": cp.share_id, "post_id": cp.post_id,
+            "share_title": share.title if share else '',
+            "requester_name": requester.real_name or requester.username if requester else '',
+            "message": cp.message, "status": cp.status,
+            "created_at": cp.created_at.isoformat() if cp.created_at else None,
+        })
+    return jsonify(result)
+
+@village_bp.route('/api/village/content/permission-respond', methods=['POST'])
+def content_permission_respond():
+    uid = session.get('user_id')
+    if not uid: return jsonify({"error":"로그인 필요"}), 401
+    perm_id = request.form.get('perm_id', type=int)
+    action = request.form.get('action', '')
+    if not perm_id or action not in ('approve', 'reject'):
+        return jsonify({"error":"잘못된 요청"}), 400
+    cp = ContentPermission.query.get(perm_id)
+    if not cp or cp.author_id != uid:
+        return jsonify({"error":"권한 없음"}), 403
+    cp.status = 'approved' if action == 'approve' else 'rejected'
+    cp.responded_at = datetime.now(timezone.utc)
+    if action == 'approve' and cp.share_id:
+        share = ShareReport.query.get(cp.share_id)
+        if share:
+            share.promotion_allowed = True
+    db.session.commit()
+    return jsonify({"status":"success","msg":"처리 완료"})
+
+@village_bp.route('/api/village/content/promotion-allowed')
+def content_promotion_allowed():
+    uid = session.get('user_id')
+    if not uid or not has_page_access('village'):
+        return jsonify({"error":"권한 없음"}), 403
+    shares = ShareReport.query.filter_by(promotion_allowed=True)\
+        .order_by(ShareReport.created_at.desc()).limit(50).all()
+    return jsonify([{
+        "id": s.id, "title": s.title, "description": s.description,
+        "image_path": s.image_path or '', "created_at": s.created_at.isoformat() if s.created_at else None,
+    } for s in shares])
 
 @village_bp.route('/village/invite/<path:target>')
 def village_invite(target):
@@ -536,7 +778,7 @@ def village_invite(target):
         return redirect(url_for('auth.login', next=request.path))
     user = User.query.get(uid)
     # 진 인증 체크 (6개월)
-    if not user.jin_verified_at or (datetime.now() - user.jin_verified_at).days > 150:
+    if not user.jin_verified_at or (datetime.now(timezone.utc) - user.jin_verified_at).days > 150:
         return _serve_spa()
     # target에 따라 이동
     if target == 'join':
@@ -554,7 +796,7 @@ def village_invite_jin():
     if not uid:
         return jsonify({"error":"로그인 필요"})
     user = User.query.get(uid)
-    user.jin_verified_at = datetime.now()
+    user.jin_verified_at = datetime.now(timezone.utc)
     user.is_verified_resident = True
     db.session.commit()
     target = request.json.get('target','')
@@ -692,7 +934,7 @@ def village_join():
                 import os as _os
                 upload_dir = _os.path.join(current_app.config['UPLOAD_FOLDER'], 'village_members')
                 _os.makedirs(upload_dir, exist_ok=True)
-                fname = f'{uid}_{datetime.now().strftime("%Y%m%d%H%M%S")}.jpg'
+                fname = f'{uid}_{datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")}.jpg'
                 fpath = _os.path.join(upload_dir, fname)
                 photo.save(fpath)
                 member.photo_path = '/static/uploads/village_members/' + fname

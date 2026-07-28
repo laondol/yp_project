@@ -10,6 +10,7 @@ interface ScheduleItem {
   is_recurring?: boolean; repeat_type?: string; repeat_interval?: number
   repeat_infinite?: boolean; repeat_weekdays?: number; repeat_week_of_month?: number
   repeat_month_of_year?: number; reminder_minutes?: number; exceptions?: string
+  content?: string; departure_location?: string; return_location?: string
 }
 
 const DAYS = ['일', '월', '화', '수', '목', '금', '토']
@@ -217,12 +218,12 @@ export default function SchedulePage() {
               const dayScheds = eventsForDay(selectedDay).sort((a, b) => (a.event_date || '').localeCompare(b.event_date || ''))
               return dayScheds.length === 0 ? (
                 <EmptyState icon="📅" title="등록된 일정이 없습니다." />
-              ) : dayScheds.map((s, idx) => {
+              ) : dayScheds.map((s) => {
                 let transitBtns: React.ReactNode = null
                 const isTransit = (s.title && (s.title.includes('이동') || s.title.includes('집으로'))) && s.content
                 if (isTransit) {
                   try {
-                    const r = JSON.parse(s.content)
+                    const r = JSON.parse(s.content || 'null')
                     if (r && r.from_lat && r.to_lat) {
                       const dl = encodeURIComponent(s.departure_location || '출발')
                       const al = encodeURIComponent(s.return_location || s.location || '도착')

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { api, villageApi } from '../lib/api'
@@ -27,9 +27,14 @@ export default function VillageAdminPage() {
   const [members, setMembers] = useState<VillageMember[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [messageContent, setMessageContent] = useState('')
+  const [messageSubject, setMessageSubject] = useState('')
   const [messageFile, setMessageFile] = useState<File | null>(null)
   const [sending, setSending] = useState(false)
+  const [messageResult, setMessageResult] = useState('')
+  const [sendingOverlay, setSendingOverlay] = useState(false)
+  const editorRef = useRef<HTMLDivElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [uploading, setUploading] = useState(false)
 
   const managed = user?.managed_pages ?? []
   const hasAccess = managed.some(p => p.startsWith('village') || p.startsWith('vi_'))
@@ -68,21 +73,48 @@ export default function VillageAdminPage() {
     else setLoading(false)
   }, [tab, authLoading, hasAccess])
 
-  const handleSendMessage = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!messageContent.trim()) return
-    setSending(true)
+  const execCmd = (cmd: string, val?: string) => {
+    document.execCommand(cmd, false, val)
+    if (editorRef.current) editorRef.current.focus()
+  }
+
+  const insertLink = () => {
+    const url = prompt('링크 URL을 입력하세요:', 'https://')
+    if (url) execCmd('createLink', url)
+  }
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploading(true)
     try {
       const fd = new FormData()
-      fd.append('content', messageContent.trim())
+      fd.append('image', file)
+      const res = await fetch('/api/message/upload-image', { method: 'POST', body: fd }).then(r => r.json())
+      if (res.url && editorRef.current) {
+        execCmd('insertHTML', `<img src="${res.url}" style="max-width:100%;border-radius:8px;margin:8px 0" />`)
+      }
+    } catch { alert('이미지 업로드 실패') }
+    finally { setUploading(false); if (fileInputRef.current) fileInputRef.current.value = '' }
+  }
+
+  const handleSendMessage = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const content = editorRef.current?.innerHTML || ''
+    if (!content.trim() || sending) return
+    setSending(true); setSendingOverlay(true); setMessageResult('')
+    try {
+      const fd = new FormData()
+      fd.append('subject', messageSubject)
+      fd.append('content', content)
       if (messageFile) fd.append('attachment', messageFile)
       await api.upload('/village/message-all', fd)
-      alert('쪽지를 전송했습니다.')
-      setMessageContent('')
+      setMessageResult('발송 완료')
+      setMessageSubject('')
+      if (editorRef.current) editorRef.current.innerHTML = ''
       setMessageFile(null)
-    } catch {
-      alert('전송 실패')
-    } finally { setSending(false) }
+    } catch (e: any) { setMessageResult('오류: ' + (e.message || '전송 실패')) }
+    finally { setSending(false); setSendingOverlay(false) }
   }
 
   if (authLoading) return <Loading />
@@ -95,7 +127,7 @@ export default function VillageAdminPage() {
         <li className="nav-item"><button className={`nav-link ${tab === 'feed' ? 'active' : ''}`} onClick={() => setTab('feed')}>마을피드</button></li>
         <li className="nav-item"><button className={`nav-link ${tab === 'members' ? 'active' : ''}`} onClick={() => setTab('members')}>마을회원</button></li>
         <li className="nav-item"><button className={`nav-link ${tab === 'activities' ? 'active' : ''}`} onClick={() => setTab('activities')}>활동</button></li>
-        <li className="nav-item"><button className={`nav-link ${tab === 'message' ? 'active' : ''}`} onClick={() => setTab('message')}>전체쪽지</button></li>
+        <li className="nav-item"><button className={`nav-link ${tab === 'message' ? 'active' : ''}`} onClick={() => setTab('message')}>✉️ 전체편지</button></li>
         <li className="nav-item"><button className={`nav-link ${tab === 'qr' ? 'active' : ''}`} onClick={() => setTab('qr')}>QR초대</button></li>
       </ul>
 
@@ -184,19 +216,49 @@ export default function VillageAdminPage() {
 
       {tab === 'message' && (
         <form onSubmit={handleSendMessage} className="card border-0 shadow-sm p-4" style={{ borderRadius: 16 }}>
+          <h6 className="fw-bold mb-3">📨 마을 전체 회원에게 편지 발송</h6>
+          <div className="mb-3">
+            <label className="small fw-bold">제목</label>
+            <input type="text" className="form-control" value={messageSubject} onChange={e => setMessageSubject(e.target.value)} placeholder="편지 제목" />
+          </div>
           <div className="mb-3">
             <label className="small fw-bold">내용</label>
-            <textarea className="form-control" rows={5} value={messageContent}
-              onChange={e => setMessageContent(e.target.value)} required />
+            <div className="border rounded" style={{ overflow: 'hidden' }}>
+              <div className="d-flex flex-wrap gap-1 p-2 bg-light border-bottom">
+                <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => execCmd('bold')} title="굵게"><b>B</b></button>
+                <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => execCmd('italic')} title="기울임"><i>I</i></button>
+                <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => execCmd('underline')} title="밑줄"><u>U</u></button>
+                <span className="border-start mx-1"></span>
+                <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => execCmd('insertUnorderedList')} title="목록">☰</button>
+                <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => execCmd('insertOrderedList')} title="번호 목록">#</button>
+                <span className="border-start mx-1"></span>
+                <button type="button" className="btn btn-sm btn-outline-secondary" onClick={insertLink} title="링크">🔗</button>
+                <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => { if (fileInputRef.current) fileInputRef.current.click() }} title="사진 넣기">
+                  {uploading ? '⏳' : '📷'}
+                </button>
+              </div>
+              <input ref={fileInputRef} type="file" accept="image/*" className="d-none" onChange={handleImageUpload} />
+              <div ref={editorRef} contentEditable suppressContentEditableWarning
+                className="form-control" style={{ minHeight: 200, maxHeight: 400, overflowY: 'auto', border: 'none', borderRadius: 0, boxShadow: 'none' }}
+              />
+            </div>
           </div>
           <div className="mb-3">
             <label className="small fw-bold">파일 첨부</label>
-            <input type="file" className="form-control form-control-sm"
-              onChange={e => setMessageFile(e.target.files?.[0] || null)} />
+            <input type="file" className="form-control form-control-sm" onChange={e => setMessageFile(e.target.files?.[0] || null)} />
           </div>
           <button type="submit" className="btn btn-success w-100" disabled={sending}>
-            {sending ? '전송 중...' : '전체 쪽지 보내기'}
+            {sending ? '전송 중...' : '전체 편지 보내기'}
           </button>
+          {messageResult && <div className={`small mt-2 ${messageResult.includes('오류') ? 'text-danger' : 'text-success'}`}>{messageResult}</div>}
+          {sendingOverlay && (
+            <div className="position-fixed top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center" style={{ background: 'rgba(0,0,0,0.4)', zIndex: 9999 }}>
+              <div className="bg-white rounded shadow p-4 text-center">
+                <div className="spinner-border text-success mb-2" role="status" />
+                <div className="fw-bold">편지 발송 중...</div>
+              </div>
+            </div>
+          )}
         </form>
       )}
 

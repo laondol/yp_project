@@ -1,7 +1,7 @@
 import os
 import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from flask import Blueprint, request, jsonify, session, current_app, send_file, send_from_directory
 from models import db, User, EpubBook, EpubPage, EpubMedia, EpubTemplate
 
@@ -172,7 +172,7 @@ def api_epub_book_update(book_id):
     if 'status' in data: book.status = data['status']
     if 'town' in data: book.town = data['town']
     if 'village' in data: book.village = data['village']
-    book.updated_at = datetime.now()
+    book.updated_at = datetime.now(timezone.utc)
     db.session.commit()
     return jsonify({"status": "success", "msg": "수정되었습니다."})
 

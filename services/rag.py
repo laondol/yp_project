@@ -68,6 +68,13 @@ def remove_item(source_type, item_id):
     except Exception as e:
         print(f"[RAG REMOVE] error: {e}")
 
+def remove_by_source(source_type):
+    try:
+        col = _get_collection()
+        col.delete(where={'source_type': source_type})
+    except Exception as e:
+        print(f"[RAG REMOVE] error: {e}")
+
 def search(query, top_k=5, source_type=None):
     try:
         col = _get_collection()
@@ -95,7 +102,7 @@ def search(query, top_k=5, source_type=None):
 
 def rebuild_index(app):
     with app.app_context():
-        from models import Post, NewsArticle, ShareReport
+        from models import Post, NewsArticle, ShareReport, LegalPost, PsychoPost
         try:
             col = _get_collection()
             col.delete(where={})
@@ -110,7 +117,39 @@ def rebuild_index(app):
         shares = ShareReport.query.filter_by(status='approved').all()
         for s in shares:
             index_item(s.id, s.title or '', s.description or '', 'share', url=f"/share/detail/{s.id}", author=s.author_name or '', created_at=str(s.created_at))
-        print(f"[RAG] 인덱스 재구축 완료: posts={len(posts)}, news={len(articles)}, shares={len(shares)}")
+        legals = LegalPost.query.filter_by(is_public=True).all()
+        for l in legals:
+            index_item(l.id, l.title or '', l.content or '', 'legal', url=f"/legal/detail/{l.id}", author=l.author_name or '', created_at=str(l.created_at))
+        psychos = PsychoPost.query.filter_by(is_public=True).all()
+        for p in psychos:
+            index_item(p.id, p.title or '', p.content or '', 'psycho', url=f"/psycho/detail/{p.id}", author=p.author_name or '', created_at=str(p.created_at))
+        print(f"[RAG] 인덱스 재구축 완료: posts={len(posts)}, news={len(articles)}, shares={len(shares)}, legal={len(legals)}, psycho={len(psychos)}")
+    index_terms_and_charter(app)
+
+def index_terms_and_charter(app):
+    with app.app_context():
+        try:
+            remove_by_source('terms')
+            remove_by_source('charter')
+            base = os.path.dirname(os.path.dirname(__file__))
+            terms_path = os.path.join(base, 'templates', 'terms.html')
+            charter_path = os.path.join(base, 'charter.md')
+            if os.path.exists(terms_path):
+                import re
+                with open(terms_path, 'r', encoding='utf-8') as f:
+                    html = f.read()
+                text = re.sub(r'<[^>]+>', '', html)
+                text = re.sub(r'\s+', ' ', text).strip()
+                if text:
+                    index_item('main', '회원약관', text, 'terms', url='/terms')
+            if os.path.exists(charter_path):
+                with open(charter_path, 'r', encoding='utf-8') as f:
+                    md = f.read()
+                if md.strip():
+                    index_item('main', '사회적협동조합 정관', md, 'charter', url='/charter')
+            print(f"[RAG] 약관/정관 인덱싱 완료")
+        except Exception as e:
+            print(f"[RAG] 약관/정관 인덱싱 실패: {e}")
 
 def build_context(query, top_k=3):
     hits = search(query, top_k=top_k)

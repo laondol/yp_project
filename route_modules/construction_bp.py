@@ -1,5 +1,5 @@
 from flask import Blueprint, render_template, request, redirect, url_for, jsonify, session, current_app, send_file
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 from urllib.parse import quote
 from sqlalchemy import or_
 from models import db, ConstructionNotice, StoreInfo, VillageAlert, HeritageStamp, User, Message, ShareReport, VillageCache, PublicFacility
@@ -220,7 +220,7 @@ def construction_traffic_gg():
     import json
     # 캐시 우선 조회
     cache = VillageCache.query.filter_by(data_type='traffic').order_by(VillageCache.updated_at.desc()).first()
-    if cache and cache.updated_at and (datetime.now() - cache.updated_at).seconds < 600:
+    if cache and cache.updated_at and (datetime.now(timezone.utc) - cache.updated_at).seconds < 600:
         data = json.loads(cache.data_json or '[]')
         return jsonify({"available":True,"yangpyeong":cache.data_count,"incidents":data,"cached":True})
     from services.utic_traffic import traffic_summary as utic_summary
@@ -432,7 +432,7 @@ def construction_local_scenery():
     user = User.query.get(uid)
     if not user or not user.curr_town or not user.curr_village:
         return jsonify({"error": "등록된 주소(리)가 없습니다."}), 400
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     cur_month = now.month
     season_months = {1,2,12} if cur_month in (1,2,12) else {3,4,5} if cur_month in (3,4,5) else {6,7,8} if cur_month in (6,7,8) else {9,10,11}
     season_name = '겨울' if cur_month in (1,2,12) else '봄' if cur_month in (3,4,5) else '여름' if cur_month in (6,7,8) else '가을'
@@ -577,7 +577,7 @@ def admin_alerts_edit(alert_id):
         if session.get('role') == 'admin':
             alert.town = request.form.get('town', '').strip()
             alert.village = request.form.get('village', '').strip()
-        alert.updated_at = datetime.now()
+        alert.updated_at = datetime.now(timezone.utc)
         db.session.commit()
         return redirect('/admin/alerts')
     return _serve_spa()
@@ -626,7 +626,7 @@ def api_user_location():
         if len(parts) >= 2:
             user.curr_town = parts[0]
             user.curr_village = parts[1]
-            user.location_updated_at = datetime.now()
+            user.location_updated_at = datetime.now(timezone.utc)
             db.session.commit()
             return jsonify({"status":"success","msg":"ok"})
         return jsonify({"status":"error","msg":"format"})
@@ -670,7 +670,7 @@ def construction_refresh():
 
 @construction_bp.route('/api/construction/notices')
 def api_construction_notices():
-    six_months_ago = datetime.now() - timedelta(days=180)
+    six_months_ago = datetime.now(timezone.utc) - timedelta(days=180)
     notices = ConstructionNotice.query.filter(
         ConstructionNotice.is_active == True,
         db.or_(

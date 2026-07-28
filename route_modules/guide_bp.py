@@ -1,6 +1,6 @@
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from flask import Blueprint, request, jsonify, session, current_app, send_file
 from models import db, User, GuideSection, GuideTemplate
 
@@ -77,7 +77,7 @@ def api_guide_section_update(section_id):
     if 'style_json' in data: section.style_json = json.dumps(data['style_json'])
     if 'language' in data: section.language = data['language']
     if 'status' in data: section.status = data['status']
-    section.updated_at = datetime.now()
+    section.updated_at = datetime.now(timezone.utc)
     db.session.commit()
     return jsonify({"status": "success"})
 
@@ -161,7 +161,7 @@ def api_guide_template_update(tpl_id):
     if 'preview_image' in data: tpl.preview_image = data['preview_image']
     if 'is_featured' in data: tpl.is_featured = data['is_featured']
     if 'is_active' in data: tpl.is_active = data['is_active']
-    tpl.updated_at = datetime.now()
+    tpl.updated_at = datetime.now(timezone.utc)
     db.session.commit()
     return jsonify({"status": "success"})
 

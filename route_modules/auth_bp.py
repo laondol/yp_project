@@ -1,5 +1,5 @@
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta, timezone
 from flask import Blueprint, render_template, request, redirect, url_for, jsonify, session, current_app, send_file
 from werkzeug.security import generate_password_hash, check_password_hash
 from models import db, User, PointHistory, Message
@@ -91,7 +91,7 @@ def register_verify_email_confirm(token):
     fallback = '/register'
     if not record:
         return f"<script>alert('만료되었거나 유효하지 않은 링크입니다.'); location.href='{fallback}';</script>"
-    if record.created_at and datetime.now() - record.created_at > timedelta(minutes=30):
+    if record.created_at and datetime.now(timezone.utc) - record.created_at > timedelta(minutes=30):
         db.session.delete(record)
         db.session.commit()
         return f"<script>alert('인증 링크가 만료되었습니다. 다시 인증해 주세요.'); location.href='{fallback}';</script>"
@@ -122,16 +122,17 @@ def reset_password():
 @auth_bp.route('/reset-password/send', methods=['POST'])
 def reset_password_send():
     data = request.get_json()
-    email = data.get('email','').strip()
+    email = data.get('email','').strip().lower()
     if not email:
         return jsonify({"status":"error","msg":"이메일을 입력하세요."})
-    user = User.query.filter_by(email=email).first()
+    from sqlalchemy import func
+    user = User.query.filter(func.lower(User.email) == email).first()
     if not user:
         return jsonify({"status":"error","msg":"등록되지 않은 이메일입니다."})
     import secrets, time
     token = secrets.token_urlsafe(32)
     user.reset_token = token
-    user.reset_token_expiry = datetime.now() + timedelta(hours=1)
+    user.reset_token_expiry = datetime.now(timezone.utc) + timedelta(hours=1)
     db.session.commit()
     reset_url = url_for('auth.reset_password_confirm', token=token, _external=True)
     from services.email_service import EmailService
@@ -145,7 +146,7 @@ def reset_password_send():
 @auth_bp.route('/reset-password/<token>')
 def reset_password_confirm(token):
     user = User.query.filter_by(reset_token=token).first()
-    if not user or not user.reset_token_expiry or user.reset_token_expiry < datetime.now():
+    if not user or not user.reset_token_expiry or user.reset_token_expiry < datetime.now(timezone.utc):
         return "<script>alert('만료된 링크입니다.'); location.href='/reset-password';</script>"
     return _serve_spa()
 
@@ -155,7 +156,7 @@ def reset_password_confirm_post():
     token = data.get('token','')
     password = data.get('password','')
     user = User.query.filter_by(reset_token=token).first()
-    if not user or not user.reset_token_expiry or user.reset_token_expiry < datetime.now():
+    if not user or not user.reset_token_expiry or user.reset_token_expiry < datetime.now(timezone.utc):
         return jsonify({"status":"error","msg":"만료된 링크입니다."})
     user.password = generate_password_hash(password)
     user.reset_token = None
@@ -206,7 +207,7 @@ def register():
             session.pop('verify_email', None)
             return "<script>alert('이미 등록된 이메일입니다.'); location.href='/register';</script>"
         hashed_pw = generate_password_hash(password)
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         new_user = User(
             username=username, password=hashed_pw,
             real_name=real_name, email=verified_email,
@@ -289,7 +290,7 @@ def login():
         u = User.query.filter_by(email=login_id).first()
         if u and check_password_hash(u.password, request.form['password']):
             session.update({'user_id': u.id, 'username': u.username, 'role': u.role, 'email': u.email or '', 'real_name': u.real_name or '', 'managed_pages': u.managed_pages or ''})
-            now = datetime.now()
+            now = datetime.now(timezone.utc)
             u.last_login = now
             # 로그인 위치 기록 (GPS from form)
             lat = request.form.get('lat', type=float)
@@ -303,7 +304,7 @@ def login():
                     u.login_town = town
                     u.login_village = village or ''
             # 30일 주기 닢 지급 (가입일 기준, 가입 시 1000P만 지급)
-            now = datetime.now()
+            now = datetime.now(timezone.utc)
             if u.last_payout:
                 if (now - u.last_payout).days >= 30:
                     add_points(u.id, 1000, 'monthly', '30일 주기 물맑은머니 지급')
@@ -324,7 +325,7 @@ def logout():
     if uid:
         user = User.query.get(uid)
         if user:
-            user.last_logout = datetime.now()
+            user.last_logout = datetime.now(timezone.utc)
             db.session.commit()
     session.clear()
     return redirect(url_for('page.intro'))
@@ -395,7 +396,7 @@ def oauth_callback(provider):
                 username = f"{base_username}{counter}"
                 counter += 1
             hashed_pw = generate_password_hash(os.urandom(16).hex())
-            now = datetime.now()
+            now = datetime.now(timezone.utc)
             user = User(
                 username=username,
                 password=hashed_pw,
@@ -421,7 +422,7 @@ def oauth_callback(provider):
             db.session.commit()
 
     session.update({'user_id': user.id, 'username': user.username, 'role': user.role, 'email': user.email or '', 'real_name': user.real_name or ''})
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     user.last_login = now
     if user.last_payout and (now - user.last_payout).days >= 30:
         add_points(user.id, 1000, 'monthly', '30일 주기 물맑은머니 지급')
@@ -449,7 +450,7 @@ def verify_email_send():
     import secrets
     token = secrets.token_urlsafe(32)
     user.email_verification_token = token
-    user.email_verification_sent_at = datetime.now()
+    user.email_verification_sent_at = datetime.now(timezone.utc)
     db.session.commit()
     verify_url = url_for('auth.verify_email_confirm', token=token, _external=True)
     from services.email_service import EmailService
@@ -499,9 +500,9 @@ def api_login():
     u = User.query.filter_by(email=login_id).first()
     if u and check_password_hash(u.password, data.get('password', '')):
         session.update({'user_id': u.id, 'username': u.username, 'role': u.role, 'email': u.email or '', 'real_name': u.real_name or '', 'managed_pages': u.managed_pages or ''})
-        u.last_login = datetime.now()
+        u.last_login = datetime.now(timezone.utc)
         db.session.commit()
-        return jsonify({'status': 'success', 'user': {'id': u.id, 'username': u.username, 'role': u.role, 'email': u.email, 'real_name': u.real_name, 'managed_pages': u.managed_pages, 'points': u.points, 'town': u.town, 'village': u.village}})
+        return jsonify({'status': 'success', 'user': {'id': u.id, 'username': u.username, 'role': u.role, 'email': u.email, 'real_name': u.real_name, 'managed_pages': u.managed_pages, 'points': u.points, 'town': u.town, 'village': u.village}, 'unread_count': Message.query.filter_by(receiver_id=u.id, is_read=False).count()})
     return jsonify({'status': 'error', 'msg': '로그인 정보가 올바르지 않습니다.'}), 401
 
 @auth_bp.route('/login/send-link', methods=['POST'])
@@ -542,7 +543,7 @@ def login_link_confirm(token):
     record = TempEmailVerify.query.filter_by(token=token, is_verified=False).first()
     if not record:
         return "<script>alert('만료되었거나 유효하지 않은 링크입니다.'); location.href='/login';</script>"
-    if record.created_at and datetime.now() - record.created_at > timedelta(minutes=15):
+    if record.created_at and datetime.now(timezone.utc) - record.created_at > timedelta(minutes=15):
         db.session.delete(record)
         db.session.commit()
         return "<script>alert('링크가 만료되었습니다. 다시 요청해 주세요.'); location.href='/login';</script>"
@@ -557,7 +558,7 @@ def login_link_confirm(token):
         'email': u.email or '', 'real_name': u.real_name or '',
         'managed_pages': u.managed_pages or '',
     })
-    u.last_login = datetime.now()
+    u.last_login = datetime.now(timezone.utc)
     db.session.delete(record)
     db.session.commit()
     return f"<script>location.href='{target}';</script>"
@@ -601,7 +602,7 @@ def api_register():
         session.pop('verify_email', None)
         return jsonify({'status': 'error', 'msg': '이미 등록된 이메일입니다.'}), 400
     hashed_pw = generate_password_hash(password)
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     new_user = User(username=username, password=hashed_pw, real_name=real_name, email=verified_email, email_verified=True, town=town, village=village, reg_town=town, reg_village=village, curr_town=town, curr_village=village, curr_address=home_address[:200] if home_address else None, office_address=office_address[:200] if office_address else None, is_neighbor=neighbor, location_updated_at=now, points=1000)
     profile_img = request.files.get('profile_img')
     if profile_img and profile_img.filename:
@@ -630,7 +631,7 @@ def api_logout():
     if uid:
         user = User.query.get(uid)
         if user:
-            user.last_logout = datetime.now()
+            user.last_logout = datetime.now(timezone.utc)
             db.session.commit()
     session.clear()
     return jsonify({'status': 'success'})

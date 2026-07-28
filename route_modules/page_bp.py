@@ -1,6 +1,6 @@
 import os
 from flask import Blueprint, render_template, request, redirect, url_for, jsonify, session, current_app, send_file
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 from models import db, User, Post, Message, NewsArticle, ShareReport, AiKnowledge, VillageAlert, AiKnowledge, VillageAlert
 page_bp = Blueprint('page', __name__)
 from route_modules.user_bp import _cleanup_expired_posts
@@ -128,7 +128,7 @@ def index():
 
 @page_bp.route('/all-proposals')
 def all_proposals():
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     user_id = session.get('user_id')
     _cleanup_expired_posts()
     
@@ -237,9 +237,6 @@ def reverse_geocode():
     town, village = gps_to_town_village(lat, lon)
     return jsonify({"status": "success", "town": town or '', "village": village or ''})
 
-
-    return jsonify({'status':'success','msg':'주소가 수정되었습니다.'})
-
 @page_bp.route('/api/page/intro')
 def api_intro():
     yp_news = NewsArticle.query.filter(NewsArticle.is_selected == True, NewsArticle.world_admin_approved == True, ~NewsArticle.category.in_(['세계뉴스', '해외뉴스'])).order_by(NewsArticle.updated_at.desc()).limit(5).all()
@@ -254,7 +251,7 @@ def api_intro():
 @page_bp.route('/api/page/all-proposals')
 def api_all_proposals():
     from datetime import timedelta
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     posts = Post.query.order_by(Post.created_at.desc()).all()
     result = []
     uid = session.get('user_id')
@@ -287,7 +284,7 @@ def api_all_proposals():
 @page_bp.route('/api/page/index-posts')
 def api_index_posts():
     from datetime import timedelta
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     posts = Post.query.filter(Post.total_score > -50, ((Post.created_at <= now - timedelta(hours=48)) | (Post.is_forced_approved == True))).order_by(Post.created_at.desc()).all()
     return jsonify([{
         'id': p.id, 'title': p.title, 'content': p.content[:150] if p.content else '',

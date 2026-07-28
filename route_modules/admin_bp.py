@@ -113,7 +113,7 @@ def api_admin_ai_knowledge():
     knowledge = AiKnowledge.query.order_by(AiKnowledge.created_at.desc()).all()
     return jsonify([{
         'id': k.id, 'question': k.question, 'answer': k.answer,
-        'category': k.category, 'created_at': k.created_at.isoformat() if k.created_at else None,
+        'created_at': k.created_at.isoformat() if k.created_at else None,
     } for k in knowledge])
 
 @admin_bp.route('/api/admin/news')
@@ -254,7 +254,7 @@ def admin_debate(post_id):
     except Exception as e:
         return jsonify({"status": "error", "msg": f"AI 응답 오류: {e}"}), 500
     logs = json.loads(post.ai_debate_log) if post.ai_debate_log else []
-    logs.append({"time": datetime.now().strftime('%H:%M'), "admin": admin_opinion, "ai": res.get('ai_reply', 'AI 분석 오류')})
+    logs.append({"time": datetime.now(timezone.utc).strftime('%H:%M'), "admin": admin_opinion, "ai": res.get('ai_reply', 'AI 분석 오류')})
     post.ai_debate_log = json.dumps(logs, ensure_ascii=False)
     post.ai_score = res.get('final_ai_score', post.ai_score)
     post.total_score = post.ai_score + post.admin_score + post.leader_score + post.member_score
@@ -461,10 +461,11 @@ def admin_ai_train():
 
 @admin_bp.route('/admin/ai-train/save', methods=['POST'])
 def admin_ai_train_save():
-    if session.get('role') != 'leader':
+    if session.get('role') not in ('admin', 'leader'):
         return jsonify({"error":"권한 부족"}), 403
-    q = request.form.get('question','').strip()
-    a = request.form.get('answer','').strip()
+    data = request.get_json() or request.form
+    q = data.get('question','').strip()
+    a = data.get('answer','').strip()
     if not q or not a:
         return jsonify({"error":"질문과 답변을 모두 입력하세요."})
     k = AiKnowledge(question=q, answer=a, created_by=session.get('user_id'))
@@ -472,12 +473,100 @@ def admin_ai_train_save():
     db.session.commit()
     return jsonify({"status":"success","msg":"저장되었습니다."})
 
+@admin_bp.route('/api/admin/ai-train/update/<int:kid>', methods=['POST'])
+def admin_ai_train_update(kid):
+    if session.get('role') not in ('admin', 'leader'):
+        return jsonify({"error":"권한 부족"}), 403
+    data = request.get_json() or request.form
+    q = data.get('question','').strip()
+    a = data.get('answer','').strip()
+    if not q or not a:
+        return jsonify({"error":"질문과 답변을 모두 입력하세요."})
+    k = AiKnowledge.query.get_or_404(kid)
+    k.question = q; k.answer = a
+    db.session.commit()
+    return jsonify({"status":"success","msg":"수정되었습니다."})
+
 @admin_bp.route('/admin/ai-train/delete/<int:kid>', methods=['POST'])
 def admin_ai_train_delete(kid):
-    if session.get('role') != 'leader':
+    if session.get('role') not in ('admin', 'leader'):
         return jsonify({"error":"권한 부족"}), 403
     k = AiKnowledge.query.get_or_404(kid)
     db.session.delete(k)
     db.session.commit()
     return jsonify({"status":"success","msg":"삭제되었습니다."})
+
+# ────────── 양평AI 전체공지 (AiBroadcast) ──────────
+
+@admin_bp.route('/api/admin/ai-broadcasts', methods=['GET'])
+def admin_ai_broadcasts_list():
+    uid = session.get('user_id')
+    if not uid or session.get('role') not in ('admin', 'leader'):
+        return jsonify({"error": "권한이 없습니다."}), 403
+    from models import AiBroadcast
+    bcs = AiBroadcast.query.order_by(AiBroadcast.created_at.desc()).all()
+    return jsonify([{
+        'id': b.id, 'title': b.title, 'content': b.content,
+        'author_name': b.author_name, 'status': b.status,
+        'is_active': b.is_active, 'created_at': b.created_at.isoformat() if b.created_at else '',
+    } for b in bcs])
+
+@admin_bp.route('/api/admin/ai-broadcasts', methods=['POST'])
+def admin_ai_broadcasts_create():
+    uid = session.get('user_id')
+    if not uid or session.get('role') not in ('admin', 'leader'):
+        return jsonify({"error": "권한이 없습니다."}), 403
+    from models import User, AiBroadcast
+    data = request.get_json() or {}
+    title = (data.get('title', '') or '').strip()
+    content = (data.get('content', '') or '').strip()
+    if not title or not content:
+        return jsonify({"error": "제목과 내용을 입력하세요."}), 400
+    user = User.query.get(uid)
+    b = AiBroadcast(title=title, content=content, author_id=uid, author_name=user.username if user else '관리자',
+                    status='draft', is_active=False)
+    db.session.add(b)
+    db.session.commit()
+    return jsonify({"success": True, "id": b.id})
+
+@admin_bp.route('/api/admin/ai-broadcasts/<int:b_id>/status', methods=['PUT'])
+def admin_ai_broadcasts_status(b_id):
+    """상태 변경: draft → pending(승인요청) / pending → approved(최종승인, leader전용) / approved → published(발행) / any → rejected(반려)"""
+    uid = session.get('user_id')
+    if not uid or session.get('role') not in ('admin', 'leader'):
+        return jsonify({"error": "권한이 없습니다."}), 403
+    from models import AiBroadcast
+    from datetime import datetime, timezone
+    b = AiBroadcast.query.get_or_404(b_id)
+    data = request.get_json() or {}
+    new_status = data.get('status', '')
+    valid = {'draft', 'pending', 'approved', 'published', 'rejected'}
+    if new_status not in valid:
+        return jsonify({"error": "올바르지 않은 상태입니다."}), 400
+    # 최종승인은 leader만 가능
+    if new_status == 'approved' and session.get('role') != 'leader':
+        return jsonify({"error": "최종승인은 리더만 가능합니다."}), 403
+    b.status = new_status
+    if new_status == 'approved':
+        b.is_active = False
+        b.approver_id = uid
+        b.approved_at = datetime.now(timezone.utc)
+    elif new_status == 'published':
+        b.is_active = True
+    elif new_status in ('draft', 'rejected'):
+        b.is_active = False
+    b.updated_at = datetime.now(timezone.utc)
+    db.session.commit()
+    return jsonify({"success": True, "id": b.id, "status": b.status})
+
+@admin_bp.route('/api/admin/ai-broadcasts/<int:b_id>', methods=['DELETE'])
+def admin_ai_broadcasts_delete(b_id):
+    uid = session.get('user_id')
+    if not uid or session.get('role') not in ('admin', 'leader'):
+        return jsonify({"error": "권한이 없습니다."}), 403
+    from models import AiBroadcast
+    b = AiBroadcast.query.get_or_404(b_id)
+    db.session.delete(b)
+    db.session.commit()
+    return jsonify({"success": True})
 

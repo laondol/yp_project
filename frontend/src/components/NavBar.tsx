@@ -1,4 +1,28 @@
+import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
+
+let _notifBeepCtx: AudioContext | null = null
+function notifBeep(freq: number, pattern: number[]) {
+  if (localStorage.getItem('yp_sound_enabled') === 'false') return
+  try {
+    const Ctx = (window as any).AudioContext || (window as any).webkitAudioContext
+    if (!Ctx) return
+    if (!_notifBeepCtx) _notifBeepCtx = new Ctx()
+    _notifBeepCtx!.resume()
+    const ac = _notifBeepCtx
+    pattern.forEach((dur, i) => {
+      const o = ac!.createOscillator()
+      const g = ac!.createGain()
+      o.connect(g); g.connect(ac!.destination)
+      o.type = 'sine'; o.frequency.value = freq
+      const t = ac!.currentTime + pattern.slice(0, i).reduce((a, b) => a + b, 0)
+      g.gain.setValueAtTime(0.0001, t)
+      g.gain.exponentialRampToValueAtTime(0.3, t + 0.01)
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur - 0.01)
+      o.start(t); o.stop(t + dur)
+    })
+  } catch (e) { /* ignore */ }
+}
 
 export default function NavBar() {
   const { user, loading } = useAuth()
@@ -6,6 +30,66 @@ export default function NavBar() {
   const siteName = host === 'localhost' || host === '127.0.0.1' ? '함께사는로컬'
     : host === 'test.unocum.kr' ? '함께사는테스트' : '함께사는양평'
 
+  const [notif, setNotif] = useState({ memos: 0, notices: 0, friend_requests: 0, ai_broadcasts: 0 })
+  const prevRef = useRef({ memos: 0, notices: 0, friend_requests: 0, ai_broadcasts: 0 })
+  const [toasts, setToasts] = useState<{ id: number; type: string; msg: string }[]>([])
+  const toastIdRef = useRef(0)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const searchRef = useRef<HTMLInputElement>(null)
+  const [showMemoModal, setShowMemoModal] = useState(false)
+  const [memoList, setMemoList] = useState<{id:number;content:string;author:string;done:boolean;created_at:string}[]>([])
+
+  useEffect(() => {
+    if (!user?.id) return
+    const poll = () => {
+      fetch('/api/user/notification-summary', { credentials: 'include' })
+        .then(r => r.json())
+        .then(d => {
+          const prev = prevRef.current
+          if (d.notices > prev.notices) {
+            const n = d.notices - prev.notices
+            notifBeep(660, [0.3])
+            showToast('📢', `${n}개의 새 공지사항`)
+          }
+          if (d.memos > prev.memos) {
+            const n = d.memos - prev.memos
+            notifBeep(880, [0.15, 0.1, 0.15])
+            showToast('📝', `${n}개의 새 메모`)
+          }
+          if (d.friend_requests > prev.friend_requests) {
+            const n = d.friend_requests - prev.friend_requests
+            notifBeep(1047, [0.1, 0.08, 0.1, 0.08, 0.1])
+            showToast('👥', `${n}개의 새 벗 신청`)
+          }
+          if (d.ai_broadcasts > prev.ai_broadcasts) {
+            const n = d.ai_broadcasts - prev.ai_broadcasts
+            notifBeep(523, [0.2, 0.15, 0.2, 0.15, 0.2])
+            showToast('🤖', `${n}개의 새 AI 이야기`)
+          }
+          prevRef.current = d
+          setNotif(d)
+        })
+        .catch(() => {})
+    }
+    poll()
+    const iv = setInterval(poll, 15000)
+    return () => clearInterval(iv)
+  }, [user?.id])
+
+  function showToast(icon: string, msg: string) {
+    const id = ++toastIdRef.current
+    setToasts(prev => [...prev, { id, type: icon, msg }])
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 4000)
+  }
+
+  function doSearch(e: React.FormEvent) {
+    e.preventDefault()
+    const inp = searchRef.current
+    if (inp?.value) window.location.href = '/search?q=' + encodeURIComponent(inp.value)
+  }
+
+  const [myVillage, setMyVillage] = useState<{exists:boolean;title?:string;myeon?:string;ri?:string}>({exists:false})
+  const [managedPageExists, setManagedPageExists] = useState(false)
   const hasVillage = user?.managed_pages?.some(p => p.startsWith('vi_') || p === 'village') || user?.role === 'leader'
   const villageParts = (() => {
     for (const p of (user?.managed_pages || [])) {
@@ -16,10 +100,24 @@ export default function NavBar() {
     }
     return { myeon: '', ri: '', tooltip: '마을' }
   })()
+  useEffect(() => {
+    if (!user?.id) return
+    fetch('/api/village/my-page', { credentials: 'include' }).then(r => r.json()).then(d => setMyVillage(d)).catch(() => {})
+    if (villageParts.myeon && villageParts.ri) {
+      fetch(`/api/village/page?myeon=${villageParts.myeon}&ri=${villageParts.ri}`, { credentials: 'include' })
+        .then(r => r.json()).then(d => setManagedPageExists(!!d.id)).catch(() => {})
+    }
+  }, [user?.id])
+
+  const totalMemos = notif.memos
+  const totalNotices = notif.notices
+  const totalFriendReqs = notif.friend_requests
+  const totalAiBroadcasts = notif.ai_broadcasts
 
   return (
     <nav className="navbar navbar-expand-lg sticky-top mb-1">
       <div className="container">
+        {/* Left: logo + quick menu */}
         <div className="d-flex align-items-center flex-shrink-0">
           <a className="navbar-brand d-flex align-items-center me-1" href="/intro">
             <img src="/static/images/logo.png" alt="양평" height="36" title={siteName} />
@@ -31,14 +129,14 @@ export default function NavBar() {
             <a href="/share-report" className="btn btn-sm btn-outline-success px-2 py-0 ms-1" style={{ fontSize: '0.9rem' }}>📸</a>
             {user?.id && hasVillage && (
               <div className="d-inline-flex align-items-center ms-1 position-relative">
-                <a href="/village" className="text-decoration-none" title={villageParts.tooltip} style={{ fontSize: '1.2rem' }}
+                <a href="/village" className="text-decoration-none" title="마을" style={{ fontSize: '1.2rem' }}
                   onClick={e => { e.preventDefault(); document.getElementById('villageMenu')?.classList.toggle('d-none') }}>🏘️</a>
                 <div className="position-absolute bg-white border rounded shadow-sm p-2 d-none" id="villageMenu"
-                  style={{ zIndex: 1050, minWidth: 130, top: '100%', left: 0 }}>
+                  style={{ zIndex: 1050, minWidth: 140, top: '100%', left: 0 }}>
                   <a className="d-block small py-1 px-2 text-dark text-decoration-none rounded" href="/village">📝 봉사</a>
-                  {villageParts.ri && (
+                  {managedPageExists && villageParts.ri && (
                     <a className="d-block small py-1 px-2 text-dark text-decoration-none rounded"
-                      href={`/village/view/${villageParts.myeon}/${villageParts.ri}`}>📖 홍보</a>
+                      href={`/village/view/${villageParts.myeon}/${villageParts.ri}`}>📖 마을 홍보</a>
                   )}
                 </div>
               </div>
@@ -53,13 +151,24 @@ export default function NavBar() {
           </div>
         </div>
 
-        <div className="d-none d-lg-flex mx-auto flex-shrink-0">
-          <form className="d-flex" action="/search" method="GET" role="search">
-            <input className="form-control form-control-sm" type="search" name="q" placeholder="검색"
-              style={{ width: 130, borderRadius: 20 }} />
+        {/* Center: search */}
+        <div className="d-flex align-items-center mx-1">
+          <form className="d-flex align-items-center" onSubmit={doSearch} role="search">
+            {searchOpen ? (
+              <>
+                <input ref={searchRef} className="form-control form-control-sm" type="search" name="q" placeholder="검색"
+                  autoFocus style={{ width: 130, borderRadius: 20 }}
+                  onBlur={e => { if (!e.currentTarget.value) setSearchOpen(false) }} />
+                <button type="submit" className="btn btn-sm btn-outline-secondary ms-1 py-0 px-1">🔍</button>
+              </>
+            ) : (
+              <button type="button" className="btn btn-sm btn-outline-secondary py-0 px-1" style={{ fontSize: '1rem' }}
+                onClick={() => { setSearchOpen(true); setTimeout(() => searchRef.current?.focus(), 50) }}>🔍</button>
+            )}
           </form>
         </div>
 
+        {/* Navigation menus */}
         <div className="collapse navbar-collapse" id="navbarNav" style={{ background: 'white', zIndex: 1020 }}>
           <ul className="navbar-nav mx-auto align-items-center">
             <li className="nav-item dropdown mx-1">
@@ -126,25 +235,63 @@ export default function NavBar() {
           </ul>
         </div>
 
-        <div className="d-lg-none mx-auto" style={{ position: 'relative' }}>
-          <form className="d-flex" action="/search" method="GET"
-            onSubmit={e => { const inp = document.getElementById('mobileSearchInput') as HTMLInputElement; if (!inp.value) e.preventDefault() }}>
-            <input id="mobileSearchInput" className="form-control form-control-sm" type="search" name="q" placeholder="🔍"
-              style={{ width: 36, borderRadius: 20, cursor: 'pointer', transition: 'width 0.3s ease' }}
-              onFocus={e => { e.currentTarget.style.width = '180px'; e.currentTarget.placeholder = '검색어 입력' }}
-              onBlur={e => { if (!e.currentTarget.value) { e.currentTarget.style.width = '44px'; e.currentTarget.placeholder = '🔍' } }} />
-          </form>
-        </div>
-
-        <div className="d-flex align-items-center flex-shrink-0 position-relative">
-          <a href="/ai/chat" className="btn btn-sm btn-outline-success px-2 py-0"
-            style={{ fontSize: '1.1rem', borderRadius: '50%', width: 34, height: 34, lineHeight: '1' }} title="양평AI">🤖</a>
+        {/* Right: AI + Notification hub + Profile */}
+        <div className="d-flex align-items-center flex-shrink-0">
+          <a href="/ai/chat" className="btn btn-sm btn-outline-success px-2 py-0 position-relative"
+            style={{ fontSize: '1.1rem', borderRadius: '50%', width: 34, height: 34, lineHeight: '1' }} title="양평AI">
+            🤖
+            {totalAiBroadcasts > 0 && (
+              <span className="position-absolute top-0 start-100 translate-middle badge rounded-pill"
+                style={{ fontSize: '0.5rem', background: '#20c997', minWidth: 14, padding: '1px 4px', lineHeight: '1.2' }}>
+                {totalAiBroadcasts}
+              </span>
+            )}
+          </a>
           {!loading && user?.id ? (
-            <>
-              <a href="/friends" className="text-decoration-none ms-2 d-none d-lg-inline" title="벗">👥</a>
-              <a href="/message/inbox" className="text-decoration-none ms-2 d-none d-lg-inline" title="쪽지">💬</a>
-              <a href={`/user/${user.id}`} className="text-decoration-none ms-2" title="회원정보">👤</a>
-            </>
+            <div className="d-flex align-items-center ms-1 gap-1">
+              {/* Friend requests */}
+              <a href="/friends" className="text-decoration-none position-relative" title="벗 신청">
+                <span style={{ fontSize: '1.1rem' }}>👥</span>
+                {totalFriendReqs > 0 && (
+                  <span className="position-absolute top-0 start-100 translate-middle badge rounded-pill"
+                    style={{ fontSize: '0.5rem', background: '#dc3545', minWidth: 14, padding: '1px 4px', lineHeight: '1.2' }}>
+                    {totalFriendReqs}
+                  </span>
+                )}
+              </a>
+              {/* 메모 */}
+              <button className="btn btn-sm p-0 border-0 bg-transparent position-relative ms-1" title="메모"
+                onClick={() => {
+                  fetch('/api/bot/memos', { credentials: 'include' }).then(r => r.json()).then(d => {
+                    setMemoList(d.memos || []); setShowMemoModal(true)
+                  }).catch(() => {})
+                }}>
+                <span style={{ fontSize: '1.1rem' }}>📝</span>
+                {totalMemos > 0 && (
+                  <span className="position-absolute top-0 start-100 translate-middle badge rounded-pill"
+                    style={{ fontSize: '0.5rem', background: '#ffc107', color: '#000', minWidth: 14, padding: '1px 4px', lineHeight: '1.2' }}>
+                    {totalMemos}
+                  </span>
+                )}
+              </button>
+              {/* 편지 */}
+              <a href="/message/inbox" className="text-decoration-none position-relative ms-1" title="편지">
+                <span style={{ fontSize: '1.1rem' }}>✉️</span>
+                {totalNotices > 0 && (
+                  <span className="position-absolute top-0 start-100 translate-middle badge rounded-pill"
+                    style={{ fontSize: '0.5rem', background: '#0d6efd', minWidth: 14, padding: '1px 4px', lineHeight: '1.2' }}>
+                    {totalNotices}
+                  </span>
+                )}
+              </a>
+              {/* 일반회원: 공개된 마을 홍보페이지 링크 */}
+              {!hasVillage && myVillage.exists && (
+                <a href={`/village/view/${myVillage.myeon}/${myVillage.ri}`} className="text-decoration-none ms-1" title={myVillage.title}>
+                  <span style={{ fontSize: '1.1rem' }}>📖</span>
+                </a>
+              )}
+              <a href={`/user/${user.id}`} className="text-decoration-none ms-1" title="회원정보">👤</a>
+            </div>
           ) : (
             <a href="/login" className="text-decoration-none text-muted ms-2" title="회원정보">👤</a>
           )}
@@ -153,6 +300,45 @@ export default function NavBar() {
             <span className="navbar-toggler-icon"></span>
           </button>
         </div>
+
+        {/* Memo modal */}
+        {showMemoModal && (
+          <div className="position-fixed top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center"
+            style={{ background: 'rgba(0,0,0,0.4)', zIndex: 9999 }} onClick={() => setShowMemoModal(false)}>
+            <div className="bg-white rounded shadow p-3" style={{ maxWidth: 400, width: '90%', maxHeight: '70vh', overflow: 'auto' }}
+              onClick={e => e.stopPropagation()}>
+              <div className="d-flex justify-content-between align-items-center mb-2">
+                <h6 className="fw-bold mb-0">📝 메모</h6>
+                <button className="btn btn-sm btn-outline-secondary py-0 px-1" onClick={() => setShowMemoModal(false)}>✕</button>
+              </div>
+              {memoList.length === 0 ? (
+                <div className="text-muted small text-center py-3">메모가 없습니다</div>
+              ) : (
+                memoList.slice(0, 20).map(m => (
+                  <div key={m.id} className={`small border-bottom py-2 ${m.done ? 'text-decoration-line-through text-muted' : ''}`}>
+                    <div>{m.content}</div>
+                    <div className="text-muted" style={{ fontSize: '0.65rem' }}>
+                      {m.author === 'bot' ? '🤖' : '👤'} {m.created_at?.slice(0, 10)}
+                    </div>
+                  </div>
+                ))
+              )}
+              <a href="/user/my" className="d-block text-center small mt-2">📋 모든 메모 보기 →</a>
+            </div>
+          </div>
+        )}
+
+        {/* Toast notifications */}
+        {toasts.length > 0 && (
+          <div style={{ position: 'fixed', bottom: 16, right: 16, zIndex: 9999 }}>
+            {toasts.map(t => (
+              <div key={t.id} className="shadow rounded px-3 py-2 mb-2"
+                style={{ background: '#333', color: '#fff', fontSize: '0.85rem', minWidth: 200, transition: 'opacity 0.3s' }}>
+                {t.type} {t.msg}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </nav>
   )

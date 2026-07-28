@@ -4,7 +4,6 @@ load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'))
 from flask import Flask
 from config import Config
 from models import db, User
-from routes import register_routes
 from tongbot_routes import tongbot_bp
 from route_modules.construction_bp import construction_bp
 from route_modules.share_bp import share_bp
@@ -21,7 +20,6 @@ from route_modules.message_bp import message_bp
 from route_modules.service_bp import service_bp
 from route_modules.auth_bp import auth_bp
 from route_modules.page_bp import page_bp
-from route_modules.legal_bp import legal_bp
 from route_modules.psycho_bp import psycho_bp
 from route_modules.epub_bp import epub_bp
 from route_modules.guide_bp import guide_bp
@@ -62,7 +60,6 @@ def create_app():
     app.jinja_env.globals['nip'] = lambda: '닢'
 
     # 웹 경로 등록
-    register_routes(app)
     app.register_blueprint(tongbot_bp)
     app.register_blueprint(construction_bp)
     app.register_blueprint(share_bp)
@@ -173,8 +170,8 @@ def create_app():
     try:
         with app.app_context():
             from models import Post
-            from datetime import datetime, timedelta
-            expired = Post.query.filter(Post.total_score <= -50, Post.deadline != None, Post.deadline < datetime.now()).all()
+            from datetime import datetime, timezone, timedelta
+            expired = Post.query.filter(Post.total_score <= -50, Post.deadline != None, Post.deadline < datetime.now(timezone.utc)).all()
             for p in expired:
                 db.session.delete(p)
             if expired:
@@ -188,7 +185,7 @@ def create_app():
         with app.app_context():
             from models import LegalPost, PsychoPost
             from sqlalchemy import or_
-            cutoff = datetime.now() - timedelta(days=1)
+            cutoff = datetime.now(timezone.utc) - timedelta(days=1)
             flagged_legal = LegalPost.query.filter(
                 LegalPost.status == 'flagged',
                 LegalPost.created_at < cutoff,
@@ -276,20 +273,95 @@ def create_app():
     except Exception as e:
         print(f'[SKIP] message_reminder_log migration: {e}')
 
-    # share_report.promotion_allowed 컬럼 마이그레이션
+    # share_report.promotion_allowed / store_suggestion_id / sub_category 컬럼 마이그레이션
     try:
         with app.app_context():
             from sqlalchemy import inspect as _insp_pa
             insp_pa = _insp_pa(db.engine)
             if 'share_report' in insp_pa.get_table_names():
                 sr_cols = [c['name'] for c in insp_pa.get_columns('share_report')]
-                if 'promotion_allowed' not in sr_cols:
-                    with db.engine.connect() as conn:
+                with db.engine.connect() as conn:
+                    if 'promotion_allowed' not in sr_cols:
                         conn.execute(db.text('ALTER TABLE share_report ADD COLUMN promotion_allowed BOOLEAN DEFAULT FALSE'))
                         conn.commit()
                         print('[OK] share_report.promotion_allowed column added')
+                    if 'store_suggestion_id' not in sr_cols:
+                        conn.execute(db.text('ALTER TABLE share_report ADD COLUMN store_suggestion_id INTEGER REFERENCES store_suggestion(id)'))
+                        conn.commit()
+                        print('[OK] share_report.store_suggestion_id column added')
+                    if 'sub_category' not in sr_cols:
+                        conn.execute(db.text("ALTER TABLE share_report ADD COLUMN sub_category VARCHAR(50) DEFAULT ''"))
+                        conn.commit()
+                        print('[OK] share_report.sub_category column added')
     except Exception as e:
-        print(f'[SKIP] share_report.promotion_allowed migration: {e}')
+        print(f'[SKIP] share_report migration: {e}')
+
+    # message 테이블 누락 컬럼 마이그레이션
+    try:
+        with app.app_context():
+            from sqlalchemy import inspect as _insp_msg
+            insp_msg = _insp_msg(db.engine)
+            if 'message' in insp_msg.get_table_names():
+                msg_cols = [c['name'] for c in insp_msg.get_columns('message')]
+                with db.engine.connect() as conn:
+                    _msg_migrations = [
+                        ('is_public', 'BOOLEAN DEFAULT FALSE'),
+                        ('letter_type', "VARCHAR(20) DEFAULT 'private'"),
+                        ('moderation_status', "VARCHAR(20) DEFAULT 'approved'"),
+                        ('original_receiver_type', 'VARCHAR(20)'),
+                        ('rejection_reason', 'TEXT'),
+                        ('town', 'VARCHAR(50)'),
+                        ('village', 'VARCHAR(50)'),
+                    ]
+                    for col_name, col_type in _msg_migrations:
+                        if col_name not in msg_cols:
+                            conn.execute(db.text(f'ALTER TABLE message ADD COLUMN {col_name} {col_type}'))
+                            conn.commit()
+                            print(f'[OK] message.{col_name} column added')
+    except Exception as e:
+        print(f'[SKIP] message migration: {e}')
+
+    # tong_bot 누락 컬럼 마이그레이션 (is_active, recalled_at, recall_reason)
+    try:
+        with app.app_context():
+            from sqlalchemy import inspect as _insp_tb
+            insp_tb = _insp_tb(db.engine)
+            if 'tong_bot' in insp_tb.get_table_names():
+                tb_cols = [c['name'] for c in insp_tb.get_columns('tong_bot')]
+                with db.engine.connect() as conn:
+                    if 'is_active' not in tb_cols:
+                        conn.execute(db.text('ALTER TABLE tong_bot ADD COLUMN is_active BOOLEAN DEFAULT TRUE'))
+                        conn.commit()
+                        print('[OK] tong_bot.is_active column added')
+                    if 'recalled_at' not in tb_cols:
+                        conn.execute(db.text('ALTER TABLE tong_bot ADD COLUMN recalled_at TIMESTAMP'))
+                        conn.commit()
+                        print('[OK] tong_bot.recalled_at column added')
+                    if 'recall_reason' not in tb_cols:
+                        conn.execute(db.text("ALTER TABLE tong_bot ADD COLUMN recall_reason VARCHAR(200) DEFAULT ''"))
+                        conn.commit()
+                        print('[OK] tong_bot.recall_reason column added')
+    except Exception as e:
+        print(f'[SKIP] tong_bot migration: {e}')
+
+    # temp_email_verify.id auto-increment 시퀀스 마이그레이션
+    try:
+        with app.app_context():
+            from sqlalchemy import inspect as _insp_tev, text as _t
+            _i = _insp_tev(db.engine)
+            if 'temp_email_verify' in _i.get_table_names():
+                cols = [c['name'] for c in _i.get_columns('temp_email_verify')]
+                if 'id' in cols:
+                    with db.engine.connect() as conn:
+                        r = conn.execute(_t("SELECT pg_get_serial_sequence('temp_email_verify','id')")).scalar()
+                        if not r:
+                            conn.execute(_t("CREATE SEQUENCE IF NOT EXISTS temp_email_verify_id_seq OWNED BY temp_email_verify.id"))
+                            conn.execute(_t("SELECT setval('temp_email_verify_id_seq', COALESCE((SELECT MAX(id) FROM temp_email_verify), 0) + 1, false)"))
+                            conn.execute(_t("ALTER TABLE temp_email_verify ALTER COLUMN id SET DEFAULT nextval('temp_email_verify_id_seq')"))
+                            conn.commit()
+                            print('[OK] temp_email_verify.id sequence created')
+    except Exception as e:
+        print(f'[SKIP] temp_email_verify sequence migration: {e}')
 
     # 모든 테이블 id auto-increment 시퀀스 복구 (pgloader 마이그레이션 갭)
     try:
@@ -368,7 +440,7 @@ def create_app():
                 db.session.add(u)
             db.session.commit()
             for u in demo_users:
-                u.last_payout = datetime.now()
+                u.last_payout = datetime.now(timezone.utc)
             db.session.commit()
             print("[OK] Demo accounts created (pw: pw1234)")
         try:

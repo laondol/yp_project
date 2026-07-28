@@ -42,12 +42,13 @@ export default function AdminPageManagers() {
     fd.append('user_id', String(userId))
     fd.append('page', page)
     fd.append('action', 'toggle')
-    const res = await fetch('/admin/page-managers', { method: 'POST', body: fd })
+    const res = await fetch('/admin/page-managers', { method: 'POST', body: fd, credentials: 'include' })
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: '요청 실패' }))
       alert(err.error || '요청 실패')
+    } else {
+      load()
     }
-    load()
   }
 
   if (loading) return <div className="px-0 px-md-2"><Loading /></div>

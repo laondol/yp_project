@@ -53,7 +53,7 @@ def payment_prepare():
     nip = data.get('nip', 0)
     if nip < 1000:
         return jsonify({"error": "최소 1,000닢부터 충전 가능합니다."})
-    payment_id = f"nip_{session['user_id']}_{int(datetime.now().timestamp())}"
+    payment_id = f"nip_{session['user_id']}_{int(datetime.now(timezone.utc).timestamp())}"
     return jsonify({"payment_id": payment_id, "nip": nip})
 
 @mypage_bp.route('/api/payment/verify', methods=['POST'])

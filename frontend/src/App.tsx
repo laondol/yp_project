@@ -1,6 +1,8 @@
+import { useState } from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { AuthProvider } from './contexts/AuthContext'
 import NavBar from './components/NavBar'
+import ProtectedRoute from './components/ProtectedRoute'
 import ShareList from './pages/ShareList'
 import ShareDetail from './pages/ShareDetail'
 import ShareReport from './pages/ShareReport'
@@ -37,8 +39,8 @@ import AdminShareReports from './pages/AdminShareReports'
 import AdminStores from './pages/AdminStores'
 import AdminAlerts from './pages/AdminAlerts'
 import AdminAiChat from './pages/AdminAiChat'
-import AdminAiFeedback from './pages/AdminAiFeedback'
 import AdminAiTrain from './pages/AdminAiTrain'
+import AdminAiBroadcasts from './pages/AdminAiBroadcasts'
 import AdminPendingLetters from './pages/AdminPendingLetters'
 import AdminPageManagers from './pages/AdminPageManagers'
 import AdminMessage from './pages/AdminMessage'
@@ -65,6 +67,7 @@ import ServiceRampPage from './pages/ServiceRampPage'
 import StoreDetailPage from './pages/StoreDetailPage'
 import AiChatPage from './pages/AiChatPage'
 import ChatPage from './pages/ChatPage'
+import TongBotChatPage from './pages/TongBotChatPage'
 import ViewPage from './pages/ViewPage'
 import SearchPage from './pages/SearchPage'
 import LegalIssuesPage from './pages/LegalIssuesPage'
@@ -82,6 +85,8 @@ import EditProfilePage from './pages/EditProfilePage'
 import SchedulePopupPage from './pages/SchedulePopupPage'
 import VillageAdminPage from './pages/VillageAdminPage'
 import VillageQrPage from './pages/VillageQrPage'
+import VillageQrDisplay from './pages/VillageQrDisplay'
+import VillageQrApprovals from './pages/VillageQrApprovals'
 import VillageEventCreatePage from './pages/VillageEventCreatePage'
 import VillageEventQrPage from './pages/VillageEventQrPage'
 import VillageJinConsentPage from './pages/VillageJinConsentPage'
@@ -111,91 +116,28 @@ function Footer() {
   )
 }
 
+function usePopup() {
+  const [params] = useState(() => new URLSearchParams(window.location.search))
+  return params.get('popup') === '1'
+}
+
 export default function App() {
+  const isPopup = usePopup()
   return (
     <AuthProvider>
       <BrowserRouter>
-        <NavBar />
-        <div className="container pb-5">
+        {!isPopup && <NavBar />}
+        <div className={isPopup ? '' : 'container pb-5'}>
           <Routes>
-            {/* Share (공유마당) */}
-            <Route path="/share" element={<ShareList />} />
-            <Route path="/share/detail/:id" element={<ShareDetail />} />
-            <Route path="/share/report" element={<ShareReport />} />
-            <Route path="/share/edit/:id" element={<ShareEdit />} />
-
-            {/* Epub */}
-            <Route path="/epub" element={<EpubList />} />
-            <Route path="/epub/list" element={<EpubList />} />
-            <Route path="/epub/new" element={<EpubList />} />
-            <Route path="/epub/edit/:id" element={<EpubEditor />} />
-
-            {/* Guide */}
-            <Route path="/guide" element={<GuideList />} />
-            <Route path="/guide/templates" element={<GuideTemplates />} />
-
-            {/* User */}
-            <Route path="/user/my" element={<UserMyPage />} />
-            <Route path="/user/edit-profile" element={<EditProfilePage />} />
-            <Route path="/user/:userId" element={<UserProfilePage />} />
-            <Route path="/user/:userId/profile" element={<UserMyPage />} />
-
-            {/* News (소식) */}
-            <Route path="/news" element={<NewsList />} />
-            <Route path="/news/:id" element={<NewsDetail />} />
-            <Route path="/world-news" element={<NewsTabsPage />} />
-            <Route path="/yp-news" element={<NewsTabsPage />} />
-            <Route path="/kr-yp-news" element={<NewsTabsPage />} />
-
-            {/* Legal (법률상담) */}
-            <Route path="/legal" element={<LegalList />} />
-            <Route path="/legal/:id" element={<LegalDetail />} />
-            <Route path="/legal/write" element={<LegalWrite />} />
-            <Route path="/legal/schedule" element={<LegalSchedule />} />
-            {/* Psycho (심리상담) */}
-            <Route path="/psycho" element={<PsychoList />} />
-            <Route path="/psycho/:id" element={<PsychoDetail />} />
-            <Route path="/psycho/write" element={<PsychoWrite />} />
-            <Route path="/psycho/schedule" element={<PsychoSchedule />} />
-            {/* Intro / Landing */}
+            {/* Public: intro / auth / share (공유마당) */}
             <Route path="/" element={<IntroPage />} />
             <Route path="/intro" element={<IntroPage />} />
-
-            {/* Auth */}
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
             <Route path="/reset-password" element={<ResetPasswordPage />} />
             <Route path="/reset-password/:token" element={<ResetConfirmPage />} />
-
-            {/* Info pages */}
-            <Route path="/presentation" element={<PresentationPage />} />
-            <Route path="/proposal" element={<ProposalPage />} />
-            <Route path="/all-proposals" element={<AllProposalsPage />} />
             <Route path="/terms" element={<TermsPage />} />
             <Route path="/charter" element={<CharterPage />} />
-            <Route path="/main" element={<MainPage />} />
-            <Route path="/go" element={<GoPage />} />
-
-            {/* Service pages */}
-            <Route path="/service/legal" element={<ServiceLegalPage />} />
-            <Route path="/service/legal/edit" element={<ServiceLegalEditPage />} />
-            <Route path="/service/psycho" element={<ServicePsychoPage />} />
-            <Route path="/service/psycho/edit" element={<ServicePsychoEditPage />} />
-            <Route path="/service/ramp" element={<ServiceRampPage />} />
-
-            {/* AI Chat */}
-            <Route path="/ai/chat" element={<AiChatPage />} />
-
-            {/* Chat */}
-            <Route path="/chat" element={<ChatPage />} />
-
-            {/* Board (freeboard) */}
-            <Route path="/post/:postId" element={<ViewPage />} />
-
-            {/* Search */}
-            <Route path="/search" element={<SearchPage />} />
-
-            {/* Share (공유마당) */}
             <Route path="/share" element={<ShareList />} />
             <Route path="/share/detail/:id" element={<ShareDetail />} />
             <Route path="/share/report" element={<ShareReport />} />
@@ -203,120 +145,113 @@ export default function App() {
             <Route path="/share/map" element={<ShareMapPage />} />
             <Route path="/leader/share-reports" element={<LeaderShareReportsPage />} />
 
-            {/* Epub */}
-            <Route path="/epub" element={<EpubList />} />
-            <Route path="/epub/list" element={<EpubList />} />
-            <Route path="/epub/new" element={<EpubList />} />
-            <Route path="/epub/edit/:id" element={<EpubEditor />} />
-
-            {/* Guide */}
-            <Route path="/guide" element={<GuideList />} />
-            <Route path="/guide/templates" element={<GuideTemplates />} />
-
-            {/* User */}
-            <Route path="/user/my" element={<UserMyPage />} />
-            <Route path="/user/edit-profile" element={<EditProfilePage />} />
-            <Route path="/user/:userId" element={<UserProfilePage />} />
-            <Route path="/user/:userId/profile" element={<UserMyPage />} />
-
-            {/* News (소식) */}
-            <Route path="/news" element={<NewsList />} />
-            <Route path="/news/:id" element={<NewsDetail />} />
-            <Route path="/world-news" element={<NewsTabsPage />} />
-            <Route path="/yp-news" element={<NewsTabsPage />} />
-            <Route path="/kr-yp-news" element={<NewsTabsPage />} />
-
-            {/* Legal (법률상담) - issues routes before :id to avoid conflict */}
-            <Route path="/legal/issues/admin" element={<LegalIssuesAdminPage />} />
-            <Route path="/legal/issues/write" element={<LegalIssueWritePage />} />
-            <Route path="/legal/issues/:postId" element={<LegalIssueDetailPage />} />
-            <Route path="/legal/issues" element={<LegalIssuesPage />} />
-            <Route path="/legal" element={<LegalList />} />
-            <Route path="/legal/:id" element={<LegalDetail />} />
-            <Route path="/legal/write" element={<LegalWrite />} />
-            <Route path="/legal/schedule" element={<LegalSchedule />} />
-
-            {/* Psycho (심리상담) */}
-            <Route path="/psycho/admin/appointments" element={<PsychoAdminAppointmentsPage />} />
-            <Route path="/psycho/admin" element={<PsychoAdminPage />} />
-            <Route path="/psycho" element={<PsychoList />} />
-            <Route path="/psycho/:id" element={<PsychoDetail />} />
-            <Route path="/psycho/:id/edit" element={<PsychoPostEdit />} />
-            <Route path="/psycho/write" element={<PsychoWrite />} />
-            <Route path="/psycho/schedule" element={<PsychoSchedule />} />
-
-            {/* Village (마을) - specific routes before parameterized */}
-            <Route path="/village/admin" element={<VillageAdminPage />} />
-            <Route path="/village/qr" element={<VillageQrPage />} />
-            <Route path="/village/event/create" element={<VillageEventCreatePage />} />
-            <Route path="/village/event/:eventId/qr" element={<VillageEventQrPage />} />
-            <Route path="/village/invite/:target" element={<VillageJinConsentPage />} />
-            <Route path="/village/join" element={<VillageJoinPage />} />
-            <Route path="/village" element={<VillagePage />} />
-            <Route path="/village/page" element={<VillagePageEdit />} />
-            <Route path="/village/view/:tmyeon/:tri" element={<VillagePageView />} />
-            <Route path="/village/events" element={<VillageEventList />} />
-            <Route path="/village/events/:id" element={<VillageEventDetail />} />
-            <Route path="/village/my-wishes" element={<VillageMyWishes />} />
-
-            {/* Friends (벗) */}
-            <Route path="/friends" element={<FriendsList />} />
-            <Route path="/friends/map" element={<FriendsMap />} />
-
-            {/* Messages (쪽지) */}
-            <Route path="/messages" element={<MessageInbox />} />
-            <Route path="/message/inbox" element={<MessageInbox />} />
-            <Route path="/message/send" element={<MessageSend />} />
-            <Route path="/message/send/global" element={<MessageSend />} />
-            <Route path="/message/send/admin" element={<MessageSend />} />
-            <Route path="/message/send/village_leader" element={<MessageSend />} />
-            <Route path="/message/admin/pending" element={<AdminPendingLetters />} />
-
-            {/* MyPage / Points */}
-            <Route path="/mypage/points" element={<MyPagePointsPage />} />
-            <Route path="/mypage/points/charge" element={<PointsChargePage />} />
-
-            {/* Construction (위치기반안내) */}
-            <Route path="/construction" element={<ConstructionPage />} />
-            <Route path="/construction/store/:storeName" element={<StoreDetailPage />} />
-
-            {/* Schedule (일정관리) */}
-            <Route path="/schedule" element={<SchedulePage />} />
-            <Route path="/schedule2" element={<SchedulePage />} />
-            <Route path="/schedule-popup" element={<SchedulePopupPage />} />
-            <Route path="/my/did" element={<MyDID />} />
-            <Route path="/did/claim" element={<DIDClaimPage />} />
-
-            {/* Admin (관리자) */}
-            <Route path="/admin" element={<AdminDashboard />} />
-            <Route path="/admin/users" element={<AdminUsers />} />
-            <Route path="/admin/news" element={<AdminNews />} />
-            <Route path="/admin/news/create" element={<AdminNewsEdit />} />
-            <Route path="/admin/news/edit/:id" element={<AdminNewsEdit />} />
-            <Route path="/admin/news/recommendations" element={<AdminNewsRecommendations />} />
-            <Route path="/admin/share-reports" element={<AdminShareReports />} />
-            <Route path="/admin/stores" element={<AdminStores />} />
-            <Route path="/admin/stores/new" element={<AdminStoreEdit />} />
-            <Route path="/admin/stores/edit/:id" element={<AdminStoreEdit />} />
-            <Route path="/admin/alerts" element={<AdminAlerts />} />
-            <Route path="/admin/alerts/new" element={<AdminAlertEdit />} />
-            <Route path="/admin/alerts/edit/:id" element={<AdminAlertEdit />} />
-            <Route path="/admin/ai-chat" element={<AdminAiChat />} />
-            <Route path="/admin/ai-feedback" element={<AdminAiFeedback />} />
-            <Route path="/admin/ai-train" element={<AdminAiTrain />} />
-            <Route path="/admin/pending-letters" element={<AdminPendingLetters />} />
-            <Route path="/admin/page-managers" element={<AdminPageManagers />} />
-            <Route path="/admin/message" element={<AdminMessage />} />
-            <Route path="/admin/postgresql" element={<AdminPostgresql />} />
-            <Route path="/admin/ramp-applications" element={<AdminRampApplications />} />
-            <Route path="/admin/post/:id" element={<AdminPostDetail />} />
-            <Route path="/admin/did/issue" element={<AdminIssueVC />} />
+            {/* Protected: all other routes require login */}
+            <Route path="/presentation" element={<ProtectedRoute><PresentationPage /></ProtectedRoute>} />
+            <Route path="/proposal" element={<ProtectedRoute><ProposalPage /></ProtectedRoute>} />
+            <Route path="/all-proposals" element={<ProtectedRoute><AllProposalsPage /></ProtectedRoute>} />
+            <Route path="/main" element={<ProtectedRoute><MainPage /></ProtectedRoute>} />
+            <Route path="/go" element={<ProtectedRoute><GoPage /></ProtectedRoute>} />
+            <Route path="/service/legal" element={<ProtectedRoute><ServiceLegalPage /></ProtectedRoute>} />
+            <Route path="/service/legal/edit" element={<ProtectedRoute><ServiceLegalEditPage /></ProtectedRoute>} />
+            <Route path="/service/psycho" element={<ProtectedRoute><ServicePsychoPage /></ProtectedRoute>} />
+            <Route path="/service/psycho/edit" element={<ProtectedRoute><ServicePsychoEditPage /></ProtectedRoute>} />
+            <Route path="/service/ramp" element={<ProtectedRoute><ServiceRampPage /></ProtectedRoute>} />
+            <Route path="/ai/chat" element={<ProtectedRoute><AiChatPage /></ProtectedRoute>} />
+            <Route path="/chat" element={<ProtectedRoute><ChatPage /></ProtectedRoute>} />
+            <Route path="/bot/chat" element={<ProtectedRoute><TongBotChatPage /></ProtectedRoute>} />
+            <Route path="/post/:postId" element={<ProtectedRoute><ViewPage /></ProtectedRoute>} />
+            <Route path="/search" element={<ProtectedRoute><SearchPage /></ProtectedRoute>} />
+            <Route path="/epub" element={<ProtectedRoute><EpubList /></ProtectedRoute>} />
+            <Route path="/epub/list" element={<ProtectedRoute><EpubList /></ProtectedRoute>} />
+            <Route path="/epub/new" element={<ProtectedRoute><EpubList /></ProtectedRoute>} />
+            <Route path="/epub/edit/:id" element={<ProtectedRoute><EpubEditor /></ProtectedRoute>} />
+            <Route path="/guide" element={<ProtectedRoute><GuideList /></ProtectedRoute>} />
+            <Route path="/guide/templates" element={<ProtectedRoute><GuideTemplates /></ProtectedRoute>} />
+            <Route path="/user/my" element={<ProtectedRoute><UserMyPage /></ProtectedRoute>} />
+            <Route path="/user/edit-profile" element={<ProtectedRoute><EditProfilePage /></ProtectedRoute>} />
+            <Route path="/user/:userId" element={<ProtectedRoute><UserProfilePage /></ProtectedRoute>} />
+            <Route path="/user/:userId/profile" element={<ProtectedRoute><UserMyPage /></ProtectedRoute>} />
+            <Route path="/news" element={<ProtectedRoute><NewsList /></ProtectedRoute>} />
+            <Route path="/news/:id" element={<ProtectedRoute><NewsDetail /></ProtectedRoute>} />
+            <Route path="/world-news" element={<ProtectedRoute><NewsTabsPage /></ProtectedRoute>} />
+            <Route path="/yp-news" element={<ProtectedRoute><NewsTabsPage /></ProtectedRoute>} />
+            <Route path="/kr-yp-news" element={<ProtectedRoute><NewsTabsPage /></ProtectedRoute>} />
+            <Route path="/legal/issues/admin" element={<ProtectedRoute><LegalIssuesAdminPage /></ProtectedRoute>} />
+            <Route path="/legal/issues/write" element={<ProtectedRoute><LegalIssueWritePage /></ProtectedRoute>} />
+            <Route path="/legal/issues/:postId" element={<ProtectedRoute><LegalIssueDetailPage /></ProtectedRoute>} />
+            <Route path="/legal/issues" element={<ProtectedRoute><LegalIssuesPage /></ProtectedRoute>} />
+            <Route path="/legal" element={<ProtectedRoute><LegalList /></ProtectedRoute>} />
+            <Route path="/legal/:id" element={<ProtectedRoute><LegalDetail /></ProtectedRoute>} />
+            <Route path="/legal/write" element={<ProtectedRoute><LegalWrite /></ProtectedRoute>} />
+            <Route path="/legal/schedule" element={<ProtectedRoute><LegalSchedule /></ProtectedRoute>} />
+            <Route path="/psycho/admin/appointments" element={<ProtectedRoute><PsychoAdminAppointmentsPage /></ProtectedRoute>} />
+            <Route path="/psycho/admin" element={<ProtectedRoute><PsychoAdminPage /></ProtectedRoute>} />
+            <Route path="/psycho" element={<ProtectedRoute><PsychoList /></ProtectedRoute>} />
+            <Route path="/psycho/:id" element={<ProtectedRoute><PsychoDetail /></ProtectedRoute>} />
+            <Route path="/psycho/:id/edit" element={<ProtectedRoute><PsychoPostEdit /></ProtectedRoute>} />
+            <Route path="/psycho/write" element={<ProtectedRoute><PsychoWrite /></ProtectedRoute>} />
+            <Route path="/psycho/schedule" element={<ProtectedRoute><PsychoSchedule /></ProtectedRoute>} />
+            <Route path="/village/admin" element={<ProtectedRoute><VillageAdminPage /></ProtectedRoute>} />
+            <Route path="/village/qr" element={<ProtectedRoute><VillageQrPage /></ProtectedRoute>} />
+            <Route path="/village/qr-display" element={<ProtectedRoute><VillageQrDisplay /></ProtectedRoute>} />
+            <Route path="/village/qr-approvals" element={<ProtectedRoute><VillageQrApprovals /></ProtectedRoute>} />
+            <Route path="/village/event/create" element={<ProtectedRoute><VillageEventCreatePage /></ProtectedRoute>} />
+            <Route path="/village/event/:eventId/qr" element={<ProtectedRoute><VillageEventQrPage /></ProtectedRoute>} />
+            <Route path="/village/invite/:target" element={<ProtectedRoute><VillageJinConsentPage /></ProtectedRoute>} />
+            <Route path="/village/join" element={<ProtectedRoute><VillageJoinPage /></ProtectedRoute>} />
+            <Route path="/village" element={<ProtectedRoute><VillagePage /></ProtectedRoute>} />
+            <Route path="/village/page" element={<ProtectedRoute><VillagePageEdit /></ProtectedRoute>} />
+            <Route path="/village/view/:tmyeon/:tri" element={<ProtectedRoute><VillagePageView /></ProtectedRoute>} />
+            <Route path="/village/events" element={<ProtectedRoute><VillageEventList /></ProtectedRoute>} />
+            <Route path="/village/events/:id" element={<ProtectedRoute><VillageEventDetail /></ProtectedRoute>} />
+            <Route path="/village/my-wishes" element={<ProtectedRoute><VillageMyWishes /></ProtectedRoute>} />
+            <Route path="/friends" element={<ProtectedRoute><FriendsList /></ProtectedRoute>} />
+            <Route path="/friends/map" element={<ProtectedRoute><FriendsMap /></ProtectedRoute>} />
+            <Route path="/messages" element={<ProtectedRoute><MessageInbox /></ProtectedRoute>} />
+            <Route path="/message/inbox" element={<ProtectedRoute><MessageInbox /></ProtectedRoute>} />
+            <Route path="/message/send" element={<ProtectedRoute><MessageSend /></ProtectedRoute>} />
+            <Route path="/message/send/global" element={<ProtectedRoute><MessageSend /></ProtectedRoute>} />
+            <Route path="/message/send/admin" element={<ProtectedRoute><MessageSend /></ProtectedRoute>} />
+            <Route path="/message/send/village_leader" element={<ProtectedRoute><MessageSend /></ProtectedRoute>} />
+            <Route path="/message/admin/pending" element={<ProtectedRoute><AdminPendingLetters /></ProtectedRoute>} />
+            <Route path="/mypage/points" element={<ProtectedRoute><MyPagePointsPage /></ProtectedRoute>} />
+            <Route path="/mypage/points/charge" element={<ProtectedRoute><PointsChargePage /></ProtectedRoute>} />
+            <Route path="/construction" element={<ProtectedRoute><ConstructionPage /></ProtectedRoute>} />
+            <Route path="/construction/store/:storeName" element={<ProtectedRoute><StoreDetailPage /></ProtectedRoute>} />
+            <Route path="/schedule" element={<ProtectedRoute><SchedulePage /></ProtectedRoute>} />
+            <Route path="/schedule2" element={<ProtectedRoute><SchedulePage /></ProtectedRoute>} />
+            <Route path="/schedule-popup" element={<ProtectedRoute><SchedulePopupPage /></ProtectedRoute>} />
+            <Route path="/my/did" element={<ProtectedRoute><MyDID /></ProtectedRoute>} />
+            <Route path="/did/claim" element={<ProtectedRoute><DIDClaimPage /></ProtectedRoute>} />
+            <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
+            <Route path="/admin/users" element={<ProtectedRoute><AdminUsers /></ProtectedRoute>} />
+            <Route path="/admin/news" element={<ProtectedRoute><AdminNews /></ProtectedRoute>} />
+            <Route path="/admin/news/create" element={<ProtectedRoute><AdminNewsEdit /></ProtectedRoute>} />
+            <Route path="/admin/news/edit/:id" element={<ProtectedRoute><AdminNewsEdit /></ProtectedRoute>} />
+            <Route path="/admin/news/recommendations" element={<ProtectedRoute><AdminNewsRecommendations /></ProtectedRoute>} />
+            <Route path="/admin/share-reports" element={<ProtectedRoute><AdminShareReports /></ProtectedRoute>} />
+            <Route path="/admin/stores" element={<ProtectedRoute><AdminStores /></ProtectedRoute>} />
+            <Route path="/admin/stores/new" element={<ProtectedRoute><AdminStoreEdit /></ProtectedRoute>} />
+            <Route path="/admin/stores/edit/:id" element={<ProtectedRoute><AdminStoreEdit /></ProtectedRoute>} />
+            <Route path="/admin/alerts" element={<ProtectedRoute><AdminAlerts /></ProtectedRoute>} />
+            <Route path="/admin/alerts/new" element={<ProtectedRoute><AdminAlertEdit /></ProtectedRoute>} />
+            <Route path="/admin/alerts/edit/:id" element={<ProtectedRoute><AdminAlertEdit /></ProtectedRoute>} />
+            <Route path="/admin/ai-chat" element={<ProtectedRoute><AdminAiChat /></ProtectedRoute>} />
+            <Route path="/admin/ai-train" element={<ProtectedRoute><AdminAiTrain /></ProtectedRoute>} />
+            <Route path="/admin/ai-broadcasts" element={<ProtectedRoute><AdminAiBroadcasts /></ProtectedRoute>} />
+            <Route path="/admin/pending-letters" element={<ProtectedRoute><AdminPendingLetters /></ProtectedRoute>} />
+            <Route path="/admin/page-managers" element={<ProtectedRoute><AdminPageManagers /></ProtectedRoute>} />
+            <Route path="/admin/message" element={<ProtectedRoute><AdminMessage /></ProtectedRoute>} />
+            <Route path="/admin/postgresql" element={<ProtectedRoute><AdminPostgresql /></ProtectedRoute>} />
+            <Route path="/admin/ramp-applications" element={<ProtectedRoute><AdminRampApplications /></ProtectedRoute>} />
+            <Route path="/admin/post/:id" element={<ProtectedRoute><AdminPostDetail /></ProtectedRoute>} />
+            <Route path="/admin/did/issue" element={<ProtectedRoute><AdminIssueVC /></ProtectedRoute>} />
 
             {/* Default */}
             <Route path="*" element={<IntroPage />} />
           </Routes>
         </div>
-        <Footer />
+        {!isPopup && <Footer />}
       </BrowserRouter>
     </AuthProvider>
   )

@@ -46,6 +46,7 @@ interface PlanResult {
     loc?: string
   }[]
   arrive_home: string
+  error?: string
 }
 
 const DAYS = ['일', '월', '화', '수', '목', '금', '토']
@@ -288,7 +289,7 @@ export default function SchedulePopupPage() {
               return (
                 <>
                   <div className="small fw-bold mb-2">{selectedDate}</div>
-                  {dayScheds.map((s, idx) => (
+                  {dayScheds.map((s) => (
                     <div key={s.id}>
                       <div className="card border-0 shadow-sm mb-1" style={{
                         borderRadius: 12,

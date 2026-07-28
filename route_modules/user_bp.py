@@ -1,5 +1,5 @@
 from flask import Blueprint, render_template, request, redirect, url_for, jsonify, session, current_app, send_file
-from datetime import datetime
+from datetime import datetime, timezone
 from models import db, User, Message, Friend, ShareReport, Post, PointHistory, VillageWish, LegalPost, PsychoPost, ChatMessage, LegalAppointment, TongBot, TongBotDraft
 from werkzeug.security import generate_password_hash, check_password_hash
 from route_modules.common import has_page_access
@@ -17,6 +17,91 @@ def _serve_spa():
         return send_file(path)
     from flask import render_template
     return render_template('intro.html')
+
+@user_bp.route('/api/user/dashboard')
+def api_user_dashboard():
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({'error': 'login'}), 401
+    from sqlalchemy import func as _func
+    today = datetime.now(timezone.utc).date()
+
+    # 1. 오늘 일정
+    schedules = TongBotSchedule.query.filter(
+        TongBotSchedule.user_id == uid,
+        _func.date(TongBotSchedule.event_date) == today
+    ).order_by(TongBotSchedule.event_date).all()
+    today_schedules = [{
+        'id': s.id, 'title': s.title, 'time': s.event_date.strftime('%H:%M') if s.event_date else '',
+        'location': s.location or '', 'memo': (s.memo or '')[:60],
+    } for s in schedules]
+
+    # 2. 안 읽은 편지
+    unread_msgs = Message.query.filter_by(receiver_id=uid, is_read=False).order_by(Message.created_at.desc()).limit(5).all()
+    unread_messages = [{
+        'id': m.id, 'subject': m.subject or '(제목 없음)', 'sender': m.sender_name or '',
+        'created_at': m.created_at.isoformat() if m.created_at else '',
+    } for m in unread_msgs]
+
+    # 3. 공지 (VillageAlert active)
+    from models import VillageAlert
+    notices_data = VillageAlert.query.filter_by(is_active=True).order_by(VillageAlert.created_at.desc()).limit(3).all()
+    notices = [{
+        'id': n.id, 'title': n.title[:80], 'content': (n.content or '')[:120],
+        'alert_type': n.alert_type, 'urgency': n.urgency,
+    } for n in notices_data]
+
+    # 4. AI 팁 (통벗이 판단)
+    ai_tip = ''
+    bot = TongBot.query.filter_by(user_id=uid).first()
+    unread_count = len(unread_msgs)
+    sched_count = len(schedules)
+    if bot:
+        try:
+            from config import Config
+            import requests
+            key = getattr(Config, 'MOTIF_API_KEY', '')
+            base_url = getattr(Config, 'MOTIF_BASE_URL', 'https://chat.motiftech.io/openapi/v1')
+            if key:
+                tip_prompt = f"'{bot.bot_name if bot.bot_name else '통벗'}'은(는) '{uid}'님의 AI 도우미입니다. 오늘의 일정 {sched_count}개, 안 읽은 편지 {unread_count}통이 있습니다. 회원님께 해줄 수 있는 짧고 따뜻한 조언이나 격려 한마디를 2문장 이내로 해주세요."
+                r = requests.post(f"{base_url}/chat/completions",
+                    headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                    json={"model": "motif-12.7b-reasoning", "messages": [{"role": "user", "content": tip_prompt}], "max_tokens": 150},
+                    timeout=10)
+                if r.status_code == 200:
+                    ai_tip = r.json()['choices'][0]['message']['content'][:200]
+        except:
+            pass
+        if not ai_tip:
+            if sched_count > 0:
+                ai_tip = f"📅 오늘 {sched_count}개의 일정이 있습니다. 준비 잘하고 계신가요?"
+            elif unread_count > 0:
+                ai_tip = f"✉️ {unread_count}통의 편지가 기다리고 있어요. 확인해보세요!"
+            else:
+                ai_tip = "🌿 좋은 하루 되세요! 무슨 일이든 통벗이 도와드릴게요."
+    else:
+        ai_tip = "🌿 좋은 하루 되세요!"
+
+    return jsonify({
+        'today_schedules': today_schedules,
+        'unread_count': len(unread_msgs),
+        'unread_messages': unread_messages,
+        'notices': notices,
+        'ai_tip': ai_tip,
+    })
+
+@user_bp.route('/api/user/notification-summary')
+def api_user_notification_summary():
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({'memos': 0, 'notices': 0, 'friend_requests': 0, 'ai_broadcasts': 0})
+    from models import Friend, TongBotMemo, VillageAlert, AiBroadcast
+    memos = TongBotMemo.query.filter_by(user_id=uid, seen=False).count()
+    unread_msgs = Message.query.filter_by(receiver_id=uid, is_read=False).count()
+    notices = VillageAlert.query.filter_by(is_active=True).count() + unread_msgs
+    friend_requests = Friend.query.filter_by(receiver_id=uid, status='pending').count()
+    ai_broadcasts = AiBroadcast.query.filter_by(is_active=True).count()
+    return jsonify({'memos': memos, 'notices': notices, 'friend_requests': friend_requests, 'ai_broadcasts': ai_broadcasts})
 
 @user_bp.route('/api/user/<int:user_id>/profile')
 def api_user_profile(user_id):
@@ -80,6 +165,16 @@ def api_user_profile(user_id):
 
     drafts = TongBotDraft.query.filter_by(user_id=user.id).order_by(TongBotDraft.updated_at.desc()).all()
     bot = TongBot.query.filter_by(user_id=user.id).first()
+    bot_id = bot.bot_id if bot else None
+    bot_name = bot.bot_name if bot else None
+    bot_mood = bot.mood if bot else None
+    bot_level = bot.level if bot else None
+    bot_intimacy = bot.intimacy if bot else None
+    bot_tone = bot.tone if bot else None
+    bot_chat_count = bot.chat_count if bot else None
+    bot_is_active = bot.is_active if bot else None
+    bot_recalled_at = bot.recalled_at.isoformat() if bot and bot.recalled_at else None
+    bot_recall_reason = bot.recall_reason if bot else None
     bot_memory = (bot.memory or '')[-500:] if bot else ''
 
     curr_location = ''
@@ -145,6 +240,16 @@ def api_user_profile(user_id):
         'appointments': appointments,
         'drafts': [{'id': d.id, 'title': d.title, 'category': d.category, 'status': d.status,
             'updated_at': d.updated_at.isoformat() if d.updated_at else None} for d in drafts],
+        'bot_id': bot_id,
+        'bot_name': bot_name,
+        'bot_mood': bot_mood,
+        'bot_level': bot_level,
+        'bot_intimacy': bot_intimacy,
+        'bot_tone': bot_tone,
+        'bot_chat_count': bot_chat_count,
+        'bot_is_active': bot_is_active,
+        'bot_recalled_at': bot_recalled_at,
+        'bot_recall_reason': bot_recall_reason,
         'bot_memory': bot_memory,
         'curr_location': curr_location,
         'share_images': share_images,
@@ -179,7 +284,7 @@ def user_location_refresh():
     if town:
         user.curr_town = town
         user.curr_village = village or ''
-    user.location_updated_at = datetime.now()
+    user.location_updated_at = datetime.now(timezone.utc)
     db.session.commit()
     return jsonify({
         "status": "success",
@@ -242,7 +347,7 @@ def user_location_correct():
         user.curr_longitude = geo['lng']
     user.curr_address = manual_loc[:200]
     user.address = manual_loc[:200]
-    user.location_updated_at = datetime.now()
+    user.location_updated_at = datetime.now(timezone.utc)
     already_got = PointHistory.query.filter_by(user_id=user.id, change_type='location_correct').first()
     if not already_got:
         user.points = (user.points or 0) + 1
@@ -258,7 +363,7 @@ def user_location_correct():
         return redirect('/construction?tab=home')
     return redirect('/user/' + str(user.id))
 def _cleanup_expired_posts():
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     expired = Post.query.filter(Post.total_score <= -50, Post.deadline != None, Post.deadline < now).all()
     for p in expired:
         db.session.delete(p)
@@ -410,4 +515,5 @@ def api_user_change_password_verify():
     session.pop('pw_change_code', None)
     session.pop('pw_change_code_time', None)
     return jsonify({'status': 'success', 'msg': '비밀번호가 변경되었습니다.'})
+
 

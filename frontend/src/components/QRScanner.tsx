@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 
 interface QRScannerProps {
   onScan: (data: string) => void
@@ -6,7 +6,6 @@ interface QRScannerProps {
 }
 
 export default function QRScanner({ onScan, onError }: QRScannerProps) {
-  const videoRef = useRef<HTMLVideoElement>(null)
   const [scanning, setScanning] = useState(false)
 
   useEffect(() => {

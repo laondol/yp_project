@@ -2,7 +2,7 @@ import os
 import threading
 import base64
 from flask import Blueprint, render_template, request, redirect, url_for, jsonify, session, current_app, send_file, send_from_directory
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 from sqlalchemy import or_
 from werkzeug.utils import secure_filename
 from models import db, User, ShareReport, ShareComment, Message, Post, Comment, NewsArticle, VillagePage, RampApplication, PointHistory, Friend, VillageWish, LegalPost, ChatMessage, FriendGroup, LegalAppointment, TongBot, TongBotDraft, ConstructionNotice, GpsCalibration, StoreSuggestion, StoreMenu
@@ -77,7 +77,7 @@ def share_report():
     drawing = request.form.get('drawing_data')
     if drawing and len(drawing) > 2000:
         data = base64.b64decode(drawing.split(",")[1])
-        fname = f"draw_{datetime.now().strftime('%Y%m%d%H%M%S')}.png"
+        fname = f"draw_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}.png"
         target_dir = os.path.join(current_app.root_path, 'static', 'uploads', 'share_reports')
         if not os.path.exists(target_dir): os.makedirs(target_dir)
         with open(os.path.join(target_dir, fname), "wb") as f: f.write(data)
@@ -90,7 +90,7 @@ def share_report():
             ext = file.filename.rsplit('.', 1)[1].lower()
             if ext in ('mp4', 'avi', 'mov', 'mkv', 'webm'):
                 img_dir = os.path.join(current_app.root_path, 'static', 'uploads', 'share_reports')
-                fname = f"video_{datetime.now().strftime('%Y%m%d%H%M%S')}_{secure_filename(file.filename)}"
+                fname = f"video_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}_{secure_filename(file.filename)}"
                 file.save(os.path.join(img_dir, fname))
                 video_path = f"/static/uploads/share_reports/{fname}"
 
@@ -459,14 +459,14 @@ def share_report_edit(report_id):
                         report.moderation_result = 'unanalyzable'
                         report.moderation_reason = reason
                         report.is_moderated = True
-                        report.moderation_at = datetime.now()
+                        report.moderation_at = datetime.now(timezone.utc)
                         break
                     if flagged:
                         report.status = 'pending_person' if cat == 'person' else 'flagged'
                         report.moderation_result = cat
                         report.moderation_reason = reason
                         report.is_moderated = True
-                        report.moderation_at = datetime.now()
+                        report.moderation_at = datetime.now(timezone.utc)
                         break
                 except:
                     pass
@@ -604,7 +604,7 @@ def share_map():
             "summary": (r.ai_summary or r.description or "")[:80]
         })
     categories = ['사건', '풍경', '장소', '맛집', '기타']
-    return _serve_spa()
+    return _serve_react_share()
 
 @share_bp.route('/share/nearby')
 def share_nearby():
@@ -640,10 +640,10 @@ def share_report_toggle(report_id, action):
     if action == 'approve':
         report.status = 'approved'
         _resolve_canonical_store_name(report)
-        report.updated_at = datetime.now()
+        report.updated_at = datetime.now(timezone.utc)
     elif action == 'reject':
         report.status = 'rejected'
-        report.updated_at = datetime.now()
+        report.updated_at = datetime.now(timezone.utc)
         # AI 학습: rejected 이미지는 AI가 다시 참고하도록 기록
         report.moderation_reason = (report.moderation_reason or '') + ' | 관리자 반려'
         # 작성자(회원)에게 보류 통보
@@ -842,6 +842,9 @@ def api_me():
             bot = _get_bot(user.id)
             return jsonify({
                 "id": user.id, "username": user.username, "role": user.role,
+                "town": user.town or '', "village": user.village or '',
+                "curr_town": user.curr_town or '', "curr_village": user.curr_village or '',
+                "login_village": user.login_village or '',
                 "managed_pages": (user.managed_pages or '').split(','),
                 "office_latitude": user.office_latitude,
                 "office_longitude": user.office_longitude,
@@ -856,7 +859,10 @@ def api_me():
                     "bot_name": bot.bot_name, "mood": bot.mood or 'warm',
                     "level": bot.level or 1, "exp": bot.exp or 0,
                     "intimacy": bot.intimacy or 0, "tone": bot.tone or 'friendly',
-                    "chat_count": bot.chat_count or 0, "bot_id": bot.bot_id
+                    "chat_count": bot.chat_count or 0, "bot_id": bot.bot_id,
+                    "is_active": bot.is_active,
+                    "recalled_at": bot.recalled_at.isoformat() if bot.recalled_at else None,
+                    "recall_reason": bot.recall_reason or ''
                 }
             })
     return jsonify({"id": None})
@@ -1004,7 +1010,7 @@ def api_user_profile(user_id):
     bot_message = ''
     if is_own and bot_name:
         try:
-            h = (datetime.now() + timedelta(hours=9)).hour
+            h = (datetime.now(timezone.utc) + timedelta(hours=9)).hour
             time_ctx = '아침' if h < 12 else ('오후' if h < 18 else '저녁')
             import random
             tips = ['오늘 양평 날씨에 맞는 옷차림을 추천해 드릴까요?','잠시 스트레칭 어떠세요? 건강이 최고예요!','오늘 하루 감사한 일 세 가지만 떠올려 보세요.','좋아하는 음악 한 곡 들으면서 잠시 쉬어 가세요.','오늘 양평의 맛집 정보가 궁금하신가요?']
