@@ -29,6 +29,10 @@ class Config:
     GROQ_API_KEY = os.getenv('GROQ_API_KEY', '')
     MOTIF_API_KEY = os.getenv('MOTIF_API_KEY', '')             # ← 추가
     MOTIF_BASE_URL = os.getenv('MOTIF_BASE_URL', 'https://chat.motiftech.io/openapi/v1')  # ← 추가
+
+    # RAG 독립 서비스
+    RAG_URL = os.getenv('RAG_URL', 'http://localhost:8001')
+    RAG_API_KEY = os.getenv('RAG_API_KEY', '')
     SMTP_HOST = os.getenv('SMTP_HOST', 'email-smtp.ap-northeast-2.amazonaws.com')
     SMTP_PORT = int(os.getenv('SMTP_PORT', '587'))
     SMTP_USERNAME = os.getenv('SMTP_USERNAME', '')

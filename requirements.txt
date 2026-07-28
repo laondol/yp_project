@@ -7,8 +7,6 @@ beautifulsoup4
 werkzeug
 markdown
 python-dotenv
-chromadb
-sentence-transformers
 openai
 Pillow
 pillow-heif
