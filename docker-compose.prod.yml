@@ -2,7 +2,7 @@ services:
   flask_app:
     build:
       context: .
-      dockerfile: Dockerfile.prod
+      dockerfile: Dockerfile
     container_name: yp_flask
     volumes:
       - .:/yp_project
@@ -13,6 +13,24 @@ services:
     env_file: .env
     environment:
       - RAG_URL=http://yp_rag:8001
+    depends_on:
+      - postgres
+      - rag
+    restart: always
+
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: yp_scheduler
+    volumes:
+      - .:/yp_project
+      - uploads_data:/yp_project/uploads
+    working_dir: /yp_project
+    env_file: .env
+    environment:
+      - RAG_URL=http://yp_rag:8001
+    command: ["python", "scheduler.py"]
     depends_on:
       - postgres
       - rag

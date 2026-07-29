@@ -1,5 +1,4 @@
 services:
-  # 1. Flask 백엔드 서버
   flask_app:
     build: .
     container_name: yp_flask
@@ -9,11 +8,28 @@ services:
     ports:
       - "5000:5000"
     env_file: .env
+    environment:
+      - RAG_URL=http://yp_rag:8001
     depends_on:
       - postgres
+      - rag
     restart: always
 
-  # 2. React 프론트엔드 서버
+  scheduler:
+    build: .
+    container_name: yp_scheduler
+    volumes:
+      - .:/yp_project
+    working_dir: /yp_project
+    env_file: .env
+    environment:
+      - RAG_URL=http://yp_rag:8001
+    command: ["python", "scheduler.py"]
+    depends_on:
+      - postgres
+      - rag
+    restart: always
+
   react_frontend:
     image: node:20-alpine
     container_name: yp_react
@@ -30,7 +46,6 @@ services:
       - flask_app
     restart: always
 
-  # 3. PostgreSQL 데이터베이스
   postgres:
     image: postgres:16-alpine
     container_name: yp_postgres
@@ -44,7 +59,23 @@ services:
       - pgdata:/var/lib/postgresql/data
     restart: unless-stopped
 
-  # 4. DB 관리 도구 (pgAdmin)
+  rag:
+    build:
+      context: .
+      dockerfile: Dockerfile.rag
+    container_name: yp_rag
+    working_dir: /yp_project/yp_rag
+    ports:
+      - "8001:8001"
+    environment:
+      - DATABASE_URL=postgresql://yp_dev:yp_dev_pass_2026@postgres:5432/yp_local
+      - RAG_API_KEY=yp_rag_secret_2026
+    volumes:
+      - rag_data:/yp_project/yp_rag/chroma_data
+    depends_on:
+      - postgres
+    restart: always
+
   pgadmin:
     image: dpage/pgadmin4
     container_name: yp_pgadmin
@@ -59,3 +90,4 @@ services:
 
 volumes:
   pgdata:
+  rag_data:

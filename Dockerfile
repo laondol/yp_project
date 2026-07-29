@@ -1,6 +1,7 @@
-FROM python:3.13
+FROM python:3.13-slim
 WORKDIR /yp_project
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt gunicorn
 COPY . .
-CMD ["python", "run.py"]
+EXPOSE 5000
+CMD ["gunicorn", "--workers", "3", "--bind", "0.0.0.0:5000", "run:app"]

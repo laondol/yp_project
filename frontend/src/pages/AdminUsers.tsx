@@ -29,6 +29,8 @@ export default function AdminUsers() {
   const [sortKey, setSortKey] = useState<SortKey>('email')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [selected, setSelected] = useState<Set<number>>(new Set())
+  const [deleteTarget, setDeleteTarget] = useState<AdminUser | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   const load = async () => {
     setLoading(true)
@@ -114,19 +116,27 @@ export default function AdminUsers() {
     })
   }
 
-  const handleDelete = async (id: number) => {
-    if (!confirm('정말 삭제하시겠습니까?')) return
+  const handleDelete = (user: AdminUser) => {
+    setDeleteTarget(user)
+  }
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return
+    setDeleting(true)
     try {
-      const res = await fetch(`/admin/users/delete/${id}`, { method: 'POST' })
+      const res = await fetch(`/admin/users/delete/${deleteTarget.id}`, { method: 'POST' })
       const data = await res.json()
       if (data.status === 'success') {
-        setUsers(prev => prev.filter(u => u.id !== id))
-        setSelected(prev => { const n = new Set(prev); n.delete(id); return n })
+        setUsers(prev => prev.filter(u => u.id !== deleteTarget.id))
+        setSelected(prev => { const n = new Set(prev); n.delete(deleteTarget.id); return n })
+        setDeleteTarget(null)
       } else {
         alert(data.msg || '삭제 실패')
       }
     } catch {
       alert('오류가 발생했습니다.')
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -246,7 +256,7 @@ export default function AdminUsers() {
                           <button
                             className="btn btn-sm btn-outline-danger"
                             title="삭제"
-                            onClick={() => handleDelete(u.id)}
+                            onClick={() => handleDelete(u)}
                           >
                             🗑️
                           </button>
@@ -260,6 +270,39 @@ export default function AdminUsers() {
           )}
         </div>
       </div>
+
+      {deleteTarget && (
+        <div className="modal d-block" tabIndex={-1} style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="modal-dialog modal-dialog-centered">
+            <div className="modal-content" style={{ borderRadius: 16 }}>
+              <div className="modal-header border-0">
+                <h5 className="modal-title fw-bold">🗑️ 회원 삭제</h5>
+                <button type="button" className="btn-close" onClick={() => setDeleteTarget(null)} />
+              </div>
+              <div className="modal-body">
+                <p>정말 삭제하시겠습니까?</p>
+                <div className="alert alert-danger mb-0">
+                  <strong>{deleteTarget.email}</strong>
+                  <br />
+                  <small>
+                    {deleteTarget.real_name && <span>{deleteTarget.real_name} · </span>}
+                    {deleteTarget.village || deleteTarget.town || '-'}
+                  </small>
+                </div>
+                <p className="text-muted small mt-2 mb-0">삭제된 데이터는 복구할 수 없습니다.</p>
+              </div>
+              <div className="modal-footer border-0">
+                <button type="button" className="btn btn-secondary" onClick={() => setDeleteTarget(null)} disabled={deleting}>
+                  취소
+                </button>
+                <button type="button" className="btn btn-danger" onClick={confirmDelete} disabled={deleting}>
+                  {deleting ? '삭제 중...' : '삭제'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
