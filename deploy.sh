@@ -12,7 +12,7 @@ sudo systemctl stop postgresql 2>/dev/null || true
 # 2. Docker 설치
 echo "[2/6] Docker 설치..."
 if ! command -v docker &> /dev/null; then
-    sudo apt install -y docker.io docker-compose-plugin
+    sudo apt install -y docker.io docker-compose
     sudo systemctl enable docker
     sudo systemctl start docker
     sudo usermod -aG docker ubuntu
@@ -27,8 +27,8 @@ fi
 # 4. docker-compose로 실행
 echo "[4/6] Docker 컨테이너 시작..."
 cd /home/ubuntu/yp_project
-docker compose -f docker-compose.prod.yml down 2>/dev/null || true
-docker compose -f docker-compose.prod.yml up -d --build
+docker-compose -f docker-compose.prod.yml down 2>/dev/null || true
+docker-compose -f docker-compose.prod.yml up -d --build
 
 # 5. DB 복원
 echo "[5/6] DB 복원..."
