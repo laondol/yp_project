@@ -270,6 +270,60 @@ def admin_delete_user(user_id):
     if user.role == 'admin':
         return jsonify({"status":"error","msg":"관리자는 삭제할 수 없습니다"})
     name = user.email or user.username
+    from sqlalchemy import text
+    uid = user_id
+    fk_deletes = [
+        ("DELETE FROM point_history WHERE user_id = :id", uid),
+        ("DELETE FROM post_vote WHERE user_id = :id", uid),
+        ("DELETE FROM comment WHERE user_id = :id", uid),
+        ("DELETE FROM share_comment WHERE user_id = :id", uid),
+        ("DELETE FROM news_comment WHERE user_id = :id", uid),
+        ("DELETE FROM news_vote WHERE user_id = :id", uid),
+        ("DELETE FROM news_recommendation WHERE user_id = :id", uid),
+        ("DELETE FROM message WHERE sender_id = :id OR receiver_id = :id", uid),
+        ("DELETE FROM friend WHERE requester_id = :id OR receiver_id = :id", uid),
+        ("DELETE FROM friend_group WHERE user_id = :id", uid),
+        ("DELETE FROM friend_cache WHERE user_id = :id", uid),
+        ("DELETE FROM store_suggestion_vote WHERE user_id = :id", uid),
+        ("DELETE FROM post WHERE user_id = :id", uid),
+        ("DELETE FROM share_report WHERE user_id = :id", uid),
+        ("DELETE FROM news_article WHERE created_by = :id", uid),
+        ("DELETE FROM village_alert WHERE author_id = :id", uid),
+        ("DELETE FROM ai_broadcast WHERE author_id = :id OR approver_id = :id", uid),
+        ("DELETE FROM heritage_stamp WHERE user_id = :id", uid),
+        ("DELETE FROM tong_bot WHERE user_id = :id", uid),
+        ("DELETE FROM tong_bot_draft WHERE user_id = :id", uid),
+        ("DELETE FROM tong_bot_memo WHERE user_id = :id", uid),
+        ("DELETE FROM tong_bot_memo_comment WHERE user_id = :id", uid),
+        ("DELETE FROM tong_bot_schedule WHERE user_id = :id", uid),
+        ("DELETE FROM chat_room WHERE creator_id = :id", uid),
+        ("DELETE FROM bot_feedback WHERE user_id = :id OR bot_user_id = :id", uid),
+        ("DELETE FROM legal_post WHERE user_id = :id", uid),
+        ("DELETE FROM legal_appointment WHERE user_id = :id OR approved_by = :id", uid),
+        ("DELETE FROM psycho_post WHERE user_id = :id", uid),
+        ("DELETE FROM psycho_appointment WHERE user_id = :id OR approved_by = :id", uid),
+        ("DELETE FROM ai_knowledge WHERE created_by = :id", uid),
+        ("DELETE FROM village_event WHERE created_by = :id", uid),
+        ("DELETE FROM village_event_attendee WHERE user_id = :id", uid),
+        ("DELETE FROM village_event_chat WHERE user_id = :id", uid),
+        ("DELETE FROM village_page WHERE created_by = :id", uid),
+        ("DELETE FROM village_wish WHERE user_id = :id OR replied_by = :id", uid),
+        ("DELETE FROM village_broadcast WHERE sender_id = :id", uid),
+        ("DELETE FROM content_permission WHERE requester_id = :id OR author_id = :id", uid),
+        ("DELETE FROM shared_route WHERE creator_id = :id", uid),
+        ("DELETE FROM schedule_reminder_log WHERE user_id = :id", uid),
+        ("DELETE FROM message_reminder_log WHERE user_id = :id", uid),
+        ("DELETE FROM epub_book WHERE user_id = :id", uid),
+        ("DELETE FROM did_document WHERE user_id = :id", uid),
+        ("DELETE FROM verifiable_credential WHERE subject_user_id = :id", uid),
+        ("DELETE FROM qr_session WHERE issuer_user_id = :id OR subject_user_id = :id", uid),
+        ("DELETE FROM store_suggestion WHERE suggested_by = :id", uid),
+    ]
+    for sql, val in fk_deletes:
+        try:
+            db.session.execute(text(sql), {"id": val})
+        except Exception:
+            pass
     db.session.delete(user)
     db.session.commit()
     return jsonify({"status":"success","msg":f"'{name}' 회원이 삭제되었습니다."})
