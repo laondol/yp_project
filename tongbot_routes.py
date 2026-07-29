@@ -2128,7 +2128,7 @@ def schedule_invite():
     sender = User.query.get(uid)
     event_date = f"{date} {time}:00"
     for fid in friend_ids:
-        msg = f'<div style="text-align:center;padding:10px;"><strong>📅 약속 제안: {title}</strong><br><small>{sender.username}님의 제안</small><br>🕐 {date} {time} ({duration}분)<hr style="margin:5px 0;"><a href="https://test.unocum.kr/schedule?accept={uid}&date={event_date}&title={title}" style="display:inline-block;padding:6px 12px;background:#198754;color:#fff;border-radius:6px;text-decoration:none;margin:2px;">✅ 수락</a> <a href="https://test.unocum.kr/schedule?decline={uid}" style="display:inline-block;padding:6px 12px;background:#dc3545;color:#fff;border-radius:6px;text-decoration:none;margin:2px;">❌ 거절</a></div>'
+        msg = f'<div style="text-align:center;padding:10px;"><strong>📅 약속 제안: {title}</strong><br><small>{sender.username}님의 제안</small><br>🕐 {date} {time} ({duration}분)<hr style="margin:5px 0;"><a href="https://unocum.kr/schedule?accept={uid}&date={event_date}&title={title}" style="display:inline-block;padding:6px 12px;background:#198754;color:#fff;border-radius:6px;text-decoration:none;margin:2px;">✅ 수락</a> <a href="https://unocum.kr/schedule?decline={uid}" style="display:inline-block;padding:6px 12px;background:#dc3545;color:#fff;border-radius:6px;text-decoration:none;margin:2px;">❌ 거절</a></div>'
         db.session.add(Message(sender_id=uid, sender_name=sender.username, receiver_id=fid,
             subject=f'📅 약속 제안: {title}', content=msg, sender_role='member'))
     db.session.commit()
@@ -2275,7 +2275,7 @@ def chat_rooms():
             except: pass
         # 초대 쪽지 발송
         creator = User.query.get(uid)
-        invite_msg = f'<div style="text-align:center;padding:10px;"><strong>💬 채팅 초대: {name}</strong><br><small>{creator.username}님이 초대했습니다</small><hr style="margin:5px 0;"><a href="https://test.unocum.kr/chat?room={room.id}&action=join" style="display:inline-block;padding:6px 12px;background:#198754;color:#fff;border-radius:6px;text-decoration:none;margin:2px;">✅ 입장</a> <a href="https://test.unocum.kr/chat?room={room.id}&action=decline" style="display:inline-block;padding:6px 12px;background:#dc3545;color:#fff;border-radius:6px;text-decoration:none;margin:2px;">❌ 거절</a> <a href="https://test.unocum.kr/chat?room={room.id}&action=monitor" style="display:inline-block;padding:6px 12px;background:#6c757d;color:#fff;border-radius:6px;text-decoration:none;margin:2px;">👁️ 모니터링</a></div>'
+        invite_msg = f'<div style="text-align:center;padding:10px;"><strong>💬 채팅 초대: {name}</strong><br><small>{creator.username}님이 초대했습니다</small><hr style="margin:5px 0;"><a href="https://unocum.kr/chat?room={room.id}&action=join" style="display:inline-block;padding:6px 12px;background:#198754;color:#fff;border-radius:6px;text-decoration:none;margin:2px;">✅ 입장</a> <a href="https://unocum.kr/chat?room={room.id}&action=decline" style="display:inline-block;padding:6px 12px;background:#dc3545;color:#fff;border-radius:6px;text-decoration:none;margin:2px;">❌ 거절</a> <a href="https://unocum.kr/chat?room={room.id}&action=monitor" style="display:inline-block;padding:6px 12px;background:#6c757d;color:#fff;border-radius:6px;text-decoration:none;margin:2px;">👁️ 모니터링</a></div>'
         for fid in friends:
             db.session.add(Message(sender_id=uid, sender_name=creator.username, receiver_id=fid,
                 subject=f'💬 채팅 초대: {name}', content=invite_msg, sender_role='member'))

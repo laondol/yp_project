@@ -1,7 +1,7 @@
 import os
 from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'))
-from flask import Flask
+from flask import Flask, send_from_directory
 from config import Config
 from models import db, User
 from tongbot_routes import tongbot_bp
@@ -100,7 +100,13 @@ def create_app():
 
 app = create_app()
 
+@app.route('/robots.txt')
+def robots_txt():
+    return send_from_directory('static', 'robots.txt', mimetype='text/plain')
 
+@app.route('/sitemap.xml')
+def sitemap_xml():
+    return send_from_directory('static', 'sitemap.xml', mimetype='application/xml')
 
 @app.after_request
 def security_headers(resp):

@@ -3,4 +3,4 @@ Allow: /
 Disallow: /admin/
 Disallow: /api/
 
-Sitemap: https://test.unocum.kr/sitemap.xml
+Sitemap: https://unocum.kr/sitemap.xml

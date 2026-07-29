@@ -282,7 +282,7 @@ def register():
         
         from services.email_service import EmailService
         EmailService.send(verified_email, f"[양평마을] 가입을 환영합니다, {real_name}님",
-            f"{real_name}님, 양평마을에 가입해 주셔서 감사합니다.\n\n지금 바로 다양한 서비스를 이용해 보세요.\n- 게시글 작성 및 공유\n- 법률/심리 상담\n- 경사로 설치 신청\n- 이웃과 소통\n\nhttps://test.unocum.kr")
+            f"{real_name}님, 양평마을에 가입해 주셔서 감사합니다.\n\n지금 바로 다양한 서비스를 이용해 보세요.\n- 게시글 작성 및 공유\n- 법률/심리 상담\n- 경사로 설치 신청\n- 이웃과 소통\n\nhttps://unocum.kr")
         
         return "<script>alert('가입 신청 완료! 로그인을 진행하세요.'); location.href='/intro';</script>"
     return _serve_spa()
