@@ -13,5 +13,6 @@ venv
 DockerDesktopWSL
 scripts
 *.md
+!charter.md
 .vscode
 .idea
