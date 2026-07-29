@@ -48,9 +48,13 @@ class EmailService:
                     ctx.verify_mode = ssl.CERT_NONE
                     if hasattr(ssl, 'OP_LEGACY_SERVER_CONNECT'):
                         ctx.options |= ssl.OP_LEGACY_SERVER_CONNECT
+                    ctx.minimum_version = ssl.TLSVersion.TLSv1
+                    ctx.maximum_version = ssl.TLSVersion.TLSv1_2
                     ctx.set_ciphers('DEFAULT:@SECLEVEL=0')
-                    server = smtplib.SMTP(smtp_host, smtp_port, timeout=5)
+                    server = smtplib.SMTP(smtp_host, smtp_port, timeout=10)
+                    server.ehlo()
                     server.starttls(context=ctx)
+                    server.ehlo()
                 server.login(smtp_user, smtp_pass)
                 server.sendmail(from_addr, [to], msg.as_string())
                 server.quit()
