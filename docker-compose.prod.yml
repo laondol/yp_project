@@ -1,0 +1,33 @@
+services:
+  flask_app:
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+    container_name: yp_flask
+    volumes:
+      - .:/yp_project
+      - uploads_data:/yp_project/uploads
+    working_dir: /yp_project
+    ports:
+      - "127.0.0.1:5000:5000"
+    env_file: .env
+    depends_on:
+      - postgres
+    restart: always
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: yp_postgres
+    environment:
+      POSTGRES_USER: yp_dev
+      POSTGRES_PASSWORD: yp_dev_pass_2026
+      POSTGRES_DB: yp_local
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  uploads_data:
