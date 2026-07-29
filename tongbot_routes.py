@@ -2066,6 +2066,12 @@ def schedule_page():
     resp.headers['Expires'] = '0'
     return resp
 
+@tongbot_bp.route('/memo')
+def memo_page():
+    if not session.get('user_id'):
+        return redirect(url_for('auth.login', next=request.path))
+    return _serve_spa()
+
 @tongbot_bp.route('/api/bot/schedule/common', methods=['POST'])
 def schedule_common():
     uid = session.get('user_id')

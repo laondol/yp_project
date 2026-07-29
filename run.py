@@ -367,17 +367,26 @@ def create_app():
     try:
         with app.app_context():
             from sqlalchemy import text as _sqlt
-            tables_to_fix = ['share_report', 'message', 'tong_bot', 'user', 'audit_log', 'email_verify', 'notification', 'payment', 'message_report', 'story', 'story_comment']
+            tables_to_fix = ['share_report', 'message', 'tong_bot', 'user', 'tong_bot_schedule', 'tong_bot_memo', 'tong_bot_memo_comment', 'post', 'news_article', 'point_history', 'friend', 'bot_feedback', 'schedule_reminder_log', 'message_reminder_log']
             with db.engine.connect() as conn:
                 for tbl in tables_to_fix:
-                    r = conn.execute(_sqlt(f"SELECT pg_get_serial_sequence('{tbl}','id')")).scalar()
-                    if not r:
+                    try:
+                        safe = f'"{tbl}"' if tbl == 'user' else tbl
+                        r = conn.execute(_sqlt(f"SELECT pg_get_serial_sequence('{tbl}','id')")).scalar()
                         seq = f"{tbl}_id_seq"
-                        conn.execute(_sqlt(f"CREATE SEQUENCE IF NOT EXISTS {seq} OWNED BY {tbl}.id"))
-                        max_id = conn.execute(_sqlt(f"SELECT COALESCE(MAX(id), 0) + 1 FROM {tbl}")).scalar()
-                        conn.execute(_sqlt(f"SELECT setval('{seq}', {max_id}, false)"))
-                        conn.execute(_sqlt(f"ALTER TABLE {tbl} ALTER COLUMN id SET DEFAULT nextval('{seq}')"))
-                        print(f'[OK] {tbl}.id sequence created (next id: {max_id})')
+                        if not r:
+                            conn.execute(_sqlt(f"CREATE SEQUENCE IF NOT EXISTS {seq} OWNED BY {safe}.id"))
+                            max_id = conn.execute(_sqlt(f"SELECT COALESCE(MAX(id), 0) + 1 FROM {safe}")).scalar()
+                            conn.execute(_sqlt(f"SELECT setval('{seq}', {max_id}, false)"))
+                            conn.execute(_sqlt(f"ALTER TABLE {safe} ALTER COLUMN id SET DEFAULT nextval('{seq}')"))
+                            print(f'[OK] {tbl}.id sequence created (next id: {max_id})')
+                        else:
+                            cd = conn.execute(_sqlt(f"SELECT column_default FROM information_schema.columns WHERE table_name='{tbl}' AND column_name='id'")).scalar()
+                            if not cd:
+                                conn.execute(_sqlt(f"ALTER TABLE {safe} ALTER COLUMN id SET DEFAULT nextval('{seq}')"))
+                                print(f'[OK] {tbl}.id default set')
+                    except Exception as e2:
+                        print(f'[SKIP] {tbl} sequence: {e2}')
                 conn.commit()
     except Exception as e:
         print(f'[SKIP] all sequences migration: {e}')

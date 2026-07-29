@@ -132,9 +132,9 @@ export default function AdminUsers() {
 
   const roleBadge = (role: string) => {
     if (role === 'admin') return <span className="badge bg-danger me-1">관</span>
-    if (role === 'manager') return <span className="badge bg-primary me-1">책</span>
-    if (role === 'master') return <span className="badge bg-dark me-1">마</span>
-    return <span className="badge bg-secondary me-1">+역할</span>
+    if (role === 'leader') return <span className="badge bg-primary me-1">책</span>
+    if (role === 'manager') return <span className="badge bg-info me-1">운</span>
+    return <span className="badge bg-secondary me-1">회</span>
   }
 
   if (loading) return (

@@ -83,6 +83,7 @@ import PsychoAdminAppointmentsPage from './pages/PsychoAdminAppointmentsPage'
 import UserProfilePage from './pages/UserProfilePage'
 import EditProfilePage from './pages/EditProfilePage'
 import SchedulePopupPage from './pages/SchedulePopupPage'
+import MemoPage from './pages/MemoPage'
 import VillageAdminPage from './pages/VillageAdminPage'
 import VillageQrPage from './pages/VillageQrPage'
 import VillageQrDisplay from './pages/VillageQrDisplay'
@@ -219,6 +220,7 @@ export default function App() {
             <Route path="/construction" element={<ProtectedRoute><ConstructionPage /></ProtectedRoute>} />
             <Route path="/construction/store/:storeName" element={<ProtectedRoute><StoreDetailPage /></ProtectedRoute>} />
             <Route path="/schedule" element={<ProtectedRoute><SchedulePage /></ProtectedRoute>} />
+            <Route path="/memo" element={<ProtectedRoute><MemoPage /></ProtectedRoute>} />
             <Route path="/schedule2" element={<ProtectedRoute><SchedulePage /></ProtectedRoute>} />
             <Route path="/schedule-popup" element={<ProtectedRoute><SchedulePopupPage /></ProtectedRoute>} />
             <Route path="/my/did" element={<ProtectedRoute><MyDID /></ProtectedRoute>} />

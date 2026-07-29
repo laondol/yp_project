@@ -115,6 +115,14 @@ def api_register_status():
         return jsonify({'verified': True, 'email': email})
     return jsonify({'verified': False})
 
+@auth_bp.route('/api/auth/register/cancel', methods=['POST'])
+def api_register_cancel():
+    session.pop('email_verified_for_register', None)
+    session.pop('verify_email', None)
+    session.pop('verify_code', None)
+    session.pop('verify_code_time', None)
+    return jsonify({'status': 'success'})
+
 @auth_bp.route('/reset-password')
 def reset_password():
     return _serve_spa()

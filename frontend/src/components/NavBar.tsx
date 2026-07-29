@@ -36,8 +36,6 @@ export default function NavBar() {
   const toastIdRef = useRef(0)
   const [searchOpen, setSearchOpen] = useState(false)
   const searchRef = useRef<HTMLInputElement>(null)
-  const [showMemoModal, setShowMemoModal] = useState(false)
-  const [memoList, setMemoList] = useState<{id:number;content:string;author:string;done:boolean;created_at:string}[]>([])
 
   useEffect(() => {
     if (!user?.id) return
@@ -260,12 +258,7 @@ export default function NavBar() {
                 )}
               </a>
               {/* 메모 */}
-              <button className="btn btn-sm p-0 border-0 bg-transparent position-relative ms-1" title="메모"
-                onClick={() => {
-                  fetch('/api/bot/memos', { credentials: 'include' }).then(r => r.json()).then(d => {
-                    setMemoList(d.memos || []); setShowMemoModal(true)
-                  }).catch(() => {})
-                }}>
+              <a href="/memo" className="text-decoration-none position-relative ms-1" title="메모">
                 <span style={{ fontSize: '1.1rem' }}>📝</span>
                 {totalMemos > 0 && (
                   <span className="position-absolute top-0 start-100 translate-middle badge rounded-pill"
@@ -273,7 +266,7 @@ export default function NavBar() {
                     {totalMemos}
                   </span>
                 )}
-              </button>
+              </a>
               {/* 편지 */}
               <a href="/message/inbox" className="text-decoration-none position-relative ms-1" title="편지">
                 <span style={{ fontSize: '1.1rem' }}>✉️</span>
@@ -300,33 +293,6 @@ export default function NavBar() {
             <span className="navbar-toggler-icon"></span>
           </button>
         </div>
-
-        {/* Memo modal */}
-        {showMemoModal && (
-          <div className="position-fixed top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center"
-            style={{ background: 'rgba(0,0,0,0.4)', zIndex: 9999 }} onClick={() => setShowMemoModal(false)}>
-            <div className="bg-white rounded shadow p-3" style={{ maxWidth: 400, width: '90%', maxHeight: '70vh', overflow: 'auto' }}
-              onClick={e => e.stopPropagation()}>
-              <div className="d-flex justify-content-between align-items-center mb-2">
-                <h6 className="fw-bold mb-0">📝 메모</h6>
-                <button className="btn btn-sm btn-outline-secondary py-0 px-1" onClick={() => setShowMemoModal(false)}>✕</button>
-              </div>
-              {memoList.length === 0 ? (
-                <div className="text-muted small text-center py-3">메모가 없습니다</div>
-              ) : (
-                memoList.slice(0, 20).map(m => (
-                  <div key={m.id} className={`small border-bottom py-2 ${m.done ? 'text-decoration-line-through text-muted' : ''}`}>
-                    <div>{m.content}</div>
-                    <div className="text-muted" style={{ fontSize: '0.65rem' }}>
-                      {m.author === 'bot' ? '🤖' : '👤'} {m.created_at?.slice(0, 10)}
-                    </div>
-                  </div>
-                ))
-              )}
-              <a href="/user/my" className="d-block text-center small mt-2">📋 모든 메모 보기 →</a>
-            </div>
-          </div>
-        )}
 
         {/* Toast notifications */}
         {toasts.length > 0 && (

@@ -311,7 +311,8 @@ def _ensure_day_routes(uid, evt_date, exclude_ids=None):
             description=format_itinerary(plan_to),
             content=json.dumps(plan_to, ensure_ascii=False),
             event_date=dep_dt, end_date=arr_dt, location=evt.location,
-            memo=_compact, departure_location=from_time, return_location=evt.location)
+            memo=_compact, departure_location=from_time, return_location=evt.location,
+            kind='route')
         db.session.add(move)
         db.session.flush()
         auto_created.append({"id":move.id,"title":move.title,"type":"move","arrival":arr_dt.strftime("%H:%M"),"departure":dep_dt.strftime("%H:%M"),"from":from_time})
@@ -363,6 +364,11 @@ def _ensure_day_routes(uid, evt_date, exclude_ids=None):
                         last_end = None
                     if not last_end:
                         last_end = last_evt.event_date + timedelta(hours=1)
+                    if last_end and last_end.tzinfo and not ret_dep.tzinfo:
+                        from datetime import timezone
+                        ret_dep = ret_dep.replace(tzinfo=last_end.tzinfo)
+                    elif last_end and not last_end.tzinfo and ret_dep.tzinfo:
+                        last_end = last_end.replace(tzinfo=ret_dep.tzinfo)
                     if ret_dep < last_end:
                         ret_dep = last_end + timedelta(minutes=5)
                     ret_arr = ret_dep + timedelta(minutes=plan_home['total_min'])
@@ -370,7 +376,8 @@ def _ensure_day_routes(uid, evt_date, exclude_ids=None):
                         description=format_itinerary(plan_home),
                         content=json.dumps(plan_home, ensure_ascii=False),
                         event_date=ret_dep, end_date=ret_arr, location=return_dest,
-                        memo=_compact_home, departure_location=last_loc, return_location=return_dest)
+                        memo=_compact_home, departure_location=last_loc, return_location=return_dest,
+                        kind='route')
                     db.session.add(home_return)
                     db.session.flush()
                     auto_created.append({"id":home_return.id,"title":return_title,"type":"return","departure":ret_dep.strftime("%H:%M"),"arrival":ret_arr.strftime("%H:%M")})
@@ -401,7 +408,7 @@ def recalc_user_routes(uid, commit=True):
     # 기존 이동/귀가 전체 삭제 후 재생성 (정합성 보장)
     TongBotSchedule.query.filter(
         TongBotSchedule.user_id == uid,
-        TongBotSchedule.kind == None,
+        or_(TongBotSchedule.kind == None, TongBotSchedule.kind == 'route'),
         or_(TongBotSchedule.title.like('%이동%'), TongBotSchedule.title.like('%귀가%'))
     ).delete(synchronize_session=False)
     db.session.flush()

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 const FULL_TERMS = `
@@ -99,8 +99,9 @@ export default function RegisterPage() {
   const [termsConfirmed, setTermsConfirmed] = useState(false)
   const [email, setEmail] = useState('')
   const [emailVerified, setEmailVerified] = useState(false)
-  const [linkSent, setLinkSent] = useState(false)
-  const [debugUrl, setDebugUrl] = useState('')
+  const [codeSent, setCodeSent] = useState(false)
+  const [code, setCode] = useState('')
+  const [codeChecking, setCodeChecking] = useState(false)
   const [password, setPassword] = useState('')
   const [passwordConfirm, setPasswordConfirm] = useState('')
   const [showPw, setShowPw] = useState(false)
@@ -113,9 +114,6 @@ export default function RegisterPage() {
   const [town, setTown] = useState('')
   const [village, setVillage] = useState('')
   const [neighborChecked, setNeighborChecked] = useState(false)
-  const [nickname, setNickname] = useState('')
-  const [nicknameStatus, setNicknameStatus] = useState<'idle' | 'checking' | 'available' | 'unavailable'>('idle')
-  const nicknameTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -130,37 +128,39 @@ export default function RegisterPage() {
         }
       })
       .catch(() => {})
+
+    return () => {
+      fetch('/api/auth/register/cancel', { method: 'POST', credentials: 'include' }).catch(() => {})
+    }
   }, [])
 
-  useEffect(() => {
-    if (nicknameTimer.current) clearTimeout(nicknameTimer.current)
-    const v = nickname.trim()
-    if (!v) { setNicknameStatus('idle'); return }
-    setNicknameStatus('checking')
-    nicknameTimer.current = setTimeout(async () => {
-      try {
-        const r = await fetch(`/api/auth/check-username?username=${encodeURIComponent(v)}`)
-        const d = await r.json()
-        setNicknameStatus(d.available ? 'available' : 'unavailable')
-      } catch { setNicknameStatus('idle') }
-    }, 500)
-  }, [nickname])
-
-  const handleSendLink = async () => {
+  const handleSendCode = async () => {
     if (!email) { setError('이메일을 입력해주세요.'); return }
-    setError(''); setLoading(true); setDebugUrl('')
+    setError(''); setLoading(true)
     try {
       const fd = new FormData()
       fd.append('email', email)
-      fd.append('redirect', '/register')
       fd.append('purpose', 'register')
-      const res = await fetch('/register/verify-email-button', { method: 'POST', body: fd, credentials: 'include' })
+      const res = await fetch('/register/send-code', { method: 'POST', body: fd, credentials: 'include' })
       const data = await res.json()
-      if (data.status === 'error') { setError(data.msg || '인증 링크 전송 실패'); return }
-      setLinkSent(true)
-      if (data.debug_url) setDebugUrl(data.debug_url)
+      if (data.status === 'error') { setError(data.msg || '인증 코드 전송 실패'); return }
+      setCodeSent(true)
     } catch { setError('서버 연결 실패') }
     finally { setLoading(false) }
+  }
+
+  const handleVerifyCode = async () => {
+    if (!code || code.length !== 6) { setError('6자리 인증 코드를 입력해주세요.'); return }
+    setError(''); setCodeChecking(true)
+    try {
+      const fd = new FormData()
+      fd.append('code', code)
+      const res = await fetch('/register/verify-code', { method: 'POST', body: fd, credentials: 'include' })
+      const data = await res.json()
+      if (data.status === 'error') { setError(data.msg || '인증 실패'); return }
+      setEmailVerified(true)
+    } catch { setError('서버 연결 실패') }
+    finally { setCodeChecking(false) }
   }
 
   const handleCurrentLocation = (target: 'home' | 'office') => {
@@ -240,7 +240,6 @@ export default function RegisterPage() {
       const fd = new FormData()
       fd.append('password', password)
       fd.append('real_name', realName)
-      if (nickname.trim()) fd.append('username', nickname.trim())
       if (homeAddress) fd.append('home_address', homeAddress)
       if (officeAddress) fd.append('office_address', officeAddress)
       if (lat !== null) fd.append('lat', String(lat))
@@ -309,21 +308,32 @@ export default function RegisterPage() {
                   value={email}
                   onChange={e => setEmail(e.target.value)}
                   placeholder="example@email.com"
+                  disabled={codeSent}
                   required
                 />
-                <button className="btn btn-success" onClick={handleSendLink} disabled={loading}>
-                  {loading ? '전송 중...' : '인증 링크'}
+                <button className="btn btn-success" onClick={handleSendCode} disabled={loading || codeSent}>
+                  {loading ? '전송 중...' : codeSent ? '전송 완료' : '인증 코드 받기'}
                 </button>
               </div>
-              {linkSent && (
-                <div className="alert alert-info py-2 small mt-2 mb-0">
-                  [{email}]로 인증 링크를 발송했습니다.<br />
-                  이메일을 확인하고 링크를 클릭하면 아래 폼이 활성화됩니다.
-                  {debugUrl && (
-                    <div className="mt-2">
-                      <a href={debugUrl} className="fw-bold">[DEV] 인증 링크로 바로 가기</a>
-                    </div>
-                  )}
+              {codeSent && (
+                <div className="mt-2">
+                  <div className="input-group">
+                    <input
+                      type="text"
+                      className="form-control"
+                      value={code}
+                      onChange={e => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                      placeholder="6자리 코드 입력"
+                      maxLength={6}
+                      style={{ letterSpacing: 6, textAlign: 'center', fontWeight: 'bold' }}
+                    />
+                    <button className="btn btn-outline-success" onClick={handleVerifyCode} disabled={codeChecking || code.length !== 6}>
+                      {codeChecking ? '확인 중...' : '인증 확인'}
+                    </button>
+                  </div>
+                  <div className="text-muted small mt-1">
+                    [{email}]로 인증 코드를 발송했습니다. 메일함을 확인해 주세요.
+                  </div>
                 </div>
               )}
             </div>
@@ -375,15 +385,6 @@ export default function RegisterPage() {
               <div className="mb-3">
                 <label className="form-label small fw-bold">이름 (선택)</label>
                 <input type="text" className="form-control" value={realName} onChange={e => setRealName(e.target.value)} placeholder="이름" />
-              </div>
-
-              {/* 별명 */}
-              <div className="mb-3">
-                <label className="form-label small fw-bold">별명 (선택, 중복불가)</label>
-                <input type="text" className="form-control" value={nickname} onChange={e => setNickname(e.target.value)} placeholder="별명" />
-                {nicknameStatus === 'checking' && <div className="small text-muted mt-1">확인 중...</div>}
-                {nicknameStatus === 'available' && <div className="small text-success mt-1">✅ 사용 가능한 별명입니다</div>}
-                {nicknameStatus === 'unavailable' && <div className="small text-danger mt-1">❌ 이미 사용 중인 별명입니다</div>}
               </div>
 
               {/* 집주소 */}
