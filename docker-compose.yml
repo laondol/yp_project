@@ -65,8 +65,6 @@ services:
       dockerfile: Dockerfile.rag
     container_name: yp_rag
     working_dir: /yp_project/yp_rag
-    ports:
-      - "8001:8001"
     environment:
       - DATABASE_URL=postgresql://yp_dev:yp_dev_pass_2026@postgres:5432/yp_local
       - RAG_API_KEY=yp_rag_secret_2026

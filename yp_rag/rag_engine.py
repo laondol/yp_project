@@ -13,7 +13,7 @@ MODEL_NAME = 'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2'
 _embedder = None
 _chroma_client = None
 _collection = None
-_lock = threading.Lock()
+_lock = threading.RLock()
 
 def _get_embedder():
     global _embedder
