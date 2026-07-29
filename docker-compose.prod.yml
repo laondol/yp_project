@@ -11,6 +11,26 @@ services:
     ports:
       - "127.0.0.1:5000:5000"
     env_file: .env
+    environment:
+      - RAG_URL=http://yp_rag:8001
+    depends_on:
+      - postgres
+      - rag
+    restart: always
+
+  rag:
+    build:
+      context: .
+      dockerfile: Dockerfile.rag
+    container_name: yp_rag
+    working_dir: /yp_project/yp_rag
+    ports:
+      - "127.0.0.1:8001:8001"
+    environment:
+      - DATABASE_URL=postgresql://yp_dev:yp_dev_pass_2026@postgres:5432/yp_local
+      - RAG_API_KEY=yp_rag_secret_2026
+    volumes:
+      - rag_data:/yp_project/yp_rag/chroma_data
     depends_on:
       - postgres
     restart: always
@@ -31,3 +51,4 @@ services:
 volumes:
   pgdata:
   uploads_data:
+  rag_data:

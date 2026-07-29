@@ -1,0 +1,9 @@
+FROM python:3.12-slim
+WORKDIR /yp_project/yp_rag
+COPY yp_rag/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY yp_rag/ .
+COPY templates/ /yp_project/templates/
+COPY charter.md /yp_project/charter.md
+EXPOSE 8001
+CMD ["python", "server.py"]
