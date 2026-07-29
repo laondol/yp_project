@@ -69,6 +69,7 @@ services:
       - DATABASE_URL=postgresql://yp_dev:yp_dev_pass_2026@postgres:5432/yp_local
       - RAG_API_KEY=yp_rag_secret_2026
     volumes:
+      - .:/yp_project
       - rag_data:/yp_project/yp_rag/chroma_data
     depends_on:
       - postgres

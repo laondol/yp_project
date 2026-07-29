@@ -1,49 +1,34 @@
 #!/bin/bash
 set -e
 
-echo "=== 양평자율플랫폼 배포 스크립트 ==="
+COMPOSE_FILE="docker-compose.prod.yml"
+REMOTE="origin"
+BRANCH="dev"
 
-# 1. 기존 서비스 정지
-echo "[1/6] 기존 서비스 정지..."
-sudo supervisorctl stop all 2>/dev/null || true
-sudo systemctl stop nginx 2>/dev/null || true
-sudo systemctl stop postgresql 2>/dev/null || true
+echo "=== YP Project Deploy ==="
 
-# 2. Docker 설치
-echo "[2/6] Docker 설치..."
-if ! command -v docker &> /dev/null; then
-    sudo apt install -y docker.io docker-compose
-    sudo systemctl enable docker
-    sudo systemctl start docker
-    sudo usermod -aG docker ubuntu
+# 1. Git pull
+echo "[1/4] Pulling latest changes..."
+git pull $REMOTE $BRANCH
+
+# 2. Check if RAG requirements changed (need rebuild)
+echo "[2/4] Checking for dependency changes..."
+RAG_CHANGED=$(git diff HEAD~1 --name-only 2>/dev/null | grep -E "^yp_rag/requirements\.txt$" || true)
+
+if [ -n "$RAG_CHANGED" ]; then
+    echo "  -> RAG requirements.txt changed, rebuilding RAG image..."
+    docker compose -f $COMPOSE_FILE build rag
+else
+    echo "  -> No dependency changes, skipping rebuild."
 fi
 
-# 3. DB 덤프 (PostgreSQL이 아직 살아있으면)
-echo "[3/6] DB 백업..."
-if sudo systemctl is-active --quiet postgresql; then
-    sudo -u postgres pg_dump -d yp_dev -F c -f /home/ubuntu/yp_dev_backup.dump 2>/dev/null || true
-fi
+# 3. Restart all services (code changes reflected via volume mount)
+echo "[3/4] Restarting services..."
+docker compose -f $COMPOSE_FILE up -d
 
-# 4. docker-compose로 실행
-echo "[4/6] Docker 컨테이너 시작..."
-cd /home/ubuntu/yp_project
-docker-compose -f docker-compose.prod.yml down 2>/dev/null || true
-docker-compose -f docker-compose.prod.yml up -d --build
-
-# 5. DB 복원
-echo "[5/6] DB 복원..."
-sleep 3
-if [ -f /home/ubuntu/yp_dev_backup.dump ]; then
-    docker exec -i yp_postgres pg_restore -U yp_dev -d yp_local --no-owner --no-privileges < /home/ubuntu/yp_dev_backup.dump 2>/dev/null || true
-fi
-
-# 6. Nginx 설정
-echo "[6/6] Nginx 설정..."
-sudo cp /home/ubuntu/yp_project/nginx/yp_project.conf /etc/nginx/sites-available/yp_project
-sudo ln -sf /etc/nginx/sites-available/yp_project /etc/nginx/sites-enabled/
-sudo rm -f /etc/nginx/sites-enabled/default
-sudo nginx -t
-sudo systemctl restart nginx
-
-echo "=== 배포 완료! ==="
-echo "https://test.unocum.kr 접속 테스트!"
+# 4. Verify
+echo "[4/4] Verifying..."
+sleep 5
+docker compose -f $COMPOSE_FILE ps
+echo ""
+echo "=== Deploy complete ==="
