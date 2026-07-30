@@ -47,3 +47,7 @@ ollama.txt
 
 # frontend build output
 frontend/dist/
+
+# DB dumps
+*.dump
+*.dump.*
