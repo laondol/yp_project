@@ -59,6 +59,20 @@ export default function AiChatPage() {
     <div className="d-flex flex-column" style={{ height: 'calc(100vh - 100px)', maxWidth: 700, margin: '0 auto' }}>
       <h4 className="fw-bold mb-3">AI 채팅</h4>
       <div className="card border-0 shadow-sm flex-grow-1 d-flex flex-column" style={{ borderRadius: 16, overflow: 'hidden' }}>
+        <div className="p-3 border-bottom d-flex gap-2" style={{ background: '#fff' }}>
+          <input
+            className="form-control"
+            placeholder="메시지를 입력하세요..."
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            disabled={loading}
+          />
+          <button className="btn btn-success px-4" onClick={handleSend} disabled={loading || !input.trim()}>
+            전송
+          </button>
+        </div>
+        {error && <div className="alert alert-danger text-center small m-2 py-1 mb-0">{error}</div>}
         <div className="flex-grow-1 p-3 overflow-auto" style={{ background: '#f8f9fa' }}>
           {messages.map((msg, i) => (
             <div key={i} className={`d-flex mb-3 ${msg.role === 'user' ? 'justify-content-end' : 'justify-content-start'}`}>
@@ -85,20 +99,6 @@ export default function AiChatPage() {
             </div>
           )}
           <div ref={bottomRef} />
-        </div>
-        {error && <div className="alert alert-danger text-center small m-2 py-1 mb-0">{error}</div>}
-        <div className="p-3 border-top d-flex gap-2" style={{ background: '#fff' }}>
-          <input
-            className="form-control"
-            placeholder="메시지를 입력하세요..."
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            disabled={loading}
-          />
-          <button className="btn btn-success px-4" onClick={handleSend} disabled={loading || !input.trim()}>
-            전송
-          </button>
         </div>
       </div>
     </div>

@@ -235,6 +235,38 @@ def bot_chat():
                 parts.append(f'\n🔗 네이버 쇼핑: https://search.shopping.naver.com/search/all?query={keyword}')
                 shopping_info = '\n'.join(parts)
 
+    # 공과금 납부 의도 감지 → 오늘 20시 마감 일정 자동 생성
+    if _detect_bill_intent(msg) and not schedule_info:
+        try:
+            now_kst = datetime.now(KST)
+            today_20 = now_kst.replace(hour=20, minute=0, second=0, microsecond=0)
+            # 이미 오늘 20시 공과금 일정이 있는지 확인
+            existing = TongBotSchedule.query.filter_by(user_id=uid).filter(
+                TongBotSchedule.event_date == today_20,
+                TongBotSchedule.title.contains('공과금')
+            ).first()
+            if not existing:
+                # 공과금 종류 추출
+                bill_type = '공과금'
+                for kw in ['전기', '가스', '수도', '전화', '통신', '인터넷', '관리비', '월세', '임대료']:
+                    if kw in msg:
+                        bill_type = f'{kw}요금'
+                        break
+                s = TongBotSchedule(
+                    user_id=uid,
+                    title=f'{bill_type} 납부',
+                    description=f'{msg[:100]}',
+                    event_date=today_20,
+                    reminder_minutes=10,
+                    memo='공과금 자동등록'
+                )
+                db.session.add(s)
+                db.session.commit()
+                schedule_info = {"id": s.id, "title": s.title, "date": today_20.strftime('%m/%d %H:%M')}
+                reply = f"✅ {bill_type} 납부 일정이 등록되었습니다!\n⏰ 마감: 오늘 20:00\n🔔 19:50에 미리 알려드릴게요."
+        except Exception as e:
+            current_app.logger.error(f'공과금 일정 생성 오류: {e}')
+
     if _detect_schedule_intent(msg):
         try:
             sched_resp = bot_schedule_ai_internal(uid, msg, user, bot)
@@ -553,6 +585,13 @@ def _nearest_weekday(d):
     return d
 
 SCHEDULE_KEYWORDS = ['일정', '약속', '캘린더', '예약', '스케줄', '추가해', '등록해', '만들어줘', '생성해', '넣어줘', '기록해', '잡아줘', '저장해', '등록', '추가', '일정추가', '일정등록', '만나자', '보자', '가자', '갈까', '만날까']
+
+BILL_KEYWORDS = ['요금', '공과금', '전기요금', '가스요금', '수도요금', '전화요금', '통신요금', '인터넷요금', '관리비', '월세', '임대료', '납부', '납입', '내야', '내는', '내자', '요금납부', '요금내', '공과금내', '공과금납부']
+
+def _detect_bill_intent(msg):
+    """공과금 납부 의도 감지"""
+    msg_lower = msg.lower()
+    return any(kw in msg_lower for kw in BILL_KEYWORDS)
 
 def _detect_schedule_intent(msg):
     """일정 생성 의도 감지"""

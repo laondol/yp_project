@@ -103,6 +103,7 @@ import AdminAlertEdit from './pages/AdminAlertEdit'
 import VillagePageEdit from './pages/VillagePageEdit'
 import VillagePageView from './pages/VillagePageView'
 import PsychoPostEdit from './pages/PsychoPostEdit'
+import FloatingMemo from './components/FloatingMemo'
 
 function Footer() {
   const host = window.location.hostname
@@ -112,7 +113,7 @@ function Footer() {
     <footer className="text-center py-4 border-top" style={{ background: '#f8f9fa' }}>
       <span className="fw-bold text-success">{name}</span>
       <span className="text-muted mx-2">|</span>
-      <a href="mailto:unocumyp@gmail.com" className="text-muted text-decoration-none small">unocumyp@gmail.com</a>
+      <a href="mailto:admin@unocum.kr" className="text-muted text-decoration-none small">admin@unocum.kr</a>
     </footer>
   )
 }
@@ -128,6 +129,7 @@ export default function App() {
     <AuthProvider>
       <BrowserRouter>
         {!isPopup && <NavBar />}
+        {!isPopup && <FloatingMemo />}
         <div className={isPopup ? '' : 'container pb-5'}>
           <Routes>
             {/* Public: intro / auth / share (공유마당) */}
@@ -230,6 +232,8 @@ export default function App() {
             <Route path="/admin/news" element={<ProtectedRoute><AdminNews /></ProtectedRoute>} />
             <Route path="/admin/news/create" element={<ProtectedRoute><AdminNewsEdit /></ProtectedRoute>} />
             <Route path="/admin/news/edit/:id" element={<ProtectedRoute><AdminNewsEdit /></ProtectedRoute>} />
+            <Route path="/admin/labor-news/edit/:id" element={<ProtectedRoute><AdminNewsEdit type="labor" /></ProtectedRoute>} />
+            <Route path="/admin/labor-news/create" element={<ProtectedRoute><AdminNewsEdit type="labor" /></ProtectedRoute>} />
             <Route path="/admin/news/recommendations" element={<ProtectedRoute><AdminNewsRecommendations /></ProtectedRoute>} />
             <Route path="/admin/share-reports" element={<ProtectedRoute><AdminShareReports /></ProtectedRoute>} />
             <Route path="/admin/stores" element={<ProtectedRoute><AdminStores /></ProtectedRoute>} />
