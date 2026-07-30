@@ -54,7 +54,7 @@ services:
       POSTGRES_PASSWORD: yp_dev_pass_2026
       POSTGRES_DB: yp_local
     ports:
-      - "5432:5432"
+      - "6432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     restart: unless-stopped

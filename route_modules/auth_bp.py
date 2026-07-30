@@ -140,7 +140,7 @@ def reset_password_send():
     import secrets, time
     token = secrets.token_urlsafe(32)
     user.reset_token = token
-    user.reset_token_expiry = datetime.now(timezone.utc) + timedelta(hours=1)
+    user.reset_token_expiry = datetime.utcnow() + timedelta(hours=1)
     db.session.commit()
     reset_url = url_for('auth.reset_password_confirm', token=token, _external=True)
     from services.email_service import EmailService
@@ -154,7 +154,7 @@ def reset_password_send():
 @auth_bp.route('/reset-password/<token>')
 def reset_password_confirm(token):
     user = User.query.filter_by(reset_token=token).first()
-    if not user or not user.reset_token_expiry or user.reset_token_expiry < datetime.now(timezone.utc):
+    if not user or not user.reset_token_expiry or user.reset_token_expiry < datetime.utcnow():
         return "<script>alert('만료된 링크입니다.'); location.href='/reset-password';</script>"
     return _serve_spa()
 
@@ -164,7 +164,7 @@ def reset_password_confirm_post():
     token = data.get('token','')
     password = data.get('password','')
     user = User.query.filter_by(reset_token=token).first()
-    if not user or not user.reset_token_expiry or user.reset_token_expiry < datetime.now(timezone.utc):
+    if not user or not user.reset_token_expiry or user.reset_token_expiry < datetime.utcnow():
         return jsonify({"status":"error","msg":"만료된 링크입니다."})
     user.password = generate_password_hash(password)
     user.reset_token = None

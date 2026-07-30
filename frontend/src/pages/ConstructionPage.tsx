@@ -60,9 +60,14 @@ export default function ConstructionPage() {
   const [facilitiesLoading, setFacilitiesLoading] = useState(false)
   const [alertsLoading, setAlertsLoading] = useState(false)
 
-  const [corrAddress, setCorrAddress] = useState('')
   const [homeLat, setHomeLat] = useState(0)
   const [homeLng, setHomeLng] = useState(0)
+
+  const [transitSuggestion, setTransitSuggestion] = useState<any>(null)
+  const [transitLoading, setTransitLoading] = useState(false)
+  const [transitError, setTransitError] = useState('')
+  const [corrAddress, setCorrAddress] = useState('')
+  const [corrLoading, setCorrLoading] = useState(false)
 
   const [heritageStampLoading, setHeritageStampLoading] = useState<Record<string, boolean>>({})
   const [heritageLat, setHeritageLat] = useState(0)
@@ -175,6 +180,28 @@ export default function ConstructionPage() {
     )
   }, [])
 
+  useEffect(() => {
+    if (activeTab !== 'home') return
+    setTransitLoading(true)
+    setTransitError('')
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        const lat = pos.coords.latitude
+        const lng = pos.coords.longitude
+        fetch(`/construction/transit/suggest?from_lat=${lat}&from_lng=${lng}`)
+          .then(r => r.json())
+          .then(d => {
+            if (d.error) { setTransitError(d.error); return }
+            setTransitSuggestion(d)
+          })
+          .catch(() => setTransitError('위치 정보를 불러올 수 없습니다.'))
+          .finally(() => setTransitLoading(false))
+      },
+      () => { setTransitLoading(false); setTransitError('GPS 위치를 가져올 수 없습니다.') },
+      { enableHighAccuracy: true, timeout: 10000 }
+    )
+  }, [activeTab])
+
   const handleStamp = async (name: string) => {
     setHeritageStampLoading(prev => ({ ...prev, [name]: true }))
     try {
@@ -191,14 +218,34 @@ export default function ConstructionPage() {
   const handleCorrection = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!corrAddress.trim()) return
-    const fd = new FormData()
-    fd.append('manual_loc', corrAddress)
-    fd.append('gps_lat', String(homeLat))
-    fd.append('gps_lng', String(homeLng))
+    setCorrLoading(true)
     try {
-      const res = await fetch('/user/location/correct', { method: 'POST', body: fd })
-      if (res.ok) alert('위치가 보정되었습니다. 1닢이 지급됩니다.')
+      const res = await fetch('/user/location/correct', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ manual_loc: corrAddress, gps_lat: homeLat, gps_lng: homeLng }),
+      })
+      const data = await res.json()
+      if (data.status === 'success') {
+        alert(data.msg || '위치가 보정되었습니다.')
+        setCorrAddress('')
+        setTransitLoading(true)
+        setTransitError('')
+        navigator.geolocation.getCurrentPosition(
+          pos => {
+            fetch(`/construction/transit/suggest?from_lat=${pos.coords.latitude}&from_lng=${pos.coords.longitude}`)
+              .then(r => r.json())
+              .then(d => { if (!d.error) setTransitSuggestion(d) })
+              .finally(() => setTransitLoading(false))
+          },
+          () => setTransitLoading(false),
+          { enableHighAccuracy: true, timeout: 10000 }
+        )
+      } else {
+        alert(data.msg || '보정 실패')
+      }
     } catch { alert('오류 발생') }
+    setCorrLoading(false)
   }
 
   if (loading) return <Loading />
@@ -393,18 +440,95 @@ export default function ConstructionPage() {
       {/* Home Tab */}
       {activeTab === 'home' && (
         <div>
-          <div className="card border-0 shadow-sm p-4" style={{ borderRadius: 16 }}>
-            <h5 className="fw-bold mb-3">🏠 내 위치 보정</h5>
-            <p className="small text-muted mb-3">📍 위치 보정 참여시 <strong>1닢</strong> 지급</p>
-            <form onSubmit={handleCorrection}>
-              <input type="hidden" name="gps_lat" value={homeLat} />
-              <input type="hidden" name="gps_lng" value={homeLng} />
-              <div className="d-flex gap-2">
-                <input type="text" className="form-control" placeholder="정확한 주소 입력 (예: 양수리 935)" value={corrAddress} onChange={e => setCorrAddress(e.target.value)} required />
-                <button type="submit" className="btn btn-outline-secondary">📍 보정</button>
+          {transitLoading ? (
+            <div className="text-center py-5"><Loading /><p className="text-muted small mt-2">귀가 경로를 분석하고 있습니다...</p></div>
+          ) : transitError ? (
+            <div className="card border-0 shadow-sm p-4" style={{ borderRadius: 16 }}>
+              <div className="text-center">
+                <p className="text-danger mb-2">⚠️ {transitError}</p>
+                <button className="btn btn-outline-secondary btn-sm" onClick={() => setActiveTab('home')}>🔄 다시 시도</button>
               </div>
-            </form>
-          </div>
+            </div>
+          ) : transitSuggestion?.already_home ? (
+            <div className="card border-0 shadow-sm p-4 text-center" style={{ borderRadius: 16 }}>
+              <h4 className="mb-2">🏠</h4>
+              <h5 className="fw-bold">이미 집 근처입니다!</h5>
+              <p className="text-muted small">{transitSuggestion.home_address}</p>
+              {transitSuggestion.current_address && <p className="text-muted small">📍 {transitSuggestion.current_address}</p>}
+            </div>
+          ) : transitSuggestion ? (
+            <div>
+              <div className="card border-0 shadow-sm mb-3 p-4" style={{ borderRadius: 16, background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', color: 'white' }}>
+                <div className="text-center">
+                  <p className="mb-1 small opacity-75">⏰ 이 시간까지 출발하세요</p>
+                  <h1 className="fw-bold mb-1" style={{ fontSize: '2.5rem' }}>{transitSuggestion.optimal_departure}</h1>
+                  <p className="small opacity-75 mb-0">{transitSuggestion.time_to_station_min}분 후 도착 (막차 {transitSuggestion.last_transit_from_station} 출발)</p>
+                </div>
+              </div>
+
+              <div className="card border-0 shadow-sm mb-3" style={{ borderRadius: 16 }}>
+                <div className="card-body p-3">
+                  <div className="d-flex align-items-center gap-2 mb-2">
+                    <span className="badge bg-primary">{transitSuggestion.mode}</span>
+                    <span className="fw-bold">{transitSuggestion.line}</span>
+                  </div>
+                  <div className="small text-muted mb-2">
+                    <div>🚉 {transitSuggestion.transfer_station} ({transitSuggestion.direction})</div>
+                    <div>📏 역까지 {transitSuggestion.distance_to_station_km}km · 도보 약 {transitSuggestion.time_to_station_min}분</div>
+                    <div>🕐 막차 {transitSuggestion.last_transit_from_station} 출발</div>
+                    {transitSuggestion.home_distance_km != null && <div>🏠 역에서 집까지 약 {transitSuggestion.home_distance_km}km</div>}
+                  </div>
+                  {transitSuggestion.deep_links && (
+                    <div className="d-flex gap-2">
+                      <a href={transitSuggestion.deep_links.kakao} target="_blank" className="btn btn-sm btn-warning" rel="noopener noreferrer">카카오맵</a>
+                      <a href={transitSuggestion.deep_links.naver} target="_blank" className="btn btn-sm btn-success" rel="noopener noreferrer">네이버맵</a>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="card border-0 shadow-sm mb-3" style={{ borderRadius: 16 }}>
+                <div className="card-body p-3">
+                  <div className="d-flex justify-content-between align-items-center mb-2">
+                    <small className="text-muted">🏠 집</small>
+                    <small className="fw-bold">{transitSuggestion.home_address || `${transitSuggestion.home_town} ${transitSuggestion.home_village}`}</small>
+                  </div>
+                  <div className="d-flex justify-content-between align-items-center mb-3">
+                    <small className="text-muted">📍 현재 위치</small>
+                    <small className="fw-bold">{transitSuggestion.current_address || 'GPS 수신 중'}</small>
+                  </div>
+                  <form onSubmit={handleCorrection} className="border-top pt-3">
+                    <label className="form-label small fw-bold text-muted">📍 현재 위치가 틀렸나요? 직접 입력 후 보정하세요 (1닢 지급)</label>
+                    <div className="d-flex gap-2">
+                      <input type="text" className="form-control form-control-sm" placeholder="예: 양수리 935" value={corrAddress} onChange={e => setCorrAddress(e.target.value)} required />
+                      <button type="submit" className="btn btn-sm btn-outline-primary" disabled={corrLoading}>{corrLoading ? '...' : '보정'}</button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+
+              {transitSuggestion.all_options && transitSuggestion.all_options.length > 1 && (
+                <div className="card border-0 shadow-sm" style={{ borderRadius: 16 }}>
+                  <div className="card-body p-3">
+                    <h6 className="fw-bold mb-2">📋 다른 교통수단</h6>
+                    {transitSuggestion.all_options.map((opt: any, i: number) => (
+                      <div key={i} className={`d-flex justify-content-between align-items-center p-2 rounded mb-1 ${i === 0 ? 'bg-primary bg-opacity-10' : ''}`}>
+                        <div>
+                          <span className="badge bg-secondary me-1">{opt.mode}</span>
+                          <small className="fw-bold">{opt.transfer_station}</small>
+                        </div>
+                        <small className="fw-bold text-primary">{opt.optimal_departure} 출발</small>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="text-center py-5 text-muted">
+              <p>위치를 가져오는 중...</p>
+            </div>
+          )}
         </div>
       )}
 

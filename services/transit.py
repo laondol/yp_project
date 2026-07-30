@@ -207,26 +207,88 @@ def find_best_hubs(from_lat, from_lng, home_town):
     return results
 
 def suggest_optimal_departure(from_lat, from_lng, home_town, home_village):
+    from services.directions import find_bus_between, find_nearest_bus_stop, haversine_km as _hav
+
+    options = []
+
     hubs = find_best_hubs(from_lat, from_lng, home_town)
-    if not hubs:
+    for hub in hubs:
+        last_min = hub["last_transit_total_min"]
+        time_to_station = hub["time_to_station_min"]
+        buffer_min = 10
+        optimal_dep_min = last_min - time_to_station - buffer_min
+        optimal_hour = optimal_dep_min // 60
+        optimal_min = optimal_dep_min % 60
+        options.append({
+            "type": "train",
+            "transfer_station": hub["station"],
+            "station_coords": {"lat": hub["lat"], "lng": hub["lng"]},
+            "station_type": hub["type"], "line": hub["line"],
+            "mode": f"🚄 {hub['line']}",
+            "distance_to_station_km": hub["distance_km"],
+            "time_to_station_min": time_to_station,
+            "last_transit_from_station": hub["last_transit_dep"],
+            "direction": hub["direction"],
+            "buffer_min": buffer_min,
+            "optimal_departure": f"{optimal_hour:02d}:{optimal_min:02d}",
+            "optimal_dep_min": optimal_dep_min,
+            "estimate": True,
+        })
+
+    home_coords = lookup_village_coords(home_town, home_village)
+    if home_coords:
+        home_lat, home_lng = home_coords
+        bus_routes = find_bus_between(from_lat, from_lng, home_lat, home_lng)
+        for bus in bus_routes:
+            nearest_stop, stop_dist = find_nearest_bus_stop(from_lat, from_lng)
+            if not nearest_stop:
+                continue
+            time_to_stop = int(stop_dist * 12 + 5)
+            if bus["dist_km"] > 20:
+                last_bus_min = 21 * 60
+            elif bus["dist_km"] > 10:
+                last_bus_min = 21 * 60 + 30
+            else:
+                last_bus_min = 22 * 60
+            buffer_min = 10
+            optimal_dep_min = last_bus_min - time_to_stop - buffer_min
+            if optimal_dep_min < 0:
+                optimal_dep_min = 0
+            optimal_hour = optimal_dep_min // 60
+            optimal_min = optimal_dep_min % 60
+            options.append({
+                "type": "bus",
+                "transfer_station": nearest_stop["stop"],
+                "station_coords": {"lat": nearest_stop["lat"], "lng": nearest_stop["lng"]},
+                "station_type": "bus_stop", "line": bus["route"],
+                "mode": f"🚌 {bus['route']}번",
+                "distance_to_station_km": round(stop_dist, 1),
+                "time_to_station_min": time_to_stop,
+                "last_transit_from_station": f"{last_bus_min // 60:02d}:{last_bus_min % 60:02d}",
+                "direction": f"{bus['from_stop']}→{bus['to_stop']}",
+                "buffer_min": buffer_min,
+                "optimal_departure": f"{optimal_hour:02d}:{optimal_min:02d}",
+                "optimal_dep_min": optimal_dep_min,
+                "estimate": True,
+            })
+
+    if not options:
         return None
-    best = hubs[0]
-    last_min = best["last_transit_total_min"]
-    time_to_station = best["time_to_station_min"]
-    buffer_min = 10
-    optimal_dep_min = last_min - time_to_station - buffer_min
-    optimal_hour = optimal_dep_min // 60
-    optimal_min = optimal_dep_min % 60
+
+    options.sort(key=lambda o: o["optimal_dep_min"], reverse=True)
+    best = options[0]
+    all_opts = [{k: v for k, v in o.items() if k != "optimal_dep_min"} for o in options]
     return {
-        "transfer_station": best["station"],
-        "station_coords": {"lat": best["lat"], "lng": best["lng"]},
-        "station_type": best["type"], "line": best["line"],
-        "distance_to_station_km": best["distance_km"],
-        "time_to_station_min": time_to_station,
-        "last_transit_from_station": best["last_transit_dep"],
+        "transfer_station": best["transfer_station"],
+        "station_coords": best["station_coords"],
+        "station_type": best["station_type"], "line": best["line"],
+        "mode": best["mode"],
+        "distance_to_station_km": best["distance_to_station_km"],
+        "time_to_station_min": best["time_to_station_min"],
+        "last_transit_from_station": best["last_transit_from_station"],
         "direction": best["direction"],
-        "buffer_min": buffer_min,
-        "optimal_departure": f"{optimal_hour:02d}:{optimal_min:02d}",
+        "buffer_min": best["buffer_min"],
+        "optimal_departure": best["optimal_departure"],
         "estimate": True,
-        "all_options": hubs,
+        "all_options": all_opts,
     }

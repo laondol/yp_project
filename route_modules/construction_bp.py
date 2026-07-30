@@ -161,7 +161,6 @@ def construction_transit_suggest():
         return jsonify({"error": "등록된 주소가 없습니다."}), 400
     home_town = user.town or user.curr_town or ''
     home_village = user.village or user.curr_village or ''
-    # 보정 오프셋 적용: 학습된 GPS 오차 보정
     corrected_lat = from_lat + (user.curr_offset_lat or 0)
     corrected_lng = from_lng + (user.curr_offset_lng or 0)
     from services.transit import suggest_optimal_departure, lookup_village_coords, haversine_km
@@ -169,39 +168,53 @@ def construction_transit_suggest():
     gps_result = gps_to_town_village(corrected_lat, corrected_lng)
     gps_town = gps_result[0] if gps_result else ""
     gps_village = gps_result[1] if gps_result else ""
-    # 집 판정: 보정좌표와 등록좌표 거리 200m 이내면 집
     user_home_lat = user.curr_latitude or user.reg_latitude or 0
     user_home_lng = user.curr_longitude or user.reg_longitude or 0
     is_home = False
     if user_home_lat and user_home_lng:
         d = haversine_km(corrected_lat, corrected_lng, user_home_lat, user_home_lng)
         is_home = d <= 0.2
+
+    from config import Config
+    kakao_key = Config.KAKAO_REST_API_KEY
+    naver_id = Config.NAVER_SEARCH_CLIENT_ID or Config.NAVER_CLIENT_ID
+    naver_secret = Config.NAVER_SEARCH_CLIENT_SECRET or Config.NAVER_CLIENT_SECRET
+
+    current_addr = ""
+    from services.transit import reverse_geocode
+    rg = reverse_geocode(from_lat, from_lng, kakao_key, naver_id, naver_secret)
+    if rg:
+        current_addr = rg.get("address", "")
+
+    home_address = user.curr_address or f"경기 양평군 {home_town} {home_village}".strip()
+
     if is_home:
-        home_addr = user.curr_address or f"{home_town} {home_village}"
         return jsonify({
             "already_home": True,
-            "message": f"🏠 집입니다! 현재 위치가 {home_addr} 근처입니다.",
-            "home_address": home_addr,
+            "message": f"🏠 집입니다! 현재 위치가 {home_address} 근처입니다.",
+            "home_address": home_address,
+            "current_address": current_addr,
         })
+
     suggestion = suggest_optimal_departure(from_lat, from_lng, home_town, home_village)
     if not suggestion:
         return jsonify({"error": "경로를 찾을 수 없습니다."}), 404
-    # 위치보정된 집 좌표를 집 좌표로 사용
+
     if user.curr_latitude and user.curr_longitude:
         home_coords = {"lat": user.curr_latitude, "lng": user.curr_longitude}
     else:
-        home_coords = lookup_village_coords(home_town, home_village)
-        if home_coords:
-            home_coords = {"lat": home_coords[0], "lng": home_coords[1]}
+        hc = lookup_village_coords(home_town, home_village)
+        home_coords = {"lat": hc[0], "lng": hc[1]} if hc else None
     if home_coords:
         suggestion["home_coords"] = home_coords
         suggestion["home_distance_km"] = round(haversine_km(
             suggestion["station_coords"]["lat"], suggestion["station_coords"]["lng"],
             home_coords["lat"], home_coords["lng"]
         ), 1)
-    suggestion["home_town"] = user.curr_town
-    suggestion["home_village"] = user.curr_village
-    suggestion["home_address"] = user.curr_address or user.address or ''
+    suggestion["home_town"] = user.curr_town or home_town
+    suggestion["home_village"] = user.curr_village or home_village
+    suggestion["home_address"] = home_address
+    suggestion["current_address"] = current_addr
     suggestion["already_home"] = False
     suggestion["corrected"] = bool(user.curr_offset_lat or user.curr_offset_lng)
     suggestion["corrected_lat"] = corrected_lat
@@ -213,6 +226,11 @@ def construction_transit_suggest():
         "kakao": f"https://map.kakao.com/?sX={from_lng}&sY={from_lat}&eX={sc['lng']}&eY={sc['lat']}&eName={sname}",
         "naver": f"https://map.naver.com/index.nhn?slat={from_lat}&slng={from_lng}&elat={sc['lat']}&elng={sc['lng']}&etitle={sname}&pathType=1"
     }
+    if home_coords:
+        suggestion["home_deep_links"] = {
+            "kakao": f"https://map.kakao.com/?sX={sc['lng']}&sY={sc['lat']}&eX={home_coords['lng']}&eY={home_coords['lat']}",
+            "naver": f"https://map.naver.com/index.nhn?slat={sc['lat']}&slng={sc['lng']}&elat={home_coords['lat']}&elng={home_coords['lng']}&pathType=1"
+        }
     return jsonify(suggestion)
 
 @construction_bp.route('/construction/traffic/gg')
