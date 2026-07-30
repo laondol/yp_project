@@ -145,6 +145,7 @@ class NewsArticle(db.Model):
     world_admin_approved = db.Column(db.Boolean, default=False)
     kr_yp_ai_approved = db.Column(db.Boolean, default=False)
     kr_yp_admin_approved = db.Column(db.Boolean, default=False)
+    labor_only = db.Column(db.Boolean, default=False)
     ai_reason = db.Column(db.Text)
     created_by = db.Column(db.Integer, db.ForeignKey('user.id'))
     created_at = db.Column(db.DateTime, default=datetime.now)
@@ -184,6 +185,22 @@ class NewsVote(db.Model):
     vote = db.Column(db.String(10), default='like')  # 'like' or 'dislike'
     created_at = db.Column(db.DateTime, default=datetime.now)
     __table_args__ = (db.UniqueConstraint('user_id', 'news_id'),)
+
+class LaborNewsArticle(db.Model):
+    __tablename__ = 'labor_news_article'
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(300), nullable=False)
+    summary = db.Column(db.Text)
+    content = db.Column(db.Text)
+    source_url = db.Column(db.Text)
+    source_name = db.Column(db.String(200))
+    category = db.Column(db.String(50), default='정책정보')
+    is_selected = db.Column(db.Boolean, default=False)
+    is_ai_generated = db.Column(db.Boolean, default=False)
+    ai_reason = db.Column(db.Text)
+    created_by = db.Column(db.Integer, db.ForeignKey('user.id'))
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    updated_at = db.Column(db.DateTime, default=datetime.now)
 
 class PointHistory(db.Model):
     id = db.Column(db.Integer, primary_key=True)

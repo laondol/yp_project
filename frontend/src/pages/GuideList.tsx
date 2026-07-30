@@ -84,7 +84,7 @@ export default function GuideList() {
           <div className="card-body p-4">
             <h6 className="fw-bold" style={{ color: '#2c5f2d' }}>더 궁금한 점이 있으신가요?</h6>
             <p className="text-muted small mb-3">이메일이나 문의하기를 통해 언제든 연락해 주세요.</p>
-            <a href="mailto:unocumyp@gmail.com" className="btn btn-success btn-sm" style={{ borderRadius: 10 }}>
+            <a href="mailto:admin@unocum.kr" className="btn btn-success btn-sm" style={{ borderRadius: 10 }}>
               문의하기
             </a>
           </div>

@@ -285,12 +285,24 @@ def api_legal_schedules():
 
 @legal_bp.route('/api/legal/issues')
 def api_legal_issues():
+    from models import LaborNewsArticle
     posts = LegalPost.query.filter(LegalPost.password == '', LegalPost.labor_approved == True).order_by(LegalPost.created_at.desc()).limit(30).all()
-    return jsonify([{
+    news = LaborNewsArticle.query.filter(LaborNewsArticle.is_selected == True).order_by(LaborNewsArticle.created_at.desc()).limit(20).all()
+    items = [{
         'id': p.id, 'title': p.title, 'content': (p.content or '')[:200],
         'author_name': p.author_name, 'comments_count': len(p.comments.split('\n')) if p.comments else 0,
         'created_at': p.created_at.isoformat() if p.created_at else None,
-    } for p in posts])
+        'type': 'post',
+    } for p in posts] + [{
+        'id': n.id, 'title': n.title, 'summary': n.summary or '',
+        'content': n.content or '', 'source_url': n.source_url or '',
+        'author_name': n.source_name or '뉴스',
+        'comment_count': 0,
+        'created_at': n.created_at.isoformat() if n.created_at else None,
+        'type': 'news',
+    } for n in news]
+    items.sort(key=lambda x: x.get('created_at') or '', reverse=True)
+    return jsonify(items[:50])
 
 @legal_bp.route('/api/legal/issues/<int:post_id>')
 def api_legal_issue(post_id):

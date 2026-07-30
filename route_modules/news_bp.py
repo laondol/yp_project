@@ -3,7 +3,7 @@ import requests
 from flask import Blueprint, render_template, request, redirect, url_for, jsonify, session, current_app, send_file
 from datetime import datetime, timezone
 from sqlalchemy import or_
-from models import db, NewsArticle, NewsComment, NewsRecommendation, NewsVote, Post, User, Message
+from models import db, NewsArticle, NewsComment, NewsRecommendation, NewsVote, Post, User, Message, LaborNewsArticle
 from services.ai_service import call_ai_judge
 from services.point_service import add_points
 
@@ -30,14 +30,7 @@ def admin_news_ai_suggest():
         return jsonify({"status": "error", "msg": "권한 없음"}), 403
     tab = request.form.get('tab', 'world')
     try:
-        trending_context = ''
-        try:
-            top_cats = db.session.query(NewsArticle.category, db.func.count(NewsVote.id)).join(NewsVote, NewsVote.news_id == NewsArticle.id).filter(NewsVote.vote == 'like').group_by(NewsArticle.category).order_by(db.func.count(NewsVote.id).desc()).limit(3).all()
-            if top_cats:
-                cats = [c[0] for c in top_cats if c[0]]
-                trending_context = ', '.join(cats)
-        except:
-            pass
+        trending_context = '노동법률, 임금체불, 부당해고, 산업재해, 노사관계'
         from services.news_service import ai_search_news
         suggestions = ai_search_news(news_type=tab, trending_context=trending_context)
         if not suggestions:
@@ -80,7 +73,7 @@ def admin_news_ai_suggest():
                     category=category,
                     source_url=real.get('url', ''),
                     is_ai_generated=True,
-                    is_selected=True,
+                    is_selected=False,
                     ai_reason=ai_reason,
                     created_by=session.get('user_id'),
                     source_name=news_source
@@ -100,7 +93,7 @@ def admin_news_ai_suggest():
                 db.session.add(article)
                 count += 1
         db.session.commit()
-        return jsonify({"status": "success", "count": count, "msg": f"✅ 실제 뉴스 {count}개를 가져왔습니다{' (영문→한글 번역 완료)' if tab == 'world' else ''}."})
+        return jsonify({"status": "success", "count": count, "msg": f"✅ 노사 뉴스 {count}개를 가져왔습니다{' (영문→한글 번역 완료)' if tab == 'world' else ''}."})
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -204,6 +197,24 @@ def admin_news_create():
         db.session.commit()
         return redirect(url_for('.admin_news'))
     return _serve_spa()
+
+@news_bp.route('/api/admin/news/<int:news_id>')
+def api_admin_news_detail(news_id):
+    if session.get('role') not in ['admin', 'leader']:
+        return jsonify({"error": "권한 없음"}), 403
+    article = NewsArticle.query.get_or_404(news_id)
+    return jsonify({
+        'id': article.id,
+        'title': article.title or '',
+        'summary': article.summary or '',
+        'content': article.content or '',
+        'source_url': article.source_url or '',
+        'source_name': article.source_name or '',
+        'category': article.category or '세계뉴스',
+        'ai_reason': article.ai_reason or '',
+        'is_selected': article.is_selected or False,
+        'image_path': article.image_path or '',
+    })
 
 @news_bp.route('/admin/news/edit/<int:news_id>', methods=['GET', 'POST'])
 def admin_news_edit(news_id):
@@ -346,7 +357,7 @@ def admin_news_import_url():
             content=f"<p>{body_text[:2000].replace(chr(10), '</p><p>')}</p>",
             source_url=url,
             category=category,
-            is_selected=True,
+            is_selected=False,
             is_ai_generated=True,
             created_by=session.get('user_id')
         )
@@ -589,4 +600,232 @@ def admin_news_recommendation_reject(rec_id):
     db.session.delete(rec)
     db.session.commit()
     return redirect(url_for('.admin_news_recommendations'))
+
+
+# === LaborNewsArticle (노사 뉴스 전용) ===
+
+@news_bp.route('/api/admin/labor-news')
+def api_admin_labor_news():
+    if session.get('role') not in ['admin', 'leader']:
+        return jsonify({"error": "권한 없음"}), 403
+    page = int(request.args.get('page', 1))
+    per_page = 20
+    q = LaborNewsArticle.query
+    total = q.count()
+    items = q.order_by(LaborNewsArticle.created_at.desc()).offset((page-1)*per_page).limit(per_page).all()
+    return jsonify({'items': [{
+        'id': a.id, 'title': a.title, 'summary': (a.summary or '')[:200],
+        'category': a.category, 'ai_reason': a.ai_reason or '',
+        'source_url': a.source_url or '', 'is_selected': a.is_selected or False,
+        'created_at': a.created_at.isoformat() if a.created_at else None,
+    } for a in items], 'total_pages': max(1, (total + per_page - 1) // per_page)})
+
+@news_bp.route('/api/admin/labor-news/<int:news_id>')
+def api_admin_labor_news_detail(news_id):
+    if session.get('role') not in ['admin', 'leader']:
+        return jsonify({"error": "권한 없음"}), 403
+    a = LaborNewsArticle.query.get_or_404(news_id)
+    return jsonify({
+        'id': a.id, 'title': a.title or '', 'summary': a.summary or '',
+        'content': a.content or '', 'source_url': a.source_url or '',
+        'source_name': a.source_name or '', 'category': a.category or '정책정보',
+        'ai_reason': a.ai_reason or '', 'is_selected': a.is_selected or False,
+    })
+
+@news_bp.route('/admin/labor-news/ai-suggest', methods=['POST'])
+def admin_labor_news_ai_suggest():
+    if session.get('role') not in ['admin', 'leader']:
+        return jsonify({"status": "error", "msg": "권한 없음"}), 403
+    tab = request.form.get('tab', 'kr_yp')
+    try:
+        trending_context = '노동법률, 임금체불, 부당해고, 산업재해, 노사관계'
+        from services.news_service import ai_search_news
+        suggestions = ai_search_news(news_type=tab, trending_context=trending_context)
+        if not suggestions:
+            return jsonify({"status": "error", "msg": "AI 주제 제안 실패. Groq API 키를 확인하세요."})
+        from services.naver_news import search_news
+        count = 0
+        for item in suggestions:
+            title = item.get('title', '')
+            if not title:
+                continue
+            search_lang = 'en' if tab == 'world' else 'ko'
+            news_results, news_source = search_news(title, display=1, language=search_lang)
+            if news_results:
+                real = news_results[0]
+                category = item.get('category', '정책정보')
+                ai_reason = item.get('reason', '')
+                raw_title = real.get('title', title)
+                raw_desc = real.get('description', '')
+                if tab == 'world' and raw_title:
+                    try:
+                        from services.news_service import _groq_text
+                        trans = _groq_text(
+                            "Translate English news to natural Korean. Output JSON only.",
+                            f"Translate to Korean:\nEN title: {raw_title[:200]}\nEN description: {raw_desc[:500]}\n\nJSON: {{\"title\": \"번역된 제목\", \"description\": \"번역된 내용\"}}",
+                            format_json=True
+                        )
+                        if trans:
+                            raw_title = trans.get('title', raw_title) or raw_title
+                            raw_desc = trans.get('description', raw_desc) or raw_desc
+                    except:
+                        pass
+                article = LaborNewsArticle(
+                    title=raw_title,
+                    summary=(raw_desc or '')[:200],
+                    content=f"<p>{(raw_desc or '')[:1000]}</p>",
+                    category=category,
+                    source_url=real.get('url', ''),
+                    is_ai_generated=True,
+                    is_selected=False,
+                    ai_reason=ai_reason,
+                    created_by=session.get('user_id'),
+                    source_name=news_source
+                )
+                try:
+                    from services.news_service import clean_cjk_text
+                    cleaned_title, cleaned_summary, cleaned_content = clean_cjk_text(article.title, article.summary, article.content)
+                    article.title = cleaned_title or article.title
+                    article.summary = cleaned_summary or article.summary
+                    article.content = cleaned_content or article.content
+                except:
+                    pass
+                db.session.add(article)
+                count += 1
+        db.session.commit()
+        return jsonify({"status": "success", "count": count, "msg": f"✅ 노사 뉴스 {count}개를 가져왔습니다."})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"status": "error", "msg": f"서버 오류: {str(e)}"}), 500
+
+@news_bp.route('/admin/labor-news/import-url', methods=['POST'])
+def admin_labor_news_import_url():
+    if session.get('role') not in ['admin', 'leader']:
+        return jsonify({"status": "error", "msg": "권한 없음"}), 403
+    url = request.form.get('url', '').strip()
+    if not url:
+        return jsonify({"status": "error", "msg": "URL을 입력하세요."})
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        resp = requests.get(url, headers=headers, timeout=15)
+        resp.encoding = 'utf-8'
+        text = resp.text
+    except Exception as e:
+        return jsonify({"status": "error", "msg": f"페이지를 가져올 수 없습니다: {str(e)}"})
+    try:
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(text, 'html.parser')
+        for tag in soup(['script', 'style', 'nav', 'footer', 'header', 'aside', 'iframe', 'noscript', 'form', 'button']): tag.decompose()
+        for pattern in ['gnb', 'lnb', 'menu', 'navi', 'sidebar', 'footer', 'header', 'banner', 'ad ', 'wrap_', 'search', 'comment', 'reply', 'btn_', 'link_']:
+            for el in soup.find_all(class_=lambda c: c and pattern in str(c).lower()):
+                el.decompose()
+            for el in soup.find_all(id=lambda i: i and pattern in str(i).lower()):
+                el.decompose()
+        main_area = soup.find('article') or soup.find('main') or soup.find('[role="main"]')
+        raw_text = main_area.get_text(separator='\n', strip=True) if main_area else soup.get_text(separator='\n', strip=True)
+        ui_keywords = ['본문 바로가기', '카테고리 이동', 'MY메뉴', '검색', '공유하기', 'URL복사', '신고하기',
+                       '메뉴 열기', '메뉴 닫기', '이웃추가', '폰트 크기', '폰트크기', '블로그', '카페',
+                       '메일', '뉴스', '지도', '로그인', 'MY', '메뉴', '펼쳐보기', '더보기']
+        lines = [l for l in raw_text.split('\n')
+                 if len(l.strip()) >= 3
+                 and not any(kw in l for kw in ui_keywords)]
+        body_text = '\n'.join(lines)[:3000]
+    except Exception as e:
+        body_text = text[:2000]
+    try:
+        from services.news_service import ai_summarize_url
+        result = ai_summarize_url(body_text[:3000])
+    except Exception as e:
+        result = None
+    if not result:
+        result = {"title": "URL에서 가져온 기사", "summary": "AI 요약 실패", "category": "정책정보", "is_useful": True}
+    try:
+        article = LaborNewsArticle(
+            title=result.get('title', '가져온 기사'),
+            summary=result.get('summary', ''),
+            content=f"<p>{body_text[:2000].replace(chr(10), '</p><p>')}</p>",
+            source_url=url,
+            category=result.get('category', '정책정보'),
+            is_selected=False,
+            is_ai_generated=True,
+            created_by=session.get('user_id')
+        )
+        try:
+            from services.news_service import clean_cjk_text
+            cleaned_title, cleaned_summary, cleaned_content = clean_cjk_text(article.title, article.summary, article.content)
+            article.title = cleaned_title or article.title
+            article.summary = cleaned_summary or article.summary
+            article.content = cleaned_content or article.content
+        except:
+            pass
+        db.session.add(article)
+        db.session.commit()
+        return jsonify({"status": "success", "news_id": article.id})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"status": "error", "msg": f"서버 오류: {str(e)}"}), 500
+
+@news_bp.route('/admin/labor-news/toggle/<int:news_id>')
+def admin_labor_news_toggle(news_id):
+    if session.get('role') not in ['admin', 'leader']:
+        return jsonify({"status": "error", "msg": "권한 없음"}), 403
+    article = LaborNewsArticle.query.get_or_404(news_id)
+    article.is_selected = not article.is_selected
+    article.updated_at = datetime.now(timezone.utc)
+    db.session.commit()
+    return jsonify({"status": "success", "is_selected": article.is_selected})
+
+@news_bp.route('/admin/labor-news/delete/<int:news_id>', methods=['POST'])
+def admin_labor_news_delete(news_id):
+    if session.get('role') not in ['admin', 'leader']:
+        return jsonify({"status": "error", "msg": "권한 없음"}), 403
+    article = LaborNewsArticle.query.get_or_404(news_id)
+    db.session.delete(article)
+    db.session.commit()
+    return jsonify({"status": "success"})
+
+@news_bp.route('/admin/labor-news/edit/<int:news_id>', methods=['GET', 'POST'])
+def admin_labor_news_edit(news_id):
+    if session.get('role') not in ['admin', 'leader']:
+        return "권한 없음", 403
+    article = LaborNewsArticle.query.get_or_404(news_id)
+    if request.method == 'POST':
+        article.title = request.form.get('title', '').strip()
+        article.summary = request.form.get('summary', '')
+        article.content = request.form.get('content', '')
+        article.source_url = request.form.get('source_url', '')
+        article.source_name = request.form.get('source_name', '')
+        article.category = request.form.get('category', '정책정보')
+        article.ai_reason = request.form.get('ai_reason', '')
+        article.is_selected = 'is_selected' in request.form
+        article.updated_at = datetime.now(timezone.utc)
+        db.session.commit()
+        return redirect(url_for('.admin_news'))
+    return _serve_spa()
+
+@news_bp.route('/admin/labor-news/create', methods=['GET', 'POST'])
+def admin_labor_news_create():
+    if session.get('role') not in ['admin', 'leader']:
+        return "권한 없음", 403
+    if request.method == 'POST':
+        title = request.form.get('title', '').strip()
+        if not title:
+            return "<script>alert('제목을 입력하세요.'); history.back();</script>"
+        article = LaborNewsArticle(
+            title=title,
+            summary=request.form.get('summary', ''),
+            content=request.form.get('content', ''),
+            source_url=request.form.get('source_url', ''),
+            source_name=request.form.get('source_name', ''),
+            category=request.form.get('category', '정책정보'),
+            ai_reason=request.form.get('ai_reason', ''),
+            is_selected='is_selected' in request.form,
+            created_by=session.get('user_id')
+        )
+        db.session.add(article)
+        db.session.commit()
+        return redirect(url_for('.admin_news'))
+    return _serve_spa()
 

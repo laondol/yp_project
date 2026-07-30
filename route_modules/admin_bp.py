@@ -122,7 +122,7 @@ def api_admin_news():
     tab = request.args.get('tab', 'all')
     page = int(request.args.get('page', 1))
     per_page = 20
-    q = NewsArticle.query
+    q = NewsArticle.query.filter(NewsArticle.labor_only != True)
     if tab == 'world':
         q = q.filter(NewsArticle.category.in_(['세계뉴스', '환경뉴스', '건강정보', '복지정보', '농업정보', '관광소식']))
     elif tab == 'kr_yp':

@@ -9,10 +9,25 @@ interface LaborIssue {
   id: number
   title: string
   content?: string
+  summary?: string
   author_name?: string
   comment_count?: number
+  comments_count?: number
   labor_approved?: boolean
+  source_url?: string
   created_at?: string
+  type?: 'post' | 'news'
+  is_selected?: boolean
+}
+
+interface AdminNewsItem {
+  id: number
+  title: string
+  summary: string
+  category: string
+  source_url?: string
+  is_selected: boolean
+  created_at: string
 }
 
 export default function LegalIssuesPage() {
@@ -21,9 +36,15 @@ export default function LegalIssuesPage() {
   const [issues, setIssues] = useState<LaborIssue[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [aiKeyword, setAiKeyword] = useState('')
-  const [aiLoading, setAiLoading] = useState(false)
-  const [showAiModal, setShowAiModal] = useState(false)
+
+  const isAdmin = user?.role === 'admin' || user?.role === 'leader'
+  const [showNewsModal, setShowNewsModal] = useState(false)
+  const [importUrl, setImportUrl] = useState('')
+  const [importing, setImporting] = useState(false)
+  const [importMsg, setImportMsg] = useState('')
+  const [importMsgOk, setImportMsgOk] = useState(false)
+  const [suggesting, setSuggesting] = useState(false)
+  const [adminNews, setAdminNews] = useState<AdminNewsItem[]>([])
 
   const load = useCallback(async () => {
     setLoading(true); setError('')
@@ -37,25 +58,75 @@ export default function LegalIssuesPage() {
     } finally { setLoading(false) }
   }, [])
 
-  useEffect(() => { load() }, [load])
+  const loadAdminNews = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/labor-news?page=1')
+      if (!res.ok) return
+      const data = await res.json()
+      setAdminNews(data.items ?? [])
+    } catch { /* ignore */ }
+  }, [])
 
-  const handleAiImport = async () => {
-    if (!aiKeyword.trim()) return
-    setAiLoading(true)
+  useEffect(() => { load() }, [load])
+  useEffect(() => { if (showNewsModal && isAdmin) loadAdminNews() }, [showNewsModal, isAdmin, loadAdminNews])
+
+  const handleImportUrl = async () => {
+    if (!importUrl.trim()) return
+    setImporting(true); setImportMsg('')
     try {
       const fd = new FormData()
-      fd.append('keyword', aiKeyword.trim())
-      const res = await fetch('/legal/issues/write', { method: 'POST', body: fd })
+      fd.append('url', importUrl.trim())
+      const res = await fetch('/admin/labor-news/import-url', { method: 'POST', body: fd })
       const data = await res.json()
       if (data.status === 'success') {
-        setShowAiModal(false)
-        setAiKeyword('')
-        load()
+        setImportMsg('✅ 뉴스를 가져왔습니다!')
+        setImportMsgOk(true)
+        setImportUrl('')
+        loadAdminNews()
       } else {
-        alert(data.msg || 'AI 가져오기 실패')
+        setImportMsg(data.msg || '가져오기 실패')
+        setImportMsgOk(false)
       }
-    } catch { alert('AI 가져오기 중 오류') }
-    finally { setAiLoading(false) }
+    } catch { setImportMsg('오류가 발생했습니다.'); setImportMsgOk(false) }
+    finally { setImporting(false) }
+  }
+
+  const handleAiSuggest = async () => {
+    setSuggesting(true)
+    try {
+      const fd = new FormData()
+      fd.append('tab', 'kr_yp')
+      const res = await fetch('/admin/labor-news/ai-suggest', { method: 'POST', body: fd })
+      const data = await res.json()
+      if (data.status === 'success') {
+        alert(data.msg || `✅ ${data.count}개의 노사 뉴스를 가져왔습니다.`)
+        loadAdminNews()
+      } else {
+        alert(data.msg || '추천 실패')
+      }
+    } catch { alert('오류가 발생했습니다.') }
+    finally { setSuggesting(false) }
+  }
+
+  const handleToggleNews = async (id: number) => {
+    try {
+      const res = await fetch(`/admin/labor-news/toggle/${id}`)
+      const data = await res.json()
+      if (data.status === 'success') {
+        setAdminNews(prev => prev.map(n => n.id === id ? { ...n, is_selected: data.is_selected } : n))
+      } else { alert(data.msg || '토글 실패') }
+    } catch { alert('오류가 발생했습니다.') }
+  }
+
+  const handleDeleteNews = async (id: number) => {
+    if (!confirm('이 뉴스를 삭제하시겠습니까?')) return
+    try {
+      const res = await fetch(`/admin/labor-news/delete/${id}`, { method: 'POST' })
+      const data = await res.json()
+      if (data.status === 'success') {
+        setAdminNews(prev => prev.filter(n => n.id !== id))
+      } else { alert(data.msg || '삭제 실패') }
+    } catch { alert('오류가 발생했습니다.') }
   }
 
   const formatDate = (dateStr?: string) => {
@@ -64,19 +135,17 @@ export default function LegalIssuesPage() {
     return `${d.getMonth() + 1}/${d.getDate()}`
   }
 
-  const isAdmin = user?.role === 'admin' || user?.role === 'leader'
-
   if (loading) return <Loading />
   if (error) return <ErrorMessage message={error} onRetry={load} />
 
   return (
     <div style={{ maxWidth: 700, margin: '0 auto' }}>
       <div className="d-flex justify-content-between align-items-center mb-3">
-        <h4 className="fw-bold mb-0">노동 게시판</h4>
+        <h4 className="fw-bold mb-0">노동이슈</h4>
         <div className="d-flex gap-2">
           {isAdmin && (
-            <button className="btn btn-sm btn-outline-info" onClick={() => setShowAiModal(true)}>
-              AI 가져오기
+            <button className="btn btn-sm btn-outline-info" onClick={() => { setShowNewsModal(true); loadAdminNews() }}>
+              AI 추천뉴스
             </button>
           )}
           <button className="btn btn-sm btn-success" onClick={() => navigate('/legal/issues/write')}>
@@ -90,52 +159,120 @@ export default function LegalIssuesPage() {
       ) : (
         <div className="row g-3">
           {issues.map(issue => (
-            <div key={issue.id} className="col-12">
-              <div
-                className="card border-0 shadow-sm"
-                style={{ borderRadius: 12, cursor: 'pointer' }}
-                onClick={() => navigate(`/legal/issues/${issue.id}`)}
-              >
-                <div className="card-body p-3">
-                  <div className="d-flex justify-content-between align-items-start">
-                    <h6 className="fw-bold mb-1">{issue.title}</h6>
-                    <span className="small text-muted">{formatDate(issue.created_at)}</span>
-                  </div>
-                  <div className="d-flex justify-content-between align-items-center mt-2">
-                    <small className="text-muted">{issue.author_name || '익명'}</small>
-                    <small className="text-muted">
-                      💬 {issue.comment_count ?? 0}
-                    </small>
+            <div key={`${issue.type}-${issue.id}`} className="col-12">
+              {issue.type === 'news' ? (
+                <div className="card border-0 shadow-sm" style={{ borderRadius: 12 }}>
+                  <div className="card-body p-3">
+                    <div className="d-flex justify-content-between align-items-start">
+                      <h6 className="fw-bold mb-1">{issue.title}</h6>
+                      <span className="small text-muted">{formatDate(issue.created_at)}</span>
+                    </div>
+                    <div className="mt-1">
+                      <small className="text-muted">뉴스</small>
+                      {issue.source_url && (
+                        <a href={issue.source_url} target="_blank" rel="noopener noreferrer" className="small text-primary ms-2">
+                          🔗 원문보기
+                        </a>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
+              ) : (
+                <div
+                  className="card border-0 shadow-sm"
+                  style={{ borderRadius: 12, cursor: 'pointer' }}
+                  onClick={() => navigate(`/legal/issues/${issue.id}`)}
+                >
+                  <div className="card-body p-3">
+                    <div className="d-flex justify-content-between align-items-start">
+                      <h6 className="fw-bold mb-1">{issue.title}</h6>
+                      <span className="small text-muted">{formatDate(issue.created_at)}</span>
+                    </div>
+                    <div className="d-flex justify-content-between align-items-center mt-2">
+                      <small className="text-muted">{issue.author_name || '익명'}</small>
+                      <small className="text-muted">
+                        💬 {issue.comment_count ?? issue.comments_count ?? 0}
+                      </small>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           ))}
         </div>
       )}
 
-      {showAiModal && (
+      {showNewsModal && (
         <div className="modal fade show d-block" tabIndex={-1} style={{ background: 'rgba(0,0,0,0.5)' }}>
-          <div className="modal-dialog modal-dialog-centered">
+          <div className="modal-dialog modal-dialog-centered modal-lg">
             <div className="modal-content" style={{ borderRadius: 16 }}>
               <div className="modal-header">
-                <h5 className="fw-bold">AI 자동 가져오기</h5>
-                <button type="button" className="btn-close" onClick={() => { setShowAiModal(false); setAiKeyword('') }} />
+                <h5 className="fw-bold">AI 추천뉴스 관리</h5>
+                <button type="button" className="btn-close" onClick={() => { setShowNewsModal(false); load() }} />
               </div>
               <div className="modal-body">
-                <label className="form-label small fw-bold">키워드 입력</label>
-                <input
-                  className="form-control"
-                  placeholder="검색할 키워드를 입력하세요..."
-                  value={aiKeyword}
-                  onChange={e => setAiKeyword(e.target.value)}
-                />
-              </div>
-              <div className="modal-footer">
-                <button className="btn btn-sm btn-secondary" onClick={() => { setShowAiModal(false); setAiKeyword('') }}>취소</button>
-                <button className="btn btn-sm btn-success" onClick={handleAiImport} disabled={aiLoading || !aiKeyword.trim()}>
-                  {aiLoading ? '가져오는 중...' : '가져오기'}
-                </button>
+                <div className="input-group mb-2">
+                  <input
+                    type="url"
+                    className="form-control"
+                    placeholder="뉴스 URL을 붙여넣으세요..."
+                    value={importUrl}
+                    onChange={e => setImportUrl(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && handleImportUrl()}
+                  />
+                  <button
+                    className="btn btn-outline-primary"
+                    onClick={handleImportUrl}
+                    disabled={importing || !importUrl.trim()}
+                  >
+                    {importing ? '⏳' : '🌐 가져오기'}
+                  </button>
+                </div>
+                {importMsg && (
+                  <div className={`small mb-2 ${importMsgOk ? 'text-success' : 'text-danger'}`}>{importMsg}</div>
+                )}
+
+                <div className="d-flex gap-2 mb-3">
+                  <button className="btn btn-outline-success btn-sm" onClick={handleAiSuggest} disabled={suggesting}>
+                    {suggesting ? '⏳ 추천 중...' : '🤖 AI 노사 뉴스 추천'}
+                  </button>
+                </div>
+
+                {adminNews.length > 0 && (
+                  <div>
+                    <div className="fw-bold small mb-2 text-muted">가져온 뉴스</div>
+                    {adminNews.map(n => (
+                      <div key={n.id} className="d-flex justify-content-between align-items-center py-2 border-bottom">
+                        <div className="flex-grow-1 me-2">
+                          <div className="small fw-bold">{n.title.length > 50 ? n.title.slice(0, 50) + '...' : n.title}</div>
+                          {n.summary && <div className="text-muted" style={{ fontSize: '0.75rem' }}>{n.summary.length > 60 ? n.summary.slice(0, 60) + '...' : n.summary}</div>}
+                          {n.source_url && <a href={n.source_url} target="_blank" rel="noopener noreferrer" className="text-primary" style={{ fontSize: '0.7rem' }}>🔗 원문</a>}
+                        </div>
+                        <div className="d-flex gap-1 flex-shrink-0">
+                          <button
+                            className={`btn btn-sm py-0 ${n.is_selected ? 'btn-success' : 'btn-outline-secondary'}`}
+                            onClick={() => handleToggleNews(n.id)}
+                            title={n.is_selected ? '표시중' : '숨김'}
+                            style={{ fontSize: '0.8rem' }}
+                          >
+                            {n.is_selected ? '👁️' : '🚫'}
+                          </button>
+                          <a href={`/admin/labor-news/edit/${n.id}`} className="btn btn-sm btn-outline-primary py-0" title="편집" style={{ fontSize: '0.8rem' }}>
+                            ✏️
+                          </a>
+                          <button
+                            className="btn btn-sm btn-outline-danger py-0"
+                            onClick={() => handleDeleteNews(n.id)}
+                            title="삭제"
+                            style={{ fontSize: '0.8rem' }}
+                          >
+                            🗑️
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </div>
