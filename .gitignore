@@ -45,9 +45,20 @@ ollama.txt
 .DS_Store
 *.log
 
+# temp / scratch files
+tmp_*
+cookies.txt
+backup_local.sh
+fk_check.sql
+truncate.sql
+*.bak
+
 # frontend build output
 frontend/dist/
 
 # DB dumps
 *.dump
 *.dump.*
+
+# Docker Desktop WSL
+DockerDesktopWSL/
