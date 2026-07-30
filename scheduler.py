@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'))
 
 from flask import Flask
+from flask_migrate import Migrate
 from config import Config
 from models import db, User, PointHistory, Post, Message, Friend, TongBotSchedule, LegalPost, PsychoPost
 from werkzeug.security import generate_password_hash
@@ -19,6 +20,7 @@ def create_scheduler_app():
     app = Flask(__name__)
     app.config.from_object(Config)
     db.init_app(app)
+    Migrate(app, db)
     return app
 
 

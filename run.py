@@ -2,6 +2,7 @@ import os
 from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'))
 from flask import Flask, send_from_directory
+from flask_migrate import Migrate
 from config import Config
 from models import db, User
 from tongbot_routes import tongbot_bp
@@ -47,6 +48,7 @@ def create_app():
     
     # DB 초기화 (순환 참조 원천 해결)
     db.init_app(app)
+    Migrate(app, db)
 
     # OAuth2 초기화 (Google/Kakao/Naver)
     from services.oauth import init_oauth
