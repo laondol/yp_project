@@ -4,10 +4,13 @@ import Loading from '../components/common/Loading'
 
 const CATEGORIES = ['세계뉴스', '대한민국뉴스', '양평소식', '지역소식', '정책정보', '농업정보', '관광소식', '환경뉴스', '복지정보', '건강정보']
 
-export default function AdminNewsEdit() {
+interface Props { type?: 'news' | 'labor' }
+
+export default function AdminNewsEdit({ type = 'news' }: Props) {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const isEdit = Boolean(id)
+  const isLabor = type === 'labor'
   const [loading, setLoading] = useState(isEdit)
   const [saving, setSaving] = useState(false)
 
@@ -27,29 +30,19 @@ export default function AdminNewsEdit() {
     if (!id) return
     const fetchData = async () => {
       try {
-        const res = await fetch(`/admin/news/edit/${id}`)
+        const apiUrl = isLabor ? `/api/admin/labor-news/${id}` : `/api/admin/news/${id}`
+        const res = await fetch(apiUrl)
         if (!res.ok) throw new Error('불러오기 실패')
-        const text = await res.text()
-        const parser = new DOMParser()
-        const doc = parser.parseFromString(text, 'text/html')
-        const getVal = (name: string) => {
-          const el = doc.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[name="${name}"]`)
-          return el?.value ?? ''
-        }
-        const getChecked = (name: string) => {
-          const el = doc.querySelector<HTMLInputElement>(`[name="${name}"]`)
-          return el?.checked ?? false
-        }
-        setTitle(getVal('title'))
-        setSummary(getVal('summary'))
-        setContent(getVal('content'))
-        setSourceUrl(getVal('source_url'))
-        setSourceName(getVal('source_name'))
-        setCategory(getVal('category') || '세계뉴스')
-        setAiReason(getVal('ai_reason'))
-        setIsSelected(getChecked('is_selected'))
-        const imgEl = doc.querySelector<HTMLImageElement>('img[src*="uploads/news"]')
-        if (imgEl) setExistingImage(imgEl.src)
+        const data = await res.json()
+        setTitle(data.title || '')
+        setSummary(data.summary || '')
+        setContent(data.content || '')
+        setSourceUrl(data.source_url || '')
+        setSourceName(data.source_name || '')
+        setCategory(data.category || '세계뉴스')
+        setAiReason(data.ai_reason || '')
+        setIsSelected(data.is_selected || false)
+        if (data.image_path) setExistingImage(data.image_path)
       } catch {
         alert('데이터를 불러오는데 실패했습니다.')
       } finally { setLoading(false) }
@@ -91,10 +84,12 @@ export default function AdminNewsEdit() {
       if (isSelected) fd.append('is_selected', 'on')
       if (image) fd.append('image', image)
 
-      const url = isEdit ? `/admin/news/edit/${id}` : '/admin/news/create'
+      const url = isEdit
+        ? (isLabor ? `/admin/labor-news/edit/${id}` : `/admin/news/edit/${id}`)
+        : (isLabor ? '/admin/labor-news/create' : '/admin/news/create')
       const res = await fetch(url, { method: 'POST', body: fd })
       if (!res.ok) throw new Error('저장 실패')
-      navigate('/admin/news')
+      navigate(isLabor ? '/legal/issues' : '/admin/news')
     } catch { alert('저장 중 오류가 발생했습니다.') }
     finally { setSaving(false) }
   }
@@ -105,7 +100,7 @@ export default function AdminNewsEdit() {
     <div className="container mt-4" style={{ maxWidth: 900 }}>
       <div className="d-flex justify-content-between align-items-center mb-4">
         <h4 className="fw-bold mb-0">{isEdit ? '✏️ 뉴스 수정' : '📝 새 뉴스 작성'}</h4>
-        <a href="/admin/news" className="btn btn-outline-secondary btn-sm">← 목록</a>
+        <a href={isLabor ? '/legal/issues' : '/admin/news'} className="btn btn-outline-secondary btn-sm">← 목록</a>
       </div>
 
       <form onSubmit={handleSubmit} className="card border-0 shadow-sm p-4">
@@ -168,14 +163,14 @@ export default function AdminNewsEdit() {
 
         <div className="form-check mb-4">
           <input type="checkbox" className="form-check-input" id="chkSelect" checked={isSelected} onChange={e => setIsSelected(e.target.checked)} />
-          <label className="form-check-label fw-bold" htmlFor="chkSelect">✅ intro 페이지에 표시</label>
+          <label className="form-check-label fw-bold" htmlFor="chkSelect">{isLabor ? '노동이슈에 표시' : 'intro 페이지에 표시'}</label>
         </div>
 
         <div className="d-flex gap-2">
           <button type="submit" className="btn btn-success px-5 py-2 fw-bold" disabled={saving}>
             {saving ? '저장 중...' : isEdit ? '수정 완료' : '등록하기'}
           </button>
-          <a href="/admin/news" className="btn btn-outline-secondary px-4 py-2">취소</a>
+          <a href={isLabor ? '/legal/issues' : '/admin/news'} className="btn btn-outline-secondary px-4 py-2">취소</a>
         </div>
       </form>
     </div>
