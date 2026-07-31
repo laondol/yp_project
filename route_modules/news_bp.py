@@ -30,7 +30,10 @@ def admin_news_ai_suggest():
         return jsonify({"status": "error", "msg": "권한 없음"}), 403
     tab = request.form.get('tab', 'world')
     try:
-        trending_context = '노동법률, 임금체불, 부당해고, 산업재해, 노사관계'
+        if tab == 'kr_yp':
+            trending_context = '물가, 지원금, 농산물, 의료, 교육, 교통, 복지, 고용'
+        else:
+            trending_context = '기후변화, AI, 글로벌경제, 건강, 농업, 기술, 인권'
         from services.news_service import ai_search_news
         suggestions = ai_search_news(news_type=tab, trending_context=trending_context)
         if not suggestions:
@@ -640,7 +643,7 @@ def admin_labor_news_ai_suggest():
     try:
         trending_context = '노동법률, 임금체불, 부당해고, 산업재해, 노사관계'
         from services.news_service import ai_search_news
-        suggestions = ai_search_news(news_type=tab, trending_context=trending_context)
+        suggestions = ai_search_news(news_type=tab, trending_context=trending_context, labor_only=True)
         if not suggestions:
             return jsonify({"status": "error", "msg": "AI 주제 제안 실패. Groq API 키를 확인하세요."})
         from services.naver_news import search_news
