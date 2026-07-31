@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-COMPOSE_FILE="docker-compose.prod.yml"
+COMPOSE_FILE="docker-compose.yml"
 REMOTE="origin"
 BRANCH="dev"
 FLASK_CONTAINER="yp_flask"

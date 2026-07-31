@@ -60,5 +60,13 @@ frontend/dist/
 *.dump
 *.dump.*
 
+# domain verification files
+static/google*.html
+static/naver*.html
+
+# domain verification files
+static/google*.html
+static/naver*.html
+
 # Docker Desktop WSL
 DockerDesktopWSL/
