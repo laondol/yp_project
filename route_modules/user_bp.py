@@ -1,6 +1,6 @@
 from flask import Blueprint, render_template, request, redirect, url_for, jsonify, session, current_app, send_file
 from datetime import datetime, timezone
-from models import db, User, Message, Friend, ShareReport, Post, PointHistory, VillageWish, LegalPost, PsychoPost, ChatMessage, LegalAppointment, TongBot, TongBotDraft
+from models import db, User, Message, Friend, ShareReport, Post, PointHistory, VillageWish, LegalPost, PsychoPost, ChatMessage, LegalAppointment, TongBot, TongBotDraft, TongBotSchedule
 from werkzeug.security import generate_password_hash, check_password_hash
 from route_modules.common import has_page_access
 from services.security import save_village_file

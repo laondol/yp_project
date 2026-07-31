@@ -7,7 +7,7 @@ import ShareList from './pages/ShareList'
 import ShareDetail from './pages/ShareDetail'
 import ShareReport from './pages/ShareReport'
 import ShareEdit from './pages/ShareEdit'
-import UserMyPage from './pages/UserMyPage'
+
 import EpubList from './pages/EpubList'
 import EpubEditor from './pages/EpubEditor'
 import GuideList from './pages/GuideList'
@@ -76,8 +76,8 @@ import LegalIssueDetailPage from './pages/LegalIssueDetailPage'
 import LegalIssuesAdminPage from './pages/LegalIssuesAdminPage'
 import LeaderShareReportsPage from './pages/LeaderShareReportsPage'
 import ShareMapPage from './pages/ShareMapPage'
-import MyPagePointsPage from './pages/MyPagePointsPage'
-import PointsChargePage from './pages/PointsChargePage'
+
+
 import PsychoAdminPage from './pages/PsychoAdminPage'
 import PsychoAdminAppointmentsPage from './pages/PsychoAdminAppointmentsPage'
 import UserProfilePage from './pages/UserProfilePage'
@@ -102,6 +102,7 @@ import AdminStoreEdit from './pages/AdminStoreEdit'
 import AdminAlertEdit from './pages/AdminAlertEdit'
 import VillagePageEdit from './pages/VillagePageEdit'
 import VillagePageView from './pages/VillagePageView'
+import CompassNavPage from './pages/CompassNavPage'
 import PsychoPostEdit from './pages/PsychoPostEdit'
 import FloatingMemo from './components/FloatingMemo'
 
@@ -147,6 +148,7 @@ export default function App() {
             <Route path="/share/edit/:id" element={<ShareEdit />} />
             <Route path="/share/map" element={<ShareMapPage />} />
             <Route path="/leader/share-reports" element={<LeaderShareReportsPage />} />
+            <Route path="/compass" element={<CompassNavPage />} />
 
             {/* Protected: all other routes require login */}
             <Route path="/presentation" element={<ProtectedRoute><PresentationPage /></ProtectedRoute>} />
@@ -170,10 +172,8 @@ export default function App() {
             <Route path="/epub/edit/:id" element={<ProtectedRoute><EpubEditor /></ProtectedRoute>} />
             <Route path="/guide" element={<ProtectedRoute><GuideList /></ProtectedRoute>} />
             <Route path="/guide/templates" element={<ProtectedRoute><GuideTemplates /></ProtectedRoute>} />
-            <Route path="/user/my" element={<ProtectedRoute><UserMyPage /></ProtectedRoute>} />
             <Route path="/user/edit-profile" element={<ProtectedRoute><EditProfilePage /></ProtectedRoute>} />
             <Route path="/user/:userId" element={<ProtectedRoute><UserProfilePage /></ProtectedRoute>} />
-            <Route path="/user/:userId/profile" element={<ProtectedRoute><UserMyPage /></ProtectedRoute>} />
             <Route path="/news" element={<ProtectedRoute><NewsList /></ProtectedRoute>} />
             <Route path="/news/:id" element={<ProtectedRoute><NewsDetail /></ProtectedRoute>} />
             <Route path="/world-news" element={<ProtectedRoute><NewsTabsPage /></ProtectedRoute>} />
@@ -217,8 +217,6 @@ export default function App() {
             <Route path="/message/send/admin" element={<ProtectedRoute><MessageSend /></ProtectedRoute>} />
             <Route path="/message/send/village_leader" element={<ProtectedRoute><MessageSend /></ProtectedRoute>} />
             <Route path="/message/admin/pending" element={<ProtectedRoute><AdminPendingLetters /></ProtectedRoute>} />
-            <Route path="/mypage/points" element={<ProtectedRoute><MyPagePointsPage /></ProtectedRoute>} />
-            <Route path="/mypage/points/charge" element={<ProtectedRoute><PointsChargePage /></ProtectedRoute>} />
             <Route path="/construction" element={<ProtectedRoute><ConstructionPage /></ProtectedRoute>} />
             <Route path="/construction/store/:storeName" element={<ProtectedRoute><StoreDetailPage /></ProtectedRoute>} />
             <Route path="/schedule" element={<ProtectedRoute><SchedulePage /></ProtectedRoute>} />

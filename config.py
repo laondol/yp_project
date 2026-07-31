@@ -25,10 +25,12 @@ class Config:
     GG_BUILDING_API_KEY = os.getenv('GG_BUILDING_API_KEY', '')
     ARCH_HUB_API_KEY = os.getenv('ARCH_HUB_API_KEY', '')
     SAFEMAP_API_KEY = os.getenv('SAFEMAP_API_KEY', '')
+    GG_PUBLTOLT_API_KEY = os.getenv('GG_PUBLTOLT_API_KEY', '')
     EX_CONSTRUCTION_API_KEY = os.getenv('EX_CONSTRUCTION_API_KEY', '8485113604')
     GROQ_API_KEY = os.getenv('GROQ_API_KEY', '')
     MOTIF_API_KEY = os.getenv('MOTIF_API_KEY', '')             # ← 추가
     MOTIF_BASE_URL = os.getenv('MOTIF_BASE_URL', 'https://chat.motiftech.io/openapi/v1')  # ← 추가
+    OPENWEATHER_API_KEY = os.getenv('OPENWEATHER_API_KEY', '')
 
     # RAG 독립 서비스
     RAG_URL = os.getenv('RAG_URL', 'http://localhost:8001')
@@ -45,6 +47,7 @@ class Config:
     KAKAO_JAVASCRIPT_KEY = os.getenv('KAKAO_JAVASCRIPT_KEY', '')
     NAVER_CLIENT_ID = os.getenv('NAVER_CLIENT_ID', '')
     NAVER_CLIENT_SECRET = os.getenv('NAVER_CLIENT_SECRET', '')
+    NAVER_MAP_CLIENT_ID = os.getenv('NAVER_SEARCH_CLIENT_ID', '')
     NAVER_SEARCH_CLIENT_ID = os.getenv('NAVER_SEARCH_CLIENT_ID', 'Vi403Ckfdg8NGRPDfBin')
     NAVER_SEARCH_CLIENT_SECRET = os.getenv('NAVER_SEARCH_CLIENT_SECRET', 'bepKiJZvWx')
     GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID', '')

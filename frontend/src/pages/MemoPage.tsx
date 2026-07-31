@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 interface Memo {
   id: number; content: string; author: string
   is_shared: boolean; done: boolean
-  created_at: string; updated_at: string
+  end_date?: string; created_at: string; updated_at: string
 }
 
 const POSTIT_COLORS = ['#fff9c4', '#f8bbd0', '#c8e6c9', '#bbdefb', '#ffe0b2', '#e1bee7', '#b2ebf2', '#dcedc8']
@@ -187,6 +187,7 @@ export default function MemoPage() {
                           <div className="d-flex justify-content-between align-items-center mt-2 pt-2 border-top" style={{ borderColor: 'rgba(0,0,0,0.08)' }}>
                             <small className="text-muted" style={{ fontSize: '0.65rem' }}>
                               {m.author === 'bot' ? '🤖' : '👤'} {m.created_at?.slice(5, 16).replace('T', ' ')}
+                              {m.end_date ? ` · ⏰ ${m.end_date.slice(5, 16).replace('T', ' ')}` : ''}
                             </small>
                             <div className="d-flex align-items-center gap-1">
                               <button
@@ -239,6 +240,7 @@ export default function MemoPage() {
                             <div className="d-flex justify-content-between align-items-center mt-2 pt-2 border-top" style={{ borderColor: 'rgba(0,0,0,0.08)' }}>
                               <small className="text-muted" style={{ fontSize: '0.65rem' }}>
                                 {m.author === 'bot' ? '🤖' : '👤'} {m.created_at?.slice(0, 10)}
+                                {m.end_date ? ` · ⏰ ${m.end_date.slice(5, 10)}` : ''}
                               </small>
                               <div className="d-flex align-items-center gap-1">
                                 <button

@@ -144,7 +144,7 @@ export default function NavBar() {
               <a className="d-block small py-1 px-2 text-dark text-decoration-none rounded" href="/main">💭 꿈꾸기</a>
               <a className="d-block small py-1 px-2 text-dark text-decoration-none rounded" href="/construction">📍 위치기반안내</a>
               <a className="d-block small py-1 px-2 text-dark text-decoration-none rounded" href="#"
-                onClick={e => { e.preventDefault(); window.open('/user/my?popup=1', 'tongbotPopup', 'width=700,height=700,left=100,top=50') }}>🤖 통벗채팅</a>
+                onClick={e => { e.preventDefault(); window.open('/bot/chat?popup=1', 'tongbotChat', 'width=450,height=700,left=100,top=50') }}>🤖 통벗채팅</a>
             </div>
           </div>
         </div>

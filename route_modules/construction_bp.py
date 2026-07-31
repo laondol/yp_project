@@ -2,7 +2,7 @@ from flask import Blueprint, render_template, request, redirect, url_for, jsonif
 from datetime import datetime, timezone, timedelta
 from urllib.parse import quote
 from sqlalchemy import or_
-from models import db, ConstructionNotice, StoreInfo, VillageAlert, HeritageStamp, User, Message, ShareReport, VillageCache, PublicFacility
+from models import db, ConstructionNotice, StoreInfo, VillageAlert, HeritageStamp, User, Message, ShareReport, VillageCache, PublicFacility, FacilityReport
 from services.construction import sync_construction_notices, sync_traffic_incidents, sync_congestion_info, sync_building_permits
 from services.transit import haversine_km
 from config import Config
@@ -18,6 +18,10 @@ def _serve_spa():
 
 @construction_bp.route('/construction')
 def construction():
+    return _serve_spa()
+
+@construction_bp.route('/compass')
+def compass():
     return _serve_spa()
 
 @construction_bp.route('/construction/heritage')
@@ -769,19 +773,159 @@ def api_facilities():
             "open_hr": f.open_hr, "tel": f.tel, "manager": f.manager,
             "emergency_bell": f.emergency_bell, "cctv": f.cctv,
             "facility_type": f.facility_type, "distance_km": d,
+            "is_community": f.is_community, "status": f.status,
+            "verified_count": f.verified_count, "reject_count": f.reject_count,
+            "notes": f.notes, "photo_url": f.photo_url,
+            "submitted_by": f.submitted_by,
         })
     if home_lat:
         out.sort(key=lambda x: x['distance_km'] if x['distance_km'] is not None else 999)
     return jsonify({"facilities": out, "type": ftype})
+
+
+@construction_bp.route('/api/geocode')
+def api_geocode():
+    q = request.args.get('q', '').strip()
+    if not q:
+        return jsonify({"error": "주소를 입력하세요."}), 400
+    from config import Config
+    from services.transit import geocode_address
+    geo = geocode_address(q, Config.KAKAO_REST_API_KEY, Config.NAVER_SEARCH_CLIENT_ID or Config.NAVER_CLIENT_ID, Config.NAVER_SEARCH_CLIENT_SECRET or Config.NAVER_CLIENT_SECRET)
+    if not geo or not geo.get("lat"):
+        return jsonify({"error": "주소를 찾지 못했습니다."}), 404
+    return jsonify({"lat": geo["lat"], "lng": geo["lng"], "address": geo.get("address") or q})
+
+
+@construction_bp.route('/api/facilities/map')
+def api_facilities_map():
+    ftype = request.args.get('type', 'toilet')
+    facs = PublicFacility.query.filter_by(is_active=True)
+    if ftype and ftype not in ('all', 'ALL'):
+        types = [t.strip() for t in ftype.split(',') if t.strip()]
+        if types:
+            facs = facs.filter(PublicFacility.facility_type.in_(types))
+    facs = facs.all()
+    uid = session.get('user_id')
+    user_reports = {}
+    home_lat = home_lng = None
+    if uid:
+        user = User.query.get(uid)
+        if user and (user.curr_latitude or user.reg_latitude):
+            home_lat = user.curr_latitude or user.reg_latitude
+            home_lng = user.curr_longitude or user.reg_longitude
+        reports = FacilityReport.query.filter_by(user_id=uid).all()
+        for r in reports:
+            user_reports[r.facility_id] = r.report_type
+    items = []
+    for f in facs:
+        d = None
+        if home_lat and f.latitude and f.longitude:
+            d = round(haversine_km(home_lat, home_lng, f.latitude, f.longitude), 1)
+        items.append({
+            "id": f.id, "name": f.name, "lat": f.latitude, "lng": f.longitude,
+            "address": f.address, "status": f.status or 'active',
+            "is_community": f.is_community, "source": f.source,
+            "verified_count": f.verified_count or 0, "reject_count": f.reject_count or 0,
+            "open_hr": f.open_hr, "tel": f.tel, "notes": f.notes,
+            "my_report": user_reports.get(f.id), "distance_km": d,
+            "gender_type": f.gender_type or 'mixed', "accessible": f.accessible or False,
+            "facility_type": f.facility_type or 'toilet',
+        })
+    if home_lat:
+        items.sort(key=lambda x: x['distance_km'] if x['distance_km'] is not None else 999)
+    items = items[:200]
+    from config import Config
+    return jsonify({"facilities": items, "type": ftype,
+                    "naver_map_key": Config.NAVER_MAP_CLIENT_ID})
+
+
+@construction_bp.route('/api/facilities', methods=['POST'])
+def api_facilities_create():
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({"error": "로그인이 필요합니다."}), 401
+    data = request.get_json()
+    name = (data.get('name') or '').strip()
+    try:
+        lat = float(data.get('latitude'))
+        lng = float(data.get('longitude'))
+    except (TypeError, ValueError):
+        lat = lng = None
+    if not name or not lat or not lng:
+        return jsonify({"error": "이름과 위치가 필요합니다."}), 400
+    f = PublicFacility(
+        facility_type=data.get('facility_type', 'toilet'),
+        name=name, address=(data.get('address') or '').strip(),
+        latitude=lat, longitude=lng,
+        open_hr=(data.get('open_hr') or '').strip(),
+        tel=(data.get('tel') or '').strip(),
+        notes=(data.get('notes') or '').strip(),
+        gender_type=data.get('gender_type') or 'mixed',
+        accessible=bool(data.get('accessible', False)),
+        source='community', is_community=True, submitted_by=uid,
+        status='active',
+    )
+    db.session.add(f)
+    db.session.commit()
+    return jsonify({"success": True, "id": f.id, "msg": "화장실이 등록되었습니다."})
+
+
+@construction_bp.route('/api/facilities/<int:fid>', methods=['PUT'])
+def api_facilities_update(fid):
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({"error": "로그인이 필요합니다."}), 401
+    f = PublicFacility.query.get_or_404(fid)
+    if not f.is_community and f.submitted_by != uid:
+        role = session.get('role', '')
+        if role not in ('admin', 'leader'):
+            return jsonify({"error": "수정 권한이 없습니다."}), 403
+    data = request.get_json()
+    for field in ['name', 'address', 'open_hr', 'tel', 'notes', 'status', 'photo_url']:
+        if field in data:
+            setattr(f, field, (data[field] or '').strip() if isinstance(data[field], str) else data[field])
+    for field in ['latitude', 'longitude']:
+        if field in data and data[field] is not None:
+            setattr(f, field, float(data[field]))
+    f.updated_at = datetime.now(timezone.utc)
+    db.session.commit()
+    return jsonify({"success": True, "msg": "수정되었습니다."})
+
+
+@construction_bp.route('/api/facilities/<int:fid>/report', methods=['POST'])
+def api_facilities_report(fid):
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({"error": "로그인이 필요합니다."}), 401
+    f = PublicFacility.query.get_or_404(fid)
+    data = request.get_json()
+    report_type = data.get('report_type', '')
+    comment = (data.get('comment') or '').strip()
+    if report_type not in ('verify', 'reject', 'memo'):
+        return jsonify({"error": "잘못된 보고 유형입니다."}), 400
+    existing = FacilityReport.query.filter_by(facility_id=fid, user_id=uid, report_type=report_type).first()
+    if existing:
+        existing.comment = comment
+        existing.created_at = datetime.now(timezone.utc)
+    else:
+        r = FacilityReport(facility_id=fid, user_id=uid, report_type=report_type, comment=comment)
+        db.session.add(r)
+    if report_type == 'verify':
+        f.verified_count = (f.verified_count or 0) + (0 if existing else 1)
+    elif report_type == 'reject':
+        f.reject_count = (f.reject_count or 0) + (0 if existing else 1)
+    db.session.commit()
+    return jsonify({"success": True, "msg": "보고가 접수되었습니다.",
+                    "verified_count": f.verified_count, "reject_count": f.reject_count})
 
 @construction_bp.route('/construction/refresh-facilities', methods=['POST'])
 def refresh_facilities():
     if session.get('role') not in ('admin', 'leader'):
         return jsonify({"error": "권한 없음"}), 403
     from config import Config
-    key = getattr(Config, 'SAFEMAP_API_KEY', '')
+    key = getattr(Config, 'GG_PUBLTOLT_API_KEY', '') or getattr(Config, 'SAFEMAP_API_KEY', '')
     if not key:
-        return jsonify({"error": "SAFEMAP_API_KEY 미설정"}), 400
+        return jsonify({"error": "API 키 미설정"}), 400
     from services.construction import sync_public_facilities
     sync_public_facilities(current_app._get_current_object(), key)
     return jsonify({"status": "success", "msg": "편의시설 동기화 완료"})

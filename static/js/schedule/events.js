@@ -94,7 +94,10 @@ function showDetail(id){
     if(s.memo && s.memo.indexOf('[숙소:')>=0){ var m=s.memo.match(/\[숙소:([^\]]+)\]/); if(m) meta.push('🏠 '+m[1]); }
     document.getElementById('detailMeta').innerHTML = meta.join('<br>');
     var mv = s.memo ? s.memo.replace(/\[숙소:[^\]]+\]/g,'') : '';
-    document.getElementById('detailMemo').innerHTML = mv || '<span class="text-muted">메모 없음</span>';
+    if (s.title && (s.title.includes('이동') || s.title.includes('집으로')) && s.description && s.description.trim()) {
+        mv = s.description.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+    }
+    document.getElementById('detailMemo').innerHTML = mv ? '<div style="white-space:pre-line;">'+mv+'</div>' : '<span class="text-muted">메모 없음</span>';
     document.getElementById('detailEditBtn').onclick = function(){ closeDetail(); editEvent(baseId); };
     document.getElementById('detailModal').style.display='flex';
 }

@@ -246,6 +246,18 @@ export default function SchedulePage() {
                       const dataParam = isHome
                         ? '!3m1!4b1!4m4!4m3!2m1!6e2!3e3'
                         : '!3m1!4b1!4m6!4m5!2m3!6e1!7e2!8j' + (arrTs || '') + '!3e3'
+                      const compassWaypoints = (r.steps || []).map((st: any) => ({
+                        lat: st.mode === '도보' ? parseFloat(r.from_lat) : parseFloat(r.to_lat),
+                        lng: st.mode === '도보' ? parseFloat(r.from_lng) : parseFloat(r.to_lng),
+                        name: st.to || st.from || '',
+                        mode: st.mode,
+                        detail: st.detail,
+                      }))
+                      if (compassWaypoints.length > 0) {
+                        compassWaypoints[compassWaypoints.length - 1].lat = parseFloat(r.to_lat)
+                        compassWaypoints[compassWaypoints.length - 1].lng = parseFloat(r.to_lng)
+                      }
+                      const wpParam = encodeURIComponent(JSON.stringify(compassWaypoints))
                       transitBtns = (
                         <div className="d-flex gap-1 mt-1 flex-wrap">
                           <a className="btn btn-sm btn-outline-danger py-0" target="_blank" rel="noopener noreferrer"
@@ -254,6 +266,8 @@ export default function SchedulePage() {
                             href={`https://map.naver.com/p/directions/${r.from_lng},${r.from_lat},${dl}/${r.to_lng},${r.to_lat},${al}/-/transit`}>🗺️네이버</a>
                           <a className="btn btn-sm btn-outline-success py-0" target="_blank" rel="noopener noreferrer"
                             href={`https://map.kakao.com/link/by/traffic/${dl},${r.from_lat},${r.from_lng}/${al},${r.to_lat},${r.to_lng}`}>📱카카오</a>
+                          <a className="btn btn-sm btn-outline-primary py-0" target="_blank" rel="noopener noreferrer"
+                            href={`/compass?lat=${r.to_lat}&lng=${r.to_lng}&name=${encodeURIComponent(s.title || '목적지')}&waypoints=${wpParam}`}>🧭나침반</a>
                         </div>
                       )
                     }

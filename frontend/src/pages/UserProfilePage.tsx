@@ -73,6 +73,11 @@ export default function UserProfilePage() {
   const [showAddressEdit, setShowAddressEdit] = useState(false)
   const [showBotSettings, setShowBotSettings] = useState(false)
   const [showMemos, setShowMemos] = useState(false)
+  const [weather, setWeather] = useState<any>(null)
+  const [allWeather, setAllWeather] = useState<Record<string, any>>({})
+  const [showWeatherModal, setShowWeatherModal] = useState(false)
+  const [showWeatherDetail, setShowWeatherDetail] = useState(false)
+  const [expandedTown, setExpandedTown] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true); setError('')
@@ -88,6 +93,15 @@ export default function UserProfilePage() {
   }, [userId, navigate])
 
   useEffect(() => { load() }, [load])
+
+  useEffect(() => {
+    fetch('/api/me').then(r => r.json()).then(me => {
+      const town = me.town || me.curr_town || '양평읍'
+      fetch(`/api/daily-info?town=${encodeURIComponent(town)}`).then(r => r.json()).then(d => {
+        if (d.weather) setWeather(d.weather)
+      }).catch(() => {})
+    }).catch(() => {})
+  }, [])
 
   const formatDate = (s?: string) => {
     if (!s) return ''
@@ -161,7 +175,7 @@ export default function UserProfilePage() {
               )}
             </div>
             {/* Right: TongBot */}
-            <div className="col-6 text-center ps-3">
+            <div className="col-6 ps-3">
               {data.is_own ? (
                 <>
                   <div className="d-flex align-items-center gap-1 justify-content-center mb-1">
@@ -175,15 +189,15 @@ export default function UserProfilePage() {
                       onClick={() => setShowMemos(true)} title="메모">📝</button>
                   </div>
                   {data.bot_mood && (
-                    <div className="small text-muted mb-1">
+                    <div className="small text-muted mb-1 text-center">
                       {data.bot_mood === 'warm' ? '💕' : data.bot_mood === 'happy' ? '😊' : data.bot_mood === 'proud' ? '🥲' : data.bot_mood === 'encourage' ? '💪' : data.bot_mood === 'worried' ? '😌' : data.bot_mood === 'blessing' ? '🙏' : '🤖'}
                       Lv.{data.bot_level || 1} ❤️{data.bot_intimacy || 0}
                     </div>
                   )}
-                  <div className="d-flex flex-wrap gap-1 justify-content-center">
+                  <div className="d-flex flex-wrap gap-1 justify-content-center mb-2">
                     <a href="/epub" className="btn btn-sm btn-outline-success">✍️ 콘텐츠</a>
                     <button className="btn btn-sm btn-outline-success"
-                      onClick={() => window.open('/user/my?popup=1&tab=write', 'writePopup', 'width=700,height=700,left=100,top=50')}>
+                      onClick={() => window.open('/bot/chat?popup=1', 'tongbotChat', 'width=450,height=700,left=100,top=50')}>
                       ✍️ 글쓰기
                     </button>
                     <button className="btn btn-sm btn-outline-info"
@@ -195,6 +209,52 @@ export default function UserProfilePage() {
                       📅 일정
                     </button>
                   </div>
+                  {/* 통벗 채팅 한줄 */}
+                  {data.bot_memory && (
+                    <div className="small text-muted p-1 mb-1 rounded" style={{ background: '#f0fdf4', borderLeft: '3px solid #198754', cursor: 'pointer', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                      onClick={() => window.open('/bot/chat?popup=1', 'tongbotChat', 'width=450,height=700,left=100,top=50')}>
+                      🤖 {data.bot_memory.split('\n').filter((l:string)=>l.trim()).slice(-1)[0]?.replace(/^(회원|통벗):\s*/, '') || ''}
+                    </div>
+                  )}
+                  {/* 날씨 한줄 + 펼치기 */}
+                  {weather && (
+                    <div className="mt-1">
+                      <div className="d-flex align-items-center small">
+                        <span style={{ cursor: 'pointer' }} onClick={() => {
+                          if (Object.keys(allWeather).length === 0) {
+                            fetch('/api/weather/all').then(r => r.json()).then(d => setAllWeather(d)).catch(() => {})
+                          }
+                          setShowWeatherModal(true)
+                        }}>{weather.icon} <span className="fw-bold text-primary">{weather.sky} {weather.temperature}°C</span> <span className="text-muted">체감 {weather.feels_like}°C</span></span>
+                        <span className="text-muted ms-auto" style={{ cursor: 'pointer' }}
+                          onClick={() => {
+                            if (!showWeatherDetail && Object.keys(allWeather).length === 0) {
+                              fetch('/api/weather/all').then(r => r.json()).then(d => setAllWeather(d)).catch(() => {})
+                            }
+                            setShowWeatherDetail(!showWeatherDetail)
+                          }}>{showWeatherDetail ? '▲' : '▼'}</span>
+                      </div>
+                      {showWeatherDetail && (
+                        <div className="mt-1 p-2 rounded small" style={{ background: 'linear-gradient(135deg, #e8f4fd 0%, #f0f9ff 100%)', border: '1px solid #bee5eb' }}>
+                          <div className="d-flex gap-2 text-muted mb-1" style={{ flexWrap: 'wrap' }}>
+                            <span>💧 습도 {weather.humidity}%</span>
+                            <span>🌧️ 강수 {weather.precipitation_prob}%</span>
+                            <span>💨 바람 {weather.wind_speed}m/s</span>
+                            {weather.uv_text && <span>☀️ 자외선 {weather.uv_text}</span>}
+                          </div>
+                          {(weather.air_text || weather.o3_text) && (
+                            <div className="d-flex gap-2 text-muted mb-1" style={{ flexWrap: 'wrap' }}>
+                              {weather.air_text && <span>🌫️ 공기 {weather.air_text} (PM2.5 {weather.pm25}µg/m³)</span>}
+                              {weather.o3_text && <span>🫧 오존 {weather.o3_text}</span>}
+                            </div>
+                          )}
+                          {weather.rain_info && <div className="text-info mb-1">🌧️ {weather.rain_info}</div>}
+                          {weather.sunrise && weather.sunset && <div className="text-muted mb-1">🌅 일출 {weather.sunrise} · 🌇 일몰 {weather.sunset}</div>}
+                          {weather.tip && <div className="fw-bold" style={{ color: '#1976d2' }}>💡 {weather.tip}</div>}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </>
               ) : (
                 <div className="text-muted py-4"><small>통벗 정보 없음</small></div>
@@ -204,7 +264,59 @@ export default function UserProfilePage() {
         </div>
       </div>
 
-      {/* Dashboard: Schedule + Messages + Notices + AI Tip */}
+      {/* 할일메모 - 위치기반안내 위 */}
+      {data.is_own && <TodoMemoStrip />}
+
+      {/* Location - 맨 위 */}
+      <div className="card border-0 shadow-sm mb-3" style={{ borderRadius: 18 }}>
+        <div className="card-body p-2">
+          <div className="d-flex align-items-center gap-2 flex-wrap">
+            <small className="text-muted">📍</small>
+            <span className="fw-bold small">{data.curr_location || `${u.town || ''} ${u.village || ''}`}</span>
+            {data.is_own && (
+              <>
+                <button className="btn btn-sm btn-outline-secondary py-0 px-1"
+                  onClick={() => setShowAddressEdit(!showAddressEdit)}>✏️</button>
+                <a href="/construction?tab=home" className="btn btn-sm btn-outline-secondary py-0 px-1">🏠</a>
+                <a href="/construction?tab=scenery&sub=facility" className="btn btn-sm btn-outline-secondary py-0 px-1">🚻</a>
+                <div className="ms-auto d-flex gap-1">
+                  <div className="form-check form-switch mb-0 small">
+                    <input className="form-check-input" type="checkbox" checked={u.location_share}
+                      onChange={e => fetch('/user/location/share/toggle', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ value: e.target.checked ? 'friends' : 'off' })
+                      })} />
+                    <label className="form-check-label">위치</label>
+                  </div>
+                  <div className="form-check form-switch mb-0 small">
+                    <input className="form-check-input" type="checkbox" checked={u.village_notify}
+                      onChange={e => fetch('/user/village/notify/toggle', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ value: e.target.checked })
+                      })} />
+                    <label className="form-check-label">소식</label>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+          {data.is_own && showAddressEdit && (
+            <div className="mt-2 p-2 bg-light rounded">
+              <form method="POST" action="/user/location/correct?back=profile" className="row g-1 align-items-center">
+                <div className="col-12 mb-1"><small className="text-muted">📍 위치 보정 참여시 <strong>1닢</strong> 지급</small></div>
+                <div className="col-8">
+                  <input type="text" name="manual_loc" className="form-control form-control-sm" placeholder="정확한 주소 입력 (예: 양수리 935)" required />
+                </div>
+                <div className="col-4">
+                  <button className="btn btn-sm btn-outline-secondary w-100" type="submit">📍 보정</button>
+                </div>
+              </form>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Dashboard */}
       {data.is_own && <DashboardPanel />}
 
       {/* Appointments */}
@@ -244,7 +356,7 @@ export default function UserProfilePage() {
                       {catDrafts.map(d => (
                         <button key={d.id}
                           className="list-group-item list-group-item-action small ps-4 border-0 text-start"
-                          onClick={() => window.open(`/user/my?popup=1&tab=write&draft=${d.id}`, 'writePopup', 'width=700,height=700,left=100,top=50')}>
+                          onClick={() => window.open('/bot/chat?popup=1', 'tongbotChat', 'width=450,height=700,left=100,top=50')}>
                           {d.title || '제목없음'}
                           <span className={`badge bg-${d.status === 'reviewed' ? 'success' : 'secondary'} ms-1`}>
                             {d.status === 'reviewed' ? '교정완료' : '작성중'}
@@ -270,54 +382,6 @@ export default function UserProfilePage() {
           </div>
         </div>
       )}
-
-      {/* Location */}
-      <div className="card border-0 shadow-sm mb-3" style={{ borderRadius: 18 }}>
-        <div className="card-body p-2">
-          <div className="d-flex align-items-center gap-2 flex-wrap">
-            <small className="text-muted">📍</small>
-            <span className="fw-bold small">{data.curr_location || `${u.town || ''} ${u.village || ''}`}</span>
-            {data.is_own && (
-              <>
-                <button className="btn btn-sm btn-outline-secondary py-0 px-1"
-                  onClick={() => setShowAddressEdit(!showAddressEdit)}>✏️</button>
-                <a href="/construction?tab=home" className="btn btn-sm btn-outline-secondary py-0 px-1">🏠</a>
-                <div className="ms-auto d-flex gap-1">
-                  <div className="form-check form-switch mb-0 small">
-                    <input className="form-check-input" type="checkbox" checked={u.location_share}
-                      onChange={e => fetch('/user/location/share/toggle', {
-                        method: 'POST', headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ value: e.target.checked ? 'friends' : 'off' })
-                      })} />
-                    <label className="form-check-label">위치</label>
-                  </div>
-                  <div className="form-check form-switch mb-0 small">
-                    <input className="form-check-input" type="checkbox" checked={u.village_notify}
-                      onChange={e => fetch('/user/village/notify/toggle', {
-                        method: 'POST', headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ value: e.target.checked })
-                      })} />
-                    <label className="form-check-label">소식</label>
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
-          {data.is_own && (
-            <div className="mt-2 p-2 bg-light rounded">
-              <form method="POST" action="/user/location/correct?back=profile" className="row g-1 align-items-center">
-                <div className="col-12 mb-1"><small className="text-muted">📍 위치 보정 참여시 <strong>1닢</strong> 지급</small></div>
-                <div className="col-8">
-                  <input type="text" name="manual_loc" className="form-control form-control-sm" placeholder="정확한 주소 입력 (예: 양수리 935)" required />
-                </div>
-                <div className="col-4">
-                  <button className="btn btn-sm btn-outline-secondary w-100" type="submit">📍 보정</button>
-                </div>
-              </form>
-            </div>
-          )}
-        </div>
-      </div>
 
       {/* Point History */}
       <div className="card border-0 shadow-sm mb-3" style={{ borderRadius: 18 }}>
@@ -504,6 +568,61 @@ export default function UserProfilePage() {
           </div>
         </div>
       )}
+
+      {/* Weather Modal - 면 전체 날씨 */}
+      {showWeatherModal && (
+        <div className="modal d-block" style={{ background: 'rgba(0,0,0,0.4)', zIndex: 1050 }}
+          onClick={() => setShowWeatherModal(false)}>
+          <div className="modal-dialog modal-dialog-centered" style={{ maxWidth: 400 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-content" style={{ borderRadius: 16, maxHeight: '80vh' }}>
+              <div className="modal-header border-0 pb-0">
+                <h6 className="fw-bold">🌤️ 양평군 면별 날씨</h6>
+                <button className="btn-close" onClick={() => setShowWeatherModal(false)} />
+              </div>
+              <div className="modal-body overflow-auto p-2" style={{ maxHeight: 'calc(80vh - 80px)' }}>
+                {Object.keys(allWeather).length === 0 ? (
+                  <div className="text-center text-muted py-3 small">로딩 중...</div>
+                ) : (
+                  Object.entries(allWeather).map(([town, w]: [string, any]) => {
+                    const open = expandedTown === town
+                    return (
+                      <div key={town} className="mb-1 rounded" style={{ background: '#f8f9fa' }}>
+                        <div className="d-flex align-items-center gap-2 p-2 small" style={{ cursor: 'pointer' }}
+                          onClick={() => setExpandedTown(open ? null : town)}>
+                          <span className="fs-6">{w.icon}</span>
+                          <div className="flex-grow-1">
+                            <span className="fw-bold">{w.town}</span>{' '}
+                            <span className="text-muted">{w.sky} {w.temperature}°C</span>
+                          </div>
+                          <span className="text-muted small">{open ? '▲' : '▼'}</span>
+                        </div>
+                        {open && (
+                          <div className="px-2 pb-2 d-flex gap-2 text-muted flex-wrap" style={{ fontSize: '0.75rem' }}>
+                            <span>💧 습도 {w.humidity}%</span>
+                            <span>🌧️ 강수 {w.precipitation_prob}%</span>
+                            <span>💨 바람 {w.wind_speed}m/s</span>
+                            {w.uv_text && <span>☀️ 자외선 {w.uv_text}</span>}
+                            {(w.air_text || w.o3_text) && (
+                              <>
+                                {w.air_text && <span>🌫️ 공기 {w.air_text} (PM2.5 {w.pm25}µg/m³)</span>}
+                                {w.o3_text && <span>🫧 오존 {w.o3_text}</span>}
+                              </>
+                            )}
+                            {w.rain_info && <span className="text-info w-100">🌧️ {w.rain_info}</span>}
+                            {w.sunrise && w.sunset && <span className="w-100">🌅 일출 {w.sunrise} · 🌇 일몰 {w.sunset}</span>}
+                            {w.tip && <span className="w-100" style={{ color: '#1976d2' }}>💡 {w.tip}</span>}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   )
 }
@@ -516,6 +635,7 @@ function DashboardPanel() {
     ai_tip: string
   } | null>(null)
   const [leaderboard, setLeaderboard] = useState<{user_id:number;bot_name:string;username:string;level:number;intimacy:number;knowledge_count:number;praise_count:number;score:number;mood:string}[]>([])
+  const [showAllRank, setShowAllRank] = useState(false)
 
   useEffect(() => {
     fetch('/api/user/dashboard', { credentials: 'include' })
@@ -525,81 +645,54 @@ function DashboardPanel() {
   }, [])
 
   if (!dash) return null
-  const hasSched = dash.today_schedules.length > 0
-  const hasUnread = dash.unread_messages.length > 0
-  const hasNotices = dash.notices.length > 0
 
   return (
     <div className="card border-0 shadow-sm mb-3" style={{ borderRadius: 18 }}>
       <div className="card-body p-3">
-        {/* AI Tip */}
+        {/* 통벗 AI Tip 한줄 */}
         {dash.ai_tip && (
-          <div className="p-2 mb-2 rounded" style={{ background: '#f0fdf4', border: '1px solid #bbf7d0' }}>
-            <small>{dash.ai_tip}</small>
+          <div className="small mb-2" style={{ color: '#1976d2' }}>🤖 {dash.ai_tip}</div>
+        )}
+
+        {/* 오늘 일정 한줄 */}
+        {dash.today_schedules.length > 0 && (
+          <div className="small text-muted mb-1">
+            📅 {dash.today_schedules.map((s: any) => `${s.title} ${s.time}`).join(' · ')}
           </div>
         )}
 
-        <div className="row g-2">
-          {/* Today's Schedule */}
-          {hasSched && (
-            <div className="col-6">
-              <small className="fw-bold text-success">📅 오늘 일정</small>
-              {dash.today_schedules.map(s => (
-                <div key={s.id} className="small mt-1" style={{ borderLeft: '3px solid #198754', paddingLeft: 8 }}>
-                  <strong>{s.title}</strong>
-                  {s.time && <span className="text-muted ms-1">{s.time}</span>}
-                  {s.location && <div className="text-muted">{s.location}</div>}
-                </div>
-              ))}
-            </div>
-          )}
+        {/* 안 읽은 편지 한줄 */}
+        {dash.unread_messages.length > 0 && (
+          <div className="small text-muted mb-1">
+            ✉️ 안 읽은 편지 {dash.unread_count}건
+          </div>
+        )}
 
-          {/* Unread Messages */}
-          {hasUnread && (
-            <div className="col-6">
-              <small className="fw-bold text-primary">✉️ 안 읽은 편지 ({dash.unread_count})</small>
-              {dash.unread_messages.slice(0, 3).map(m => (
-                <a key={m.id} href={`/message/read/${m.id}`}
-                  className="text-decoration-none d-block small mt-1 text-dark">
-                  <strong>{m.sender}</strong>
-                  <span className="text-muted ms-1">{m.subject}</span>
-                </a>
-              ))}
-            </div>
-          )}
-
-          {/* Notices */}
-          {hasNotices && (
-            <div className="col-6">
-              <small className="fw-bold text-danger">📢 공지</small>
-              {dash.notices.map(n => (
-                <div key={n.id} className="small mt-1">
-                  <span className={`badge bg-${n.urgency === 'high' ? 'danger' : n.urgency === 'medium' ? 'warning' : 'info'} me-1`}>
-                    {n.alert_type}
-                  </span>
-                  <strong>{n.title}</strong>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Leaderboard */}
+        {/* 통벗 랭킹 1등 */}
         {leaderboard.length > 0 && (
-          <div className="mt-2 pt-2 border-top">
-            <small className="fw-bold text-warning">🏆 통벗 랭킹 TOP 10</small>
-            <div className="small mt-1" style={{ maxHeight: 200, overflowY: 'auto' }}>
-              {leaderboard.slice(0, 10).map((b, i) => (
-                <div key={b.user_id} className="d-flex align-items-center gap-1 py-1">
-                  <span className={`fw-bold ${i < 3 ? 'text-warning' : 'text-muted'}`}>{i + 1}</span>
-                  <span>{b.bot_name}</span>
-                  <small className="text-muted">({b.username})</small>
-                  <span className="ms-auto">
-                    Lv.{b.level} ❤️{b.intimacy} 👍{b.praise_count} 📚{b.knowledge_count}
-                  </span>
+          <div className="mt-1">
+            {!showAllRank ? (
+              <div className="d-flex align-items-center gap-1 small" style={{ cursor: 'pointer' }} onClick={() => setShowAllRank(true)}>
+                <span className="fw-bold text-warning">🏆 1위</span>
+                <span>{leaderboard[0].bot_name}</span>
+                <small className="text-muted">Lv.{leaderboard[0].level} ❤️{leaderboard[0].intimacy}</small>
+                <small className="text-muted ms-auto">▼</small>
+              </div>
+            ) : (
+              <div>
+                <div className="d-flex align-items-center mb-1" style={{ cursor: 'pointer' }} onClick={() => setShowAllRank(false)}>
+                  <small className="fw-bold text-warning">🏆 통벗 랭킹</small>
+                  <small className="text-muted ms-auto">▲</small>
                 </div>
-              ))}
-            </div>
+                {leaderboard.slice(0, 10).map((b, i) => (
+                  <div key={b.user_id} className="d-flex align-items-center gap-1 py-1 small">
+                    <span className={`fw-bold ${i < 3 ? 'text-warning' : 'text-muted'}`}>{i + 1}</span>
+                    <span>{b.bot_name}</span>
+                    <small className="text-muted">Lv.{b.level} ❤️{b.intimacy}</small>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -608,7 +701,7 @@ function DashboardPanel() {
 }
 
 function MemoPanel() {
-  const [memos, setMemos] = useState<{id:number;content:string;author:string;is_shared:boolean;done:boolean;created_at:string}[]>([])
+  const [memos, setMemos] = useState<{id:number;content:string;author:string;is_shared:boolean;done:boolean;end_date?:string;created_at:string}[]>([])
   const [newContent, setNewContent] = useState('')
   const [editing, setEditing] = useState<{id:number;content:string} | null>(null)
   const [comments, setComments] = useState<Record<number, {id:number;content:string;user_name:string;is_own:boolean}[]>>({})
@@ -715,6 +808,7 @@ function MemoPanel() {
                   <span style={{ textDecoration: m.done ? 'line-through' : 'none', wordBreak: 'break-word' }}>{m.content}</span>
                   <div className="d-flex gap-2 mt-1">
                     <small className="text-muted">{m.author === 'bot' ? '🤖' : '👤'} {new Date(m.created_at).toLocaleDateString()}</small>
+                    {m.end_date && <small className="text-muted">⏰ {new Date(m.end_date).toLocaleDateString()}</small>}
                     <button className="btn btn-sm p-0 text-primary" onClick={() => setEditing({ id: m.id, content: m.content })}>✏️</button>
                     <button className="btn btn-sm p-0 text-danger" onClick={() => remove(m.id)}>🗑️</button>
                     <button className="btn btn-sm p-0" onClick={() => update(m.id, { is_shared: !m.is_shared })}>
@@ -808,6 +902,64 @@ function BotSettingsPanel({ data, load, onClose }: { data: any; load: () => void
           }).catch(() => alert('저장 실패'))
         }}>설정 저장</button>
         <button className="btn btn-sm btn-outline-secondary" onClick={onClose}>닫기</button>
+      </div>
+    </div>
+  )
+}
+
+function TodoMemoStrip() {
+  const [memos, setMemos] = useState<{ id: number; content: string; done: boolean; end_date: string; created_at?: string; updated_at?: string }[]>([])
+  const [expanded, setExpanded] = useState(false)
+
+  useEffect(() => {
+    fetch('/api/bot/memos', { credentials: 'include' })
+      .then(r => r.json()).then(d => {
+        const list: { id: number; content: string; done: boolean; end_date: string; created_at?: string; updated_at?: string }[] =
+          Array.isArray(d.memos) ? d.memos.filter((m: any) => !m.done) : []
+        list.sort((a, b) => {
+          const ae = a.end_date ? new Date(a.end_date).getTime() : Infinity
+          const be = b.end_date ? new Date(b.end_date).getTime() : Infinity
+          if (ae !== be) return ae - be
+          return (new Date(b.updated_at || b.created_at || 0).getTime()) - (new Date(a.updated_at || a.created_at || 0).getTime())
+        })
+        setMemos(list)
+      }).catch(() => {})
+  }, [])
+
+  if (memos.length === 0) return null
+  const fmt = (s: string) => {
+    if (!s) return ''
+    const d = new Date(s)
+    return `${d.getMonth() + 1}/${d.getDate()}`
+  }
+  const first = memos[0]
+
+  return (
+    <div className="card border-0 shadow-sm mb-3" style={{ borderRadius: 18, background: '#fffdf5', borderLeft: '3px solid #f0ad4e' }}>
+      <div className="card-body p-2">
+        <div className="d-flex align-items-center gap-2">
+          <span title="할일메모">📌</span>
+          <div className="flex-grow-1 small" style={{ minWidth: 0 }}>
+            <span className="d-block text-truncate" title={first.content}>{first.content}</span>
+            {first.end_date && <small className="text-muted">⏰ {fmt(first.end_date)}</small>}
+          </div>
+          {memos.length > 1 && (
+            <button className="btn btn-sm btn-outline-secondary py-0 px-1"
+              onClick={() => setExpanded(!expanded)}>
+              {expanded ? '▲' : `▼ ${memos.length}`}
+            </button>
+          )}
+        </div>
+        {expanded && (
+          <div className="mt-2 pt-1" style={{ borderTop: '1px dashed #f0ad4e' }}>
+            {memos.map(m => (
+              <div key={m.id} className="d-flex align-items-center gap-2 py-1 small">
+                <span className="flex-grow-1 text-truncate" title={m.content}>{m.content}</span>
+                {m.end_date && <small className="text-muted flex-shrink-0">⏰ {fmt(m.end_date)}</small>}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )

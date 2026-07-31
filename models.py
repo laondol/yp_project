@@ -387,9 +387,9 @@ class HeritageStamp(db.Model):
     stamped_at = db.Column(db.DateTime, default=datetime.now)
 
 class PublicFacility(db.Model):
-    """공중화장실 등 생활안전지도 편의시설 (safemap IF_0132 등)"""
+    """공중화장실 등 생활안전지도 편의시설"""
     id = db.Column(db.Integer, primary_key=True)
-    facility_type = db.Column(db.String(50), default='toilet')  # toilet, parking, ...
+    facility_type = db.Column(db.String(50), default='toilet')  # toilet, shelter, ev_charger, office, ...
     name = db.Column(db.String(300), nullable=False)
     address = db.Column(db.String(300))
     latitude = db.Column(db.Float)
@@ -399,12 +399,21 @@ class PublicFacility(db.Model):
     manager = db.Column(db.String(100))
     emergency_bell = db.Column(db.Boolean, default=False)
     cctv = db.Column(db.Boolean, default=False)
-    source = db.Column(db.String(50))          # safemap_toilet
+    source = db.Column(db.String(50))          # gg_api, community
     source_url = db.Column(db.String(200))     # objt id / num
     town = db.Column(db.String(50))
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now)
+    is_community = db.Column(db.Boolean, default=False)
+    submitted_by = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    status = db.Column(db.String(20), default='active')  # active, inactive, closed
+    verified_count = db.Column(db.Integer, default=0)
+    reject_count = db.Column(db.Integer, default=0)
+    notes = db.Column(db.Text, default='')
+    photo_url = db.Column(db.String(300))
+    gender_type = db.Column(db.String(20))   # mixed, separate, male_only, female_only
+    accessible = db.Column(db.Boolean, default=False)  # 장애인 가능
 
 
 class TongBot(db.Model):
@@ -446,6 +455,7 @@ class TongBotMemo(db.Model):
     is_shared = db.Column(db.Boolean, default=False)
     done = db.Column(db.Boolean, default=False)
     seen = db.Column(db.Boolean, default=False)
+    end_date = db.Column(db.DateTime, nullable=True)  # 종료일(마감일) - 반복/요금 메모 자동 설정
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now)
 
@@ -483,6 +493,7 @@ class TongBotSchedule(db.Model):
     repeat_weekdays = db.Column(db.Integer, default=0)  # bitmask: Mon=1<<0 .. Sun=1<<6
     repeat_week_of_month = db.Column(db.Integer, default=0)  # 0=매주, 1-5=N번째
     repeat_month_of_year = db.Column(db.Integer, default=0)  # 0=매년아님, 1-12=해당월
+    repeat_lastday = db.Column(db.Boolean, default=False)  # '매달 말일': 월 마지막 날 반복
     reminder_minutes = db.Column(db.Integer, default=0)  # 0=알림안함, 10/30/60/1440(1일전)
     repeat_exceptions = db.Column(db.Text, default='')  # JSON list of 'YYYY-MM-DD' dates to skip
     # --- 모듈화: parent_id 기반 발생일/경로 추적 ---
@@ -998,3 +1009,17 @@ class QRSession(db.Model):
     status = db.Column(db.String(20), default='pending')
     created_at = db.Column(db.DateTime, default=datetime.now)
     expires_at = db.Column(db.DateTime, nullable=False)
+
+
+class FacilityReport(db.Model):
+    """화장실 사용 보고 (가능/불가/메모)"""
+    __tablename__ = 'facility_report'
+    id = db.Column(db.Integer, primary_key=True)
+    facility_id = db.Column(db.Integer, db.ForeignKey('public_facility.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    report_type = db.Column(db.String(20), nullable=False)  # verify, reject, memo
+    comment = db.Column(db.Text, default='')
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+    facility = db.relationship('PublicFacility', backref='reports')
+    user = db.relationship('User', backref='facility_reports')

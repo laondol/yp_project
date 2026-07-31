@@ -15,7 +15,7 @@ from route_modules.user_bp import user_bp
 from route_modules.board_bp import board_bp
 from route_modules.admin_bp import admin_bp
 from route_modules.news_bp import news_bp
-from route_modules.mypage_bp import mypage_bp
+
 from route_modules.search_bp import search_bp
 from route_modules.message_bp import message_bp
 from route_modules.service_bp import service_bp
@@ -72,7 +72,7 @@ def create_app():
     app.register_blueprint(board_bp)
     app.register_blueprint(admin_bp)
     app.register_blueprint(news_bp)
-    app.register_blueprint(mypage_bp)
+
     app.register_blueprint(search_bp)
     app.register_blueprint(message_bp)
     app.register_blueprint(service_bp)
@@ -86,6 +86,26 @@ def create_app():
     # gunicorn에서도 실행되도록 초기화 보장
     with app.app_context():
         db.create_all()
+        # 신규 컬럼 자동 추가 (기존 DB 마이그레이션)
+        from sqlalchemy import inspect as _sa_inspect, text as _sa_text
+        try:
+            _inspector = _sa_inspect(db.engine)
+            _tbls = _inspector.get_table_names()
+            if 'tong_bot_memo' in _tbls:
+                _cols = [c['name'] for c in _inspector.get_columns('tong_bot_memo')]
+                if 'end_date' not in _cols:
+                    with db.engine.connect() as _conn:
+                        _conn.execute(_sa_text('ALTER TABLE tong_bot_memo ADD COLUMN end_date TIMESTAMP'))
+                        _conn.commit()
+            if 'tong_bot_schedule' in _tbls:
+                _cols = [c['name'] for c in _inspector.get_columns('tong_bot_schedule')]
+                if 'repeat_lastday' not in _cols:
+                    with db.engine.connect() as _conn:
+                        _conn.execute(_sa_text('ALTER TABLE tong_bot_schedule ADD COLUMN repeat_lastday BOOLEAN DEFAULT FALSE'))
+                        _conn.commit()
+            print("[OK] 신규 컬럼 마이그레이션 완료")
+        except Exception as e:
+            print(f"[SKIP] 컬럼 마이그레이션: {e}")
         if not User.query.first():
             hashed_pw = generate_password_hash('pw1234')
             demo_users = [

@@ -417,8 +417,36 @@ def plan_segment(from_name, from_lat, from_lng, to_name, to_lat, to_lng, arrival
 
 def format_itinerary(plan):
     lines = [f"🚶 {plan['departure']} 출발 → {plan['arrival']} 도착 (총 {plan['total_min']}분, {plan['distance_km']}km)"]
-    for s in plan["steps"]:
-        lines.append(f"  {s['mode']} {s['detail']}")
+    for i, s in enumerate(plan["steps"], 1):
+        mode = s['mode']
+        detail = s['detail']
+        from_name = s.get('from', '')
+        to_name = s.get('to', '')
+        bus_no = s.get('bus_no', '')
+        subway = s.get('subway_name', '')
+        time_min = s.get('time_min', 0)
+
+        if '도보' in mode:
+            if from_name and to_name:
+                lines.append(f"  {i}. 🚶 도보: {from_name} → {to_name} ({time_min}분)")
+            else:
+                lines.append(f"  {i}. 🚶 도보 {time_min}분")
+        elif '버스' in mode:
+            bus_info = f"{bus_no} " if bus_no else ""
+            if from_name and to_name:
+                lines.append(f"  {i}. 🚌 {bus_info}{from_name} → {to_name} ({time_min}분)")
+            else:
+                lines.append(f"  {i}. 🚌 {bus_info}{detail}")
+        elif '전철' in mode or '지하철' in mode:
+            line_info = f"{subway} " if subway else ""
+            if from_name and to_name:
+                lines.append(f"  {i}. 🚄 {line_info}{from_name} → {to_name} ({time_min}분)")
+            else:
+                lines.append(f"  {i}. 🚄 {line_info}{detail}")
+        elif '택시' in mode:
+            lines.append(f"  {i}. 🚕 택시 {time_min}분")
+        else:
+            lines.append(f"  {i}. {mode} {detail}")
     return "\n".join(lines)
 
 def format_memo_compact(plan):
@@ -446,3 +474,168 @@ def format_memo_compact(plan):
             parts.append(f"{mode}{step_time}분")
         cumulative_min += step_time
     return " -> ".join(parts)
+
+def _fmt_dur_ko(time_min):
+    try:
+        tm = float(time_min or 0)
+    except (TypeError, ValueError):
+        tm = 0
+    if tm <= 0:
+        return "1분"
+    total_sec = int(round(tm * 60))
+    m, s = divmod(total_sec, 60)
+    if m >= 120:
+        h, m2 = divmod(m, 60)
+        return f"{h}시간{m2}분" if m2 else f"{h}시간"
+    if s and m < 60:
+        return f"{m}분{s}초" if m else f"{s}초"
+    return f"{m}분"
+
+def _place_ko(name):
+    if not name:
+        return ""
+    n = str(name).strip()
+    if "(" in n:
+        n = n.split("(")[0].strip()
+    return n
+
+def _bus_label(bus_no, from_name=""):
+    bn = (bus_no or "").strip()
+    if not bn and from_name and "(" in str(from_name):
+        bn = str(from_name).split("(")[-1].rstrip(")").strip()
+    if not bn:
+        return ""
+    if bn.endswith("번"):
+        return bn
+    if any(c.isalpha() for c in bn):
+        return bn
+    return f"{bn}번"
+
+def _stop_label(name, kind="정류장"):
+    n = _place_ko(name)
+    if not n:
+        return kind
+    if any(k in n for k in ("정류장", "역", "입구", "터미널")):
+        return n
+    return f"{n} {kind}"
+
+def _station_label(name):
+    n = _place_ko(name)
+    if not n:
+        return "역"
+    if any(k in n for k in ("역", "입구", "터미널")):
+        return n
+    return f"{n}역"
+
+def format_memo_narrative(plan, origin_name=None, dest_name=None):
+    """자연어 경로 안내 문장 (통벗 이동 메모용).
+    예) 집에서 3분 걸어서 양수리지석묘 정류장에서 58번 버스를 타고 7분30초 가서
+        운길산 정류장에서 내려서 3분 걸어서 경의중앙선으로 지하철을 타고 90분 가서
+        용산역에서 내려서 15분 걸어가면 용산시제품제작소입니다.
+    """
+    steps = list(plan.get("steps") or [])
+    if not steps:
+        return ""
+    dest = _place_ko(dest_name) or _place_ko(steps[-1].get("to")) or "목적지"
+    origin = _place_ko(origin_name) or _place_ko(steps[0].get("from")) or "출발지"
+    chunks = []
+    n = len(steps)
+    just_alighted = False
+    for i, s in enumerate(steps):
+        mode = s.get("mode") or ""
+        fr = _place_ko(s.get("from"))
+        to = _place_ko(s.get("to"))
+        dur = _fmt_dur_ko(s.get("time_min", 0))
+        is_last = i == n - 1
+        is_first = i == 0
+
+        if "도보" in mode:
+            start = ""
+            if is_first:
+                start = fr or origin
+            elif not just_alighted:
+                start = fr
+            if is_last:
+                if start:
+                    chunks.append(f"{start}에서 {dur} 걸어가면 {dest}입니다")
+                else:
+                    chunks.append(f"{dur} 걸어가면 {dest}입니다")
+            else:
+                if start:
+                    chunks.append(f"{start}에서 {dur} 걸어서")
+                else:
+                    chunks.append(f"{dur} 걸어서")
+            just_alighted = False
+        elif "버스" in mode or "고속" in mode:
+            stop_from = _stop_label(fr or (origin if is_first else ""), "정류장")
+            bl = _bus_label(s.get("bus_no") or "", s.get("from") or "")
+            ride = f"{bl} 버스를 타고" if bl else "버스를 타고"
+            if is_last and not to:
+                chunks.append(f"{stop_from}에서 {ride} {dur} 가면 {dest}입니다")
+                just_alighted = False
+            else:
+                stop_to = _stop_label(to, "정류장") if to else ""
+                if stop_to:
+                    chunks.append(f"{stop_from}에서 {ride} {dur} 가서 {stop_to}에서 내려서")
+                    just_alighted = True
+                else:
+                    chunks.append(f"{stop_from}에서 {ride} {dur} 가서")
+                    just_alighted = False
+                if is_last:
+                    chunks.append(f"{dest}입니다")
+                    just_alighted = False
+        elif "전철" in mode or "지하철" in mode or "SUBWAY" in mode or "RAIL" in mode or "METRO" in mode or "TRAIN" in mode:
+            line = (s.get("subway_name") or "").strip()
+            if line.endswith("선") or line.endswith("호선"):
+                board = f"{line}으로 지하철을 타고"
+            elif line:
+                board = f"{line} 지하철을 타고"
+            elif fr:
+                board = f"{_station_label(fr)}에서 지하철을 타고"
+            else:
+                board = "지하철을 타고"
+            if is_last and not to:
+                chunks.append(f"{board} {dur} 가면 {dest}입니다")
+                just_alighted = False
+            else:
+                end_st = _station_label(to) if to else ""
+                if end_st:
+                    chunks.append(f"{board} {dur} 가서 {end_st}에서 내려서")
+                    just_alighted = True
+                else:
+                    chunks.append(f"{board} {dur} 가서")
+                    just_alighted = False
+                if is_last:
+                    chunks.append(f"{dest}입니다")
+                    just_alighted = False
+        elif "택시" in mode:
+            start = fr if (is_first or not just_alighted) else ""
+            if not start and is_first:
+                start = origin
+            if is_last:
+                if start:
+                    chunks.append(f"{start}에서 택시로 {dur} 가면 {dest}입니다")
+                else:
+                    chunks.append(f"택시로 {dur} 가면 {dest}입니다")
+            else:
+                if start:
+                    chunks.append(f"{start}에서 택시로 {dur} 가서")
+                else:
+                    chunks.append(f"택시로 {dur} 가서")
+            just_alighted = False
+        else:
+            detail = (s.get("detail") or mode or "이동").strip()
+            if is_last:
+                chunks.append(f"{detail} 후 {dest}입니다")
+            else:
+                chunks.append(f"{detail} 후")
+            just_alighted = False
+
+    text = " ".join(c.strip() for c in chunks if c and c.strip()).strip()
+    if not text:
+        return f"{origin}에서 {dest}까지 이동합니다."
+    if "입니다" not in text:
+        text = text.rstrip("서").rstrip() + f" {dest}입니다"
+    if not text.endswith("."):
+        text += "."
+    return text

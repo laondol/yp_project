@@ -35,32 +35,6 @@ def _get_bot(user_id):
         db.session.commit()
     return bot
 
-@tongbot_bp.route('/user/my')
-def my_page():
-    if not session.get('user_id'):
-        return redirect(url_for('auth.login', next='/user/my'))
-    user = User.query.get(session['user_id'])
-    if not user:
-        return redirect(url_for('auth.login'))
-    bot = _get_bot(user.id)
-    drafts = TongBotDraft.query.filter_by(user_id=user.id).order_by(TongBotDraft.updated_at.desc()).limit(20).all()
-    schedules = TongBotSchedule.query.filter_by(user_id=user.id).order_by(TongBotSchedule.event_date.desc()).limit(10).all()
-    stamps_count = 0
-    try:
-        from models import HeritageStamp
-        stamps_count = HeritageStamp.query.filter_by(user_id=user.id).count()
-    except: pass
-    popup = request.args.get('popup') == '1'
-    active_tab = request.args.get('tab', 'chat')
-    room_id = request.args.get('room', type=int)
-    action = request.args.get('action', '')
-    if room_id and action:
-        _handle_chat_action(user.id, room_id, action)
-        active_tab = 'friendchat'
-    greeting = _greeting(user)
-    import json
-    chat_rooms = ChatRoom.query.filter(ChatRoom.is_active==True, ChatRoom.participants.contains(str(user.id))).order_by(ChatRoom.created_at.desc()).limit(10).all()
-    return _serve_spa()
 
 @tongbot_bp.route('/chat')
 def chat_page():
@@ -239,7 +213,7 @@ def bot_chat():
     if _detect_bill_intent(msg) and not schedule_info:
         try:
             now_kst = datetime.now(KST)
-            today_20 = now_kst.replace(hour=20, minute=0, second=0, microsecond=0)
+            today_20 = now_kst.replace(hour=20, minute=0, second=0, microsecond=0).replace(tzinfo=None)
             # 이미 오늘 20시 공과금 일정이 있는지 확인
             existing = TongBotSchedule.query.filter_by(user_id=uid).filter(
                 TongBotSchedule.event_date == today_20,
@@ -310,6 +284,8 @@ def bot_chat():
                         s = TongBotSchedule(user_id=uid, title=rd.get('title','알림'), description=rd.get('description',''),
                             event_date=evt, is_recurring=rd.get('is_recurring', False),
                             repeat_type=rd.get('repeat_type',''), repeat_interval=rd.get('repeat_interval',1),
+                            repeat_lastday=('말일' in msg or '마지막' in msg),
+                            repeat_infinite=bool(rd.get('is_recurring', False) and not rd.get('repeat_end_date')),
                             reminder_minutes=rd.get('reminder_minutes', -1), memo=f'통벗 알림: {msg[:100]}')
                         db.session.add(s)
                         db.session.commit()
@@ -353,9 +329,16 @@ def bot_memos():
             return jsonify({"error": "내용을 입력하세요."})
         from models import TongBotMemo
         memo = TongBotMemo(user_id=uid, content=content, author=data.get('author', 'user'), is_shared=data.get('is_shared', False))
+        # 반복/요금 메모 감지 → 반복 일정 자동 생성 + 메모 종료일 설정
+        try:
+            sched, next_occ = _auto_recurring_schedule(uid, content)
+            if sched and next_occ:
+                memo.end_date = next_occ
+        except Exception as e:
+            current_app.logger.error(f'메모 일정 자동생성 오류: {e}')
         db.session.add(memo)
         db.session.commit()
-        return jsonify({"success": True, "id": memo.id})
+        return jsonify({"success": True, "id": memo.id, "end_date": memo.end_date.isoformat() if memo.end_date else None})
     from models import TongBotMemo
     memos = TongBotMemo.query.filter_by(user_id=uid).order_by(TongBotMemo.created_at.desc()).all()
     # mark all as seen
@@ -367,6 +350,7 @@ def bot_memos():
     return jsonify({"memos": [{
         "id": m.id, "content": m.content, "author": m.author,
         "is_shared": m.is_shared, "done": m.done,
+        "end_date": m.end_date.isoformat() if m.end_date else '',
         "created_at": m.created_at.isoformat() if m.created_at else '',
         "updated_at": m.updated_at.isoformat() if m.updated_at else '',
     } for m in memos]})
@@ -391,6 +375,15 @@ def bot_memo_detail(memo_id):
         memo.is_shared = data['is_shared']
     if 'done' in data:
         memo.done = data['done']
+    if 'end_date' in data:
+        ed = data['end_date']
+        if ed:
+            try:
+                memo.end_date = datetime.fromisoformat(ed.replace('Z', '+00:00'))
+            except Exception:
+                memo.end_date = None
+        else:
+            memo.end_date = None
     memo.updated_at = datetime.now(timezone.utc)
     db.session.commit()
     return jsonify({"success": True, "id": memo.id})
@@ -605,6 +598,101 @@ def _detect_schedule_intent(msg):
             return True
     return keyword_hit
 
+
+def _auto_recurring_schedule(uid, content):
+    """메모 내용에서 반복(매달 말일/매월 N일/매주 요일/매일) + 요금 표현 감지 → 반복 일정 자동 생성.
+    성공 시 (TongBotSchedule, next_occurrence) 반환, 해당 없으면 (None, None)"""
+    import calendar as _cal
+    text = content.replace(' ', '')
+    if not any(k in text for k in ['매달', '매월', '매주', '매일', '말일', '반복']):
+        return None, None
+    # 시간 추출 (기본 20시)
+    hour, minute = 20, 0
+    tm = re.search(r'(오전|오후|아침|점심|저녁|밤)?\s*(\d{1,2})\s*시(\s*(\d{1,2})\s*분)?', content)
+    if tm:
+        label = tm.group(1) or ''
+        hour = int(tm.group(2))
+        if tm.group(4):
+            minute = int(tm.group(4))
+        if '오후' in label or '저녁' in label or '밤' in label:
+            if hour < 12:
+                hour += 12
+        elif '점심' in label:
+            if hour < 12:
+                hour += 12
+    else:
+        tm2 = re.search(r'(\d{1,2}):(\d{2})', content)
+        if tm2:
+            hour = int(tm2.group(1))
+            minute = int(tm2.group(2))
+    now = datetime.now(KST)
+    def _mk(d):
+        return d.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    def _next_month(y, m):
+        if m < 12:
+            return y, m + 1
+        return y + 1, 1
+    # 요금 종류 추출 (제목용)
+    bill_type = None
+    for kw in ['전기', '가스', '수도', '전화', '통신', '인터넷', '관리비', '월세', '임대료']:
+        if kw in text:
+            bill_type = f'{kw}요금'
+            break
+    # 반복 타입 판별
+    repeat_type = ''
+    lastday = False
+    first_ev = None
+    if '말일' in text:
+        repeat_type = 'monthly'
+        lastday = True
+        last = _cal.monthrange(now.year, now.month)[1]
+        first_ev = _mk(now.replace(day=last))
+        if first_ev <= now:
+            y, m = _next_month(now.year, now.month)
+            first_ev = _mk(now.replace(year=y, month=m, day=_cal.monthrange(y, m)[1]))
+    elif '매달' in text or '매월' in text:
+        dm = re.search(r'매달\s*(\d{1,2})일', text) or re.search(r'매월\s*(\d{1,2})일', text)
+        day = int(dm.group(1)) if dm else 1
+        repeat_type = 'monthly'
+        first_ev = _mk(now.replace(day=min(day, _cal.monthrange(now.year, now.month)[1])))
+        if first_ev <= now:
+            y, m = _next_month(now.year, now.month)
+            first_ev = _mk(now.replace(year=y, month=m, day=min(day, _cal.monthrange(y, m)[1])))
+    elif '매주' in text:
+        WD = {'월': 0, '화': 1, '수': 2, '목': 3, '금': 4, '토': 5, '일': 6}
+        wd = None
+        for w in WD:
+            if w + '요일' in text:
+                wd = WD[w]
+                break
+        if wd is None:
+            wd = now.weekday()
+        repeat_type = 'weekly'
+        days_ahead = (wd - now.weekday()) % 7
+        first_ev = _mk(now) + timedelta(days=days_ahead)
+        if first_ev <= now:
+            first_ev = first_ev + timedelta(days=7)
+    elif '매일' in text:
+        repeat_type = 'daily'
+        first_ev = _mk(now)
+        if first_ev <= now:
+            first_ev = first_ev + timedelta(days=1)
+    if not repeat_type or not first_ev:
+        return None, None
+    # DB 관례(naive KST 벽시계)에 맞춰 timezone 제거 후 저장
+    first_ev = first_ev.replace(tzinfo=None)
+    title = f'{bill_type} 납부' if bill_type else content[:50]
+    s = TongBotSchedule(
+        user_id=uid, title=title, description=content[:200],
+        event_date=first_ev, is_recurring=True, repeat_type=repeat_type,
+        repeat_interval=1, repeat_infinite=True, repeat_lastday=lastday,
+        reminder_minutes=-1, memo=f'메모 자동등록: {content[:100]}'
+    )
+    db.session.add(s)
+    db.session.flush()
+    db.session.commit()
+    return s, first_ev
+
 KST = timezone(timedelta(hours=9))
 
 def _parse_korean_datetime(msg, now):
@@ -782,7 +870,7 @@ PLATFORM_GUIDE = """[함께사는양평 플랫폼 안내 - 회원 질문에 반�
 
 회원활동:
 - 벗 신청: 다른 회원 프로필(/user/번호)에서 '벗 신청' 버튼 클릭
-- 닢(포인트): 활동하면 쌓이고, 닢 충전(/mypage/points/charge)으로 구매 가능
+- 닢(포인트): 활동하면 쌓이고, 프로필에서 확인 가능
 - 이웃인증: 프로필에서 GPS로 현재 위치 확인 후 '이웃인증' 버튼
 - 통벗: AI 개인비서. 기능: 대화(일반질문 직답·플랫폼안내), 말투 선택(친근/존중/엄격), 글쓰기 교정, 일정관리, 벗채팅, 재능발견"
 통벗 기능:
@@ -845,9 +933,20 @@ def _ai_reply(bot, user, user_msg):
                       'strict':'엄격하고 간결한 말투로, 핵심만 전달하며 군더더기 없이 답변하세요.'}.get(tone, '')
         from datetime import datetime, timezone
         today = datetime.now(timezone.utc).strftime('%Y년 %m월 %d일 %A')
+
+        weather_text = ""
+        try:
+            from services.weather import get_weather, get_daily_weather_tip
+            user_town = user.town or user.curr_town or "양평읍"
+            w = get_weather(user_town)
+            if w:
+                weather_text = f"\n[오늘 날씨 - {w['town']}]\n{w['summary']}\n기온 {w['temperature']}°C (체감 {w['feels_like']}°C), 습도 {w['humidity']}%, 강수확률 {w['precipitation_prob']}%\n{get_daily_weather_tip(w)}\n"
+        except:
+            pass
+
         prompt = f"""당신은 '{bot.bot_name}'입니다. '{user.username}'님의 개인 AI 도우미입니다.
 말투: {tone_guide} | 성장: {lvl_name} Lv.{bot.level} | 친밀도: {bot.intimacy} | 오늘: {today}
-
+{weather_text}
 [대원칙]
 1. 절대 거짓말 하지 않습니다. 모르면 모른다고 솔직히 말합니다.
 2. 존재하지 않는 기능이나 URL을 절대 만들어내지 마세요.
@@ -1532,6 +1631,7 @@ def bot_schedule():
                 "repeat_weekdays": s.repeat_weekdays or 0,
                 "repeat_week_of_month": s.repeat_week_of_month or 0,
                 "repeat_month_of_year": s.repeat_month_of_year or 0,
+                "repeat_lastday": bool(getattr(s, 'repeat_lastday', False)),
                 "reminder_minutes": s.reminder_minutes or 0,
                 "exceptions": s.repeat_exceptions or '',
             }
@@ -1619,7 +1719,10 @@ def bot_schedule():
                             do_emit = True
                         nxt = cur + timedelta(days=1)
                     elif rt == 'monthly':
-                        if cur.day == start_dt.day:
+                        _lastday = bool(getattr(base_s, 'repeat_lastday', False))
+                        _last_day = _cal.monthrange(cur.year, cur.month)[1]
+                        day_ok = (cur.day == _last_day) if _lastday else (cur.day == start_dt.day)
+                        if day_ok:
                             months = (cur.year - start_dt.year) * 12 + (cur.month - start_dt.month)
                             if months % interval == 0:
                                 do_emit = True
@@ -1670,6 +1773,7 @@ def bot_schedule():
         repeat_weekdays=data.get('repeat_weekdays', 0) or 0,
         repeat_week_of_month=data.get('repeat_week_of_month', 0) or 0,
         repeat_month_of_year=data.get('repeat_month_of_year', 0) or 0,
+        repeat_lastday=bool(data.get('repeat_lastday', False)),
         reminder_minutes=data.get('reminder_minutes', 0) or 0,
         repeat_exceptions=data.get('repeat_exceptions', '') or '',
         repeat_end_date=(_end_date if (_is_rec and not _infinite) else None))
@@ -1829,6 +1933,9 @@ def run_notification_check():
         def gen_occ(s, start_dt, end_dt):
             out = []
             ev = s.event_date
+            # DB가 timestamptz(aware UTC)로 반환해도 앱 관례(naive KST 벽시계)에 맞춰 tz 제거
+            if ev and ev.tzinfo:
+                ev = ev.replace(tzinfo=None)
             if not s.is_recurring:
                 if start_dt <= ev <= end_dt:
                     out.append(ev)
@@ -1863,7 +1970,10 @@ def run_notification_check():
                         out.append(datetime(cur.year, cur.month, cur.day, ev.hour, ev.minute))
                     cur += timedelta(days=1)
                 elif rt == 'monthly':
-                    if cur.day == ev.day:
+                    is_lastday = bool(getattr(s, 'repeat_lastday', False))
+                    last_day = _cal.monthrange(cur.year, cur.month)[1]
+                    day_ok = (cur.day == last_day) if is_lastday else (cur.day == ev.day)
+                    if day_ok:
                         months = (cur.year - ev.year) * 12 + (cur.month - ev.month)
                         if months % interval == 0:
                             out.append(datetime(cur.year, cur.month, cur.day, ev.hour, ev.minute))
@@ -1996,6 +2106,7 @@ def bot_schedule_update():
     if data.get('repeat_weekdays') is not None: s.repeat_weekdays = data.get('repeat_weekdays') or 0
     if data.get('repeat_week_of_month') is not None: s.repeat_week_of_month = data.get('repeat_week_of_month') or 0
     if data.get('repeat_month_of_year') is not None: s.repeat_month_of_year = data.get('repeat_month_of_year') or 0
+    if 'repeat_lastday' in data: s.repeat_lastday = bool(data.get('repeat_lastday', False))
     if data.get('reminder_minutes') is not None: s.reminder_minutes = data.get('reminder_minutes') or 0
     if data.get('repeat_exceptions') is not None: s.repeat_exceptions = data.get('repeat_exceptions') or ''
     if data.get('is_recurring'):
@@ -2448,7 +2559,7 @@ Rules:
     except:
         pass
 
-    from services.directions import plan_segment, format_itinerary, format_memo_compact, haversine_km
+    from services.directions import plan_segment, format_itinerary, format_memo_compact, format_memo_narrative, haversine_km
     import json as _json
     naver_id = current_app.config.get('NAVER_CLIENT_ID', os.getenv('NAVER_CLIENT_ID', ''))
     naver_secret = current_app.config.get('NAVER_CLIENT_SECRET', os.getenv('NAVER_CLIENT_SECRET', ''))
@@ -2515,22 +2626,23 @@ Rules:
                               home_town=user.town or '', home_village=user.village or '',
                               naver_id=naver_id, naver_secret=naver_secret, odsay_key=odsay_key, google_key=google_key)
             plan.update({"from_lat":prev_lat,"from_lng":prev_lng,"to_lat":loc_lat,"to_lng":loc_lng})
-            memo = format_itinerary(plan)
             _compact = format_memo_compact(plan)
+            _narrative = format_memo_narrative(plan, origin_name=prev_name, dest_name=sname or sloc)
             plan["compact"] = _compact
+            plan["narrative"] = _narrative
             arr_dt = datetime.strptime(f"{event_date_str} {stime}", "%Y-%m-%d %H:%M")
             dep_dt = datetime.strptime(f"{event_date_str} {plan['departure']}", "%Y-%m-%d %H:%M")
             move_title = f"{sname} 이동"
             plan_json = _json.dumps(plan, ensure_ascii=False)
-            mov = TongBotSchedule(user_id=uid, title=move_title, description=memo,
+            mov = TongBotSchedule(user_id=uid, title=move_title, description=_narrative,
                 content=plan_json, event_date=arr_dt, departure_time=dep_dt, location=sloc,
-                memo=_compact,
+                memo=_narrative,
                 departure_location=prev_name, return_location=sloc)
             db.session.add(mov)
             db.session.flush()
             entries.append({"id":mov.id,"title":move_title,"date":event_date_str,
                 "time":stime,"departure_time":plan['departure'],"arrival":stime,"total_min":plan['total_min'],
-                "memo":memo,"type":"move"})
+                "memo":_narrative,"type":"move"})
 
         prev_lat = loc_lat
         prev_lng = loc_lng
@@ -2547,14 +2659,16 @@ Rules:
                                home_town=user.town or '', home_village=user.village or '',
                                naver_id=naver_id, naver_secret=naver_secret, odsay_key=odsay_key, google_key=google_key)
         plan_home.update({"from_lat":prev_lat,"from_lng":prev_lng,"to_lat":home_lat,"to_lng":home_lng})
-        memo_home = f"🏠 귀가\n{format_itinerary(plan_home)}"
         _compact_home = format_memo_compact(plan_home)
+        _narrative_home = format_memo_narrative(plan_home, origin_name=prev_name, dest_name=f"집({home_addr})")
         plan_home["compact"] = _compact_home
+        plan_home["narrative"] = _narrative_home
+        memo_home = f"🏠 귀가\n{_narrative_home}"
         dep_dt = datetime.strptime(f"{event_date_str} {plan_home['departure']}", "%Y-%m-%d %H:%M")
         plan_json = _json.dumps(plan_home, ensure_ascii=False)
         sh = TongBotSchedule(user_id=uid, title="집으로 이동", description=memo_home,
             content=plan_json, event_date=dep_dt, location=home_addr,
-            memo=_compact_home,
+            memo=memo_home,
             departure_location=prev_name, return_location=home_addr)
         db.session.add(sh)
         db.session.flush()

@@ -18,6 +18,63 @@ def _serve_spa():
     from flask import render_template
     return render_template('intro.html')
 
+@news_bp.route('/api/daily-info')
+def api_daily_info():
+    from models import TongBotMemo, TongBotSchedule
+    from sqlalchemy import and_, func
+    user_id = session.get('user_id')
+
+    town = request.args.get('town', '양평읍')
+    from services.weather import get_weather, get_daily_weather_tip
+    w = get_weather(town)
+    weather = None
+    if w:
+        w["tip"] = get_daily_weather_tip(w)
+        weather = w
+
+    memos = []
+    if user_id:
+        today = datetime.utcnow().date()
+        items = TongBotMemo.query.filter_by(user_id=user_id, done=False).order_by(TongBotMemo.created_at.desc()).limit(5).all()
+        for m in items:
+            memos.append({"id": m.id, "content": (m.content or "")[:100], "created_at": m.created_at.isoformat() if m.created_at else ""})
+
+    schedules = []
+    if user_id:
+        now = datetime.utcnow()
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        today_end = today_start.replace(hour=23, minute=59, second=59)
+        items = TongBotSchedule.query.filter(
+            and_(TongBotSchedule.user_id == user_id,
+                 TongBotSchedule.event_date >= today_start,
+                 TongBotSchedule.event_date <= today_end)
+        ).order_by(TongBotSchedule.event_date.asc()).limit(10).all()
+        for s in items:
+            t = ""
+            if s.event_date:
+                t = s.event_date.strftime("%H:%M")
+            schedules.append({"id": s.id, "title": s.title, "time": t, "location": s.location or ""})
+
+    return jsonify({"weather": weather, "memos": memos, "schedules": schedules})
+
+@news_bp.route('/api/weather')
+def api_weather():
+    town = request.args.get('town', '양평읍')
+    from services.weather import get_weather, get_daily_weather_tip
+    w = get_weather(town)
+    if not w:
+        return jsonify({"error": "날씨 정보를 불러올 수 없습니다."}), 404
+    w["tip"] = get_daily_weather_tip(w)
+    return jsonify(w)
+
+@news_bp.route('/api/weather/all')
+def api_weather_all():
+    from services.weather import get_all_village_weather, get_daily_weather_tip
+    all_w = get_all_village_weather()
+    for town, w in all_w.items():
+        w["tip"] = get_daily_weather_tip(w)
+    return jsonify(all_w)
+
 @news_bp.route('/admin/news')
 def admin_news():
     if session.get('role') not in ['admin', 'leader']:
@@ -96,7 +153,8 @@ def admin_news_ai_suggest():
                 db.session.add(article)
                 count += 1
         db.session.commit()
-        return jsonify({"status": "success", "count": count, "msg": f"✅ 노사 뉴스 {count}개를 가져왔습니다{' (영문→한글 번역 완료)' if tab == 'world' else ''}."})
+        tab_label = "대한민국뉴스" if tab == "kr_yp" else "세계뉴스" if tab == "world" else "뉴스"
+        return jsonify({"status": "success", "count": count, "msg": f"✅ {tab_label} {count}개를 가져왔습니다{' (영문→한글 번역 완료)' if tab == 'world' else ''}."})
     except Exception as e:
         import traceback
         traceback.print_exc()

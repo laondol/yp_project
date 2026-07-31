@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from flask import current_app
 from sqlalchemy import or_
 from models import db, User, TongBotSchedule
-from services.directions import plan_segment, format_itinerary, format_memo_compact
+from services.directions import plan_segment, format_itinerary, format_memo_compact, format_memo_narrative
 from services.transit import haversine_km
 
 
@@ -206,8 +206,6 @@ def _ensure_day_routes(uid, evt_date, exclude_ids=None):
     naver_secret = current_app.config.get('NAVER_CLIENT_SECRET', os.getenv('NAVER_CLIENT_SECRET', ''))
     odsay_key = os.getenv('ODSAY_API_KEY', current_app.config.get('ODSAY_API_KEY', ''))
     google_key = os.getenv('GOOGLE_MAPS_API_KEY', current_app.config.get('GOOGLE_MAPS_API_KEY', ''))
-    from services.directions import plan_segment, format_itinerary, format_memo_compact
-    from services.transit import haversine_km
     # Remove existing 이동/귀가 for this day
     q = TongBotSchedule.query.filter(
         TongBotSchedule.user_id == uid,
@@ -306,12 +304,14 @@ def _ensure_day_routes(uid, evt_date, exclude_ids=None):
         plan_to.update({"from_lat":from_lat,"from_lng":from_lng,"to_lat":loc_lat,"to_lng":loc_lng})
         dep_dt = arr_dt - timedelta(minutes=plan_to['total_min'])
         _compact = format_memo_compact(plan_to)
+        _narrative = format_memo_narrative(plan_to, origin_name=from_time, dest_name=evt.location or evt.title)
         plan_to["compact"] = _compact
+        plan_to["narrative"] = _narrative
         move = TongBotSchedule(user_id=uid, title=f"{evt.title} 이동",
-            description=format_itinerary(plan_to),
+            description=_narrative,
             content=json.dumps(plan_to, ensure_ascii=False),
             event_date=dep_dt, end_date=arr_dt, location=evt.location,
-            memo=_compact, departure_location=from_time, return_location=evt.location,
+            memo=_narrative, departure_location=from_time, return_location=evt.location,
             kind='route')
         db.session.add(move)
         db.session.flush()
@@ -348,7 +348,9 @@ def _ensure_day_routes(uid, evt_date, exclude_ids=None):
                     naver_id=naver_id, naver_secret=naver_secret, odsay_key=odsay_key, google_key=google_key)
                 plan_home.update({"from_lat":last_lat,"from_lng":last_lng,"to_lat":return_lat,"to_lng":return_lng})
                 _compact_home = format_memo_compact(plan_home)
+                _narrative_home = format_memo_narrative(plan_home, origin_name=last_loc, dest_name=return_dest)
                 plan_home["compact"] = _compact_home
+                plan_home["narrative"] = _narrative_home
                 dep_raw = plan_home.get('departure') or ''
                 try:
                     _hh, _mm = dep_raw.split(':')[:2]
@@ -373,10 +375,11 @@ def _ensure_day_routes(uid, evt_date, exclude_ids=None):
                         ret_dep = last_end + timedelta(minutes=5)
                     ret_arr = ret_dep + timedelta(minutes=plan_home['total_min'])
                     home_return = TongBotSchedule(user_id=uid, title=return_title,
-                        description=format_itinerary(plan_home),
+                        description=_narrative_home if return_title != "집으로 이동" else f"🏠 귀가\n{_narrative_home}",
                         content=json.dumps(plan_home, ensure_ascii=False),
                         event_date=ret_dep, end_date=ret_arr, location=return_dest,
-                        memo=_compact_home, departure_location=last_loc, return_location=return_dest,
+                        memo=_narrative_home if return_title != "집으로 이동" else f"🏠 귀가\n{_narrative_home}",
+                        departure_location=last_loc, return_location=return_dest,
                         kind='route')
                     db.session.add(home_return)
                     db.session.flush()

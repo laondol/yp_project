@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { constructionApi } from '../lib/api'
 import type { ConstructionNotice } from '../lib/types'
 import { useAuth } from '../contexts/AuthContext'
 import Loading from '../components/common/Loading'
 import ErrorMessage from '../components/common/ErrorMessage'
 import EmptyState from '../components/common/EmptyState'
+import FacilityMap from '../components/FacilityMap'
 
 interface HeritageItem {
   name: string; lat: number; lng: number; description?: string
@@ -17,9 +19,6 @@ interface SceneryItem {
 interface StoreGroup {
   name: string; lat: number; lng: number; image?: string; store_link?: string
   link_label?: string; posts: { id: number; title: string; image?: string }[]
-}
-interface Facility {
-  name: string; category?: string; address?: string; lat?: number; lng?: number
 }
 interface AlertItem {
   id: number; title: string; content?: string; town?: string; village?: string
@@ -36,8 +35,9 @@ const typeColors: Record<string, string> = {
 export default function ConstructionPage() {
   const { user } = useAuth()
   const role = (user as any)?.role
+  const [searchParams] = useSearchParams()
 
-  const [activeTab, setActiveTab] = useState('heritage')
+  const [activeTab, setActiveTab] = useState(() => searchParams.get('tab') || 'heritage')
   const [notices, setNotices] = useState<ConstructionNotice[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -48,16 +48,14 @@ export default function ConstructionPage() {
   const [scenery, setScenery] = useState<SceneryItem[]>([])
   const [stores, setStores] = useState<StoreGroup[]>([])
   const [trafficHtml, setTrafficHtml] = useState('')
-  const [facilities, setFacilities] = useState<Facility[]>([])
   const [alerts, setAlerts] = useState<AlertItem[]>([])
   const [sceneryVillage, setSceneryVillage] = useState('')
   const [sceneryTown, setSceneryTown] = useState('')
   const [scenerySeason, setScenerySeason] = useState('')
-  const [scenerySubTab, setScenerySubTab] = useState('scenery')
+  const [scenerySubTab, setScenerySubTab] = useState(() => searchParams.get('sub') || 'scenery')
   const [sceneryLoading, setSceneryLoading] = useState(false)
   const [storesLoading, setStoresLoading] = useState(false)
   const [trafficLoading, setTrafficLoading] = useState(false)
-  const [facilitiesLoading, setFacilitiesLoading] = useState(false)
   const [alertsLoading, setAlertsLoading] = useState(false)
 
   const [homeLat, setHomeLat] = useState(0)
@@ -150,16 +148,6 @@ export default function ConstructionPage() {
       })
       .catch(() => setTrafficHtml('<div class="text-danger">불러오기 실패</div>'))
       .finally(() => setTrafficLoading(false))
-  }, [activeTab, scenerySubTab])
-
-  useEffect(() => {
-    if (activeTab !== 'scenery' || scenerySubTab !== 'facility') return
-    setFacilitiesLoading(true)
-    fetch('/api/facilities')
-      .then(r => r.json())
-      .then(d => setFacilities(Array.isArray(d) ? d : []))
-      .catch(() => {})
-      .finally(() => setFacilitiesLoading(false))
   }, [activeTab, scenerySubTab])
 
   useEffect(() => {
@@ -388,24 +376,7 @@ export default function ConstructionPage() {
           )}
 
           {scenerySubTab === 'facility' && (
-            facilitiesLoading ? <Loading /> : facilities.length === 0 ? (
-              <EmptyState icon="🏗️" title="등록된 편의시설이 없습니다." />
-            ) : (
-              <div className="row g-2">
-                {facilities.map((f, i) => (
-                  <div key={i} className="col-12">
-                    <div className="card border-0 shadow-sm" style={{ borderRadius: 16 }}>
-                      <div className="card-body p-3">
-                        <h6 className="fw-bold mb-1">{f.name}</h6>
-                        {f.category && <span className="badge bg-info me-2">{f.category}</span>}
-                        {f.address && <small className="text-muted">{f.address}</small>}
-                        {f.lat && f.lng && <a href={`https://maps.google.com/?q=${f.lat},${f.lng}`} target="_blank" className="btn btn-sm btn-outline-secondary mt-1" rel="noopener noreferrer">🗺️ 지도</a>}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )
+            <FacilityMap type="toilet" />
           )}
 
           {scenerySubTab === 'alert' && (

@@ -68,12 +68,31 @@ def search_google_news(query, display=5, language='ko'):
     except Exception as e:
         return []
 
-def search_news(query, display=5, language='ko'):
+def search_news(query, display=5, language='ko', days=7):
     results = search_naver_news(query, display)
     source = '네이버뉴스'
     if not results:
         results = search_google_news(query, display, language=language)
         source = '구글뉴스'
+    if days and results:
+        cutoff = datetime.now() - timedelta(days=days)
+        filtered = []
+        for r in results:
+            pub = r.get('pubDate', '')
+            if pub:
+                try:
+                    from email.utils import parsedate_to_datetime
+                    dt = parsedate_to_datetime(pub)
+                    if dt.tzinfo:
+                        from datetime import timezone as tz
+                        dt = dt.replace(tzinfo=None)
+                    if dt >= cutoff:
+                        filtered.append(r)
+                except:
+                    filtered.append(r)
+            else:
+                filtered.append(r)
+        results = filtered[:display]
     return results, source
 
 def get_local_share_context(title, description, town, village, exclude_id=0):

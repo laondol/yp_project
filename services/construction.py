@@ -351,3 +351,111 @@ def sync_architecture_hub(app, api_key):
         except Exception as e:
             print(f"[ARCHHUB] Error: {e}")
             import traceback; traceback.print_exc()
+
+
+def sync_public_facilities(app, api_key):
+    """경기데이터드림 공중화장실 API → PublicFacility DB 동기화"""
+    from models import PublicFacility
+    import time
+
+    url = "https://openapi.gg.go.kr/Publtolt"
+    pIdx = 1
+    pSize = 100
+    count = 0
+    skip = 0
+
+    with app.app_context():
+        while True:
+            params = {
+                "KEY": api_key,
+                "Type": "json",
+                "pIndex": pIdx,
+                "pSize": pSize,
+                "REFINE_ROADNM_ADDR": "양평군",
+            }
+            try:
+                r = requests.get(url, params=params, timeout=20)
+                data = r.json()
+                items = data.get("Publtolt", [{}])
+                head = items[0].get("head", [{}]) if items else [{}]
+                rows = items[1].get("row", []) if len(items) > 1 else []
+                total = head[0].get("list_total_count", 0) if head else 0
+            except Exception as e:
+                print(f"[FACILITY] API 오류 page={pIdx}: {e}")
+                break
+
+            for row in rows:
+                name = row.get("PBCTLT_PLC_NM", "").strip()
+                lat = row.get("REFINE_WGS84_LAT")
+                lng = row.get("REFINE_WGS84_LOGT")
+                if not name or not lat or not lng:
+                    skip += 1
+                    continue
+                addr = row.get("REFINE_ROADNM_ADDR", "") or row.get("REFINE_LOTNO_ADDR", "")
+                addr = addr.strip()
+                tel = row.get("MNGINST_TELNO", "") or ""
+                manager = row.get("MANAGE_INST_NM", "") or ""
+                open_hr = row.get("OPEN_TM_INFO", "") or ""
+                embel = row.get("EMBEL_INSTL_YN", "N") == "Y"
+
+                male_cnt = int(row.get("MALE_WTRCLS_CNT", 0) or 0)
+                female_cnt = int(row.get("FEMALE_WTRCLS_CNT", 0) or 0)
+                male_dpsn = int(row.get("MALE_DSPSN_WTRCLS_CNT", 0) or 0)
+                female_dpsn = int(row.get("FEMALE_DSPSN_WTRCLS_CNT", 0) or 0)
+                cmnuse = row.get("MALE_FEMALE_CMNUSE_TOILET_YN", "N")
+
+                if cmnuse == "Y":
+                    gender_type = "mixed"
+                elif male_cnt > 0 and female_cnt > 0:
+                    gender_type = "separate"
+                elif male_cnt > 0:
+                    gender_type = "male_only"
+                else:
+                    gender_type = "female_only"
+                accessible = embel or male_dpsn > 0 or female_dpsn > 0
+
+                town = ""
+                for t in ["양평읍", "옥천면", "서종면", "단월면", "개군면", "강상면", "강하면", "지평면", "용문면", "원덕면"]:
+                    if t in addr or t in name:
+                        town = t
+                        break
+
+                existing = PublicFacility.query.filter_by(
+                    facility_type="toilet", name=name, latitude=float(lat), longitude=float(lng)
+                ).first()
+                if existing:
+                    existing.address = addr
+                    existing.tel = tel
+                    existing.manager = manager
+                    existing.open_hr = open_hr
+                    existing.town = town
+                    existing.gender_type = gender_type
+                    existing.accessible = accessible
+                    existing.updated_at = datetime.now()
+                else:
+                    db.session.add(PublicFacility(
+                        facility_type="toilet",
+                        name=name,
+                        address=addr,
+                        latitude=float(lat),
+                        longitude=float(lng),
+                        open_hr=open_hr,
+                        tel=tel,
+                        manager=manager,
+                        emergency_bell=embel,
+                        source="gg_publtolt",
+                        town=town,
+                        is_active=True,
+                        gender_type=gender_type,
+                        accessible=accessible,
+                    ))
+                count += 1
+
+            db.session.commit()
+            print(f"[FACILITY] page {pIdx}: {len(rows)} rows (total so far: {count}, skip: {skip})")
+            if pIdx * pSize >= total:
+                break
+            pIdx += 1
+            time.sleep(0.1)
+
+    print(f"[FACILITY] 동기화 완료: {count}건 저장, {skip}건 스킵")

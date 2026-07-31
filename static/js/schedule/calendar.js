@@ -93,6 +93,9 @@ function showDay(date) {
             repTxt = ' 🔁매'+(s.repeat_interval||1)+_rm+(s.repeat_infinite ? '(무한)' : '');
         }
         h += '<div class="border-bottom py-1 mb-1 small'+(scheduleType(s)==='move'?' evt-move':'')+'"><strong>'+badge+' '+typeChip(s)+s.title+repTxt+'</strong><br>🕐 '+time+loc+accomm+'<br>';
+        if (scheduleType(s)==='move' && s.description && s.description.trim()) {
+            h += '<div class="mt-1" style="white-space:pre-line;">'+s.description.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</div>';
+        }
         if ((s.title && (s.title.includes('이동') || s.title.includes('집으로'))) && s.content) {
             try {
                 var r = JSON.parse(s.content);
@@ -132,6 +135,17 @@ function showDay(date) {
                     h += '<a class="btn btn-sm btn-outline-danger py-0" target="_blank" href="https://www.google.co.kr/maps/dir/'+fromLat+','+fromLng+'/'+toLat+','+toLng+'/data='+dataParam+'">🌐Google</a>';
                     h += '<a class="btn btn-sm btn-outline-info py-0" target="_blank" href="https://map.naver.com/p/directions/'+r.from_lng+','+r.from_lat+','+dl+'/'+r.to_lng+','+r.to_lat+','+al+'/-/transit">🗺️네이버</a>';
                     h += '<a class="btn btn-sm btn-outline-success py-0" target="_blank" href="https://map.kakao.com/link/by/traffic/'+dl+','+r.from_lat+','+r.from_lng+'/'+al+','+r.to_lat+','+r.to_lng+'">📱카카오</a>';
+                    var compassWaypoints = (r.steps || []).map(function(st){
+                        return { lat: (st.mode && st.mode.indexOf('도보')>=0) ? parseFloat(r.from_lat) : parseFloat(r.to_lat),
+                                 lng: (st.mode && st.mode.indexOf('도보')>=0) ? parseFloat(r.from_lng) : parseFloat(r.to_lng),
+                                 name: st.to || st.from || '', mode: st.mode, detail: st.detail };
+                    });
+                    if (compassWaypoints.length > 0) {
+                        compassWaypoints[compassWaypoints.length-1].lat = parseFloat(r.to_lat);
+                        compassWaypoints[compassWaypoints.length-1].lng = parseFloat(r.to_lng);
+                    }
+                    var wpParam = encodeURIComponent(JSON.stringify(compassWaypoints));
+                    h += '<a class="btn btn-sm btn-outline-primary py-0" target="_blank" href="/compass?lat='+r.to_lat+'&lng='+r.to_lng+'&name='+encodeURIComponent(s.title||'목적지')+'&waypoints='+wpParam+'">🧭나침반</a>';
                     h += '</div>';
                 }
             } catch(e){}
