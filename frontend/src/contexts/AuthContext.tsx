@@ -24,13 +24,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const data = await authApi.me()
       setUser(data.id ? data : null)
-      // 인트로 페이지 활성화된 사용자 → 인트로 페이지로 리다이렉트
-      if (data.id && data.intro_page_enabled) {
-        const path = window.location.pathname
-        if (path !== '/intro-profile' && !path.startsWith('/login') && !path.startsWith('/register')) {
-          window.location.href = '/intro-profile'
-        }
-      }
     } catch {
       setUser(null)
     } finally {

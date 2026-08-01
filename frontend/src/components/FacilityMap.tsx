@@ -414,7 +414,7 @@ export default function FacilityMap({ type = 'toilet' }: Props) {
         )}
       </div>
 
-      <div ref={mapRef} id="map" style={{ width: '100%', height: 400, borderRadius: 12, border: '1px solid #dee2e6', position: 'relative', zIndex: 1 }} />
+      <div ref={mapRef} id="map" style={{ width: '100%', height: 400, borderRadius: 12, border: '1px solid #dee2e6' }} />
 
       {typePopup && (
         <div style={{
@@ -502,10 +502,10 @@ export default function FacilityMap({ type = 'toilet' }: Props) {
               </div>
               <button className="btn btn-sm btn-outline-secondary" onClick={() => setSelected(null)}>✕</button>
             </div>
-              <a
-                className="btn btn-sm btn-outline-primary w-100 mt-2"
-                href={`/compass?popup=1&lat=${selected.lat}&lng=${selected.lng}&name=${encodeURIComponent(selected.name || typeLabel(selected.facility_type))}`}
-              >🧭 나침반 내비</a>
+            <a
+              className="btn btn-sm btn-outline-primary w-100 mt-2"
+              href={`/compass?lat=${selected.lat}&lng=${selected.lng}&name=${encodeURIComponent(selected.name || typeLabel(selected.facility_type))}`}
+            >🧭 나침반 내비</a>
             {user && (
               <div className="mt-2 pt-2 border-top">
                 <div className="d-flex gap-2 mb-2">

@@ -69,9 +69,6 @@ class User(db.Model):
     reset_token = db.Column(db.String(100), nullable=True)
     reset_token_expiry = db.Column(db.DateTime, nullable=True)
     managed_pages = db.Column(db.String(500), default='')
-    block_order_profile = db.Column(db.Text, nullable=True)   # JSON: 블록 순서 (회원정보페이지)
-    block_order_intro = db.Column(db.Text, nullable=True)     # JSON: 블록 순서 (인트로페이지)
-    intro_page_enabled = db.Column(db.Boolean, default=False)  # 인트로페이지 활성화 여부
 
 class Post(db.Model):
     id = db.Column(db.Integer, primary_key=True)

@@ -863,8 +863,7 @@ def api_me():
                     "is_active": bot.is_active,
                     "recalled_at": bot.recalled_at.isoformat() if bot.recalled_at else None,
                     "recall_reason": bot.recall_reason or ''
-                },
-                "intro_page_enabled": bool(user.intro_page_enabled),
+                }
             })
     return jsonify({"id": None})
 

@@ -11,21 +11,3 @@ body {
 }
 a { text-decoration: none; }
 .navbar { background: white; border-bottom: 1px solid #e9ecef; }
-
-/* 모바일: 블록 드래그 핸들 숨김 (터치로 드래그) */
-@media (max-width: 768px) {
-  .drag-handle {
-    display: none !important;
-  }
-}
-
-/* 인트로 메뉴바 숨김/펼침 */
-.intro-nav-hidden {
-  max-height: 0;
-  overflow: hidden;
-  transition: max-height 0.3s ease;
-}
-.intro-nav-visible {
-  max-height: 500px;
-  transition: max-height 0.3s ease;
-}
