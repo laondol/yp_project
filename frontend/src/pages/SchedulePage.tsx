@@ -267,7 +267,7 @@ export default function SchedulePage() {
                           <a className="btn btn-sm btn-outline-success py-0" target="_blank" rel="noopener noreferrer"
                             href={`https://map.kakao.com/link/by/traffic/${dl},${r.from_lat},${r.from_lng}/${al},${r.to_lat},${r.to_lng}`}>📱카카오</a>
                           <a className="btn btn-sm btn-outline-primary py-0" target="_blank" rel="noopener noreferrer"
-                            href={`/compass?lat=${r.to_lat}&lng=${r.to_lng}&name=${encodeURIComponent(s.title || '목적지')}&waypoints=${wpParam}`}>🧭나침반</a>
+                            href={`/compass?popup=1&lat=${r.to_lat}&lng=${r.to_lng}&name=${encodeURIComponent(s.title || '목적지')}&waypoints=${wpParam}`}>🧭나침반</a>
                         </div>
                       )
                     }

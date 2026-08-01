@@ -1,4 +1,5 @@
 from flask import Blueprint, render_template, request, redirect, url_for, jsonify, session, current_app, send_file
+import json as _json
 from datetime import datetime, timezone
 from models import db, User, Message, Friend, ShareReport, Post, PointHistory, VillageWish, LegalPost, PsychoPost, ChatMessage, LegalAppointment, TongBot, TongBotDraft, TongBotSchedule
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -255,6 +256,8 @@ def api_user_profile(user_id):
         'share_images': share_images,
         'recent_friends': recent_friends,
         'profile_initial': (user.real_name or user.username)[0] if (user.real_name or user.username) else '?',
+        'intro_page_enabled': bool(user.intro_page_enabled),
+        'block_order_profile': _json.loads(user.block_order_profile) if user.block_order_profile else None,
     })
 
 
@@ -263,6 +266,21 @@ def user_profile(user_id):
     if not session.get('username'):
         return redirect(url_for('auth.login', next=request.path))
     return _serve_spa()
+
+
+@user_bp.route('/intro-profile')
+def intro_profile_page():
+    if not session.get('username'):
+        return redirect(url_for('auth.login', next=request.path))
+    return _serve_spa()
+
+
+@user_bp.route('/api/user/me/profile')
+def api_user_me_profile():
+    if not session.get('username'):
+        return jsonify({'error': 'login'}), 401
+    uid = session['user_id']
+    return api_user_profile(uid)
 
 
 @user_bp.route('/user/location/refresh', methods=['POST'])
@@ -515,5 +533,58 @@ def api_user_change_password_verify():
     session.pop('pw_change_code', None)
     session.pop('pw_change_code_time', None)
     return jsonify({'status': 'success', 'msg': '비밀번호가 변경되었습니다.'})
+
+
+# ── 블록 순서 API ──────────────────────────────────────────────
+import json as _json
+
+@user_bp.route('/api/user/block-order', methods=['GET'])
+def get_block_order():
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({'profile': None, 'intro': None, 'intro_enabled': False})
+    user = User.query.get(uid)
+    if not user:
+        return jsonify({'profile': None, 'intro': None, 'intro_enabled': False})
+    profile_order = _json.loads(user.block_order_profile) if user.block_order_profile else None
+    intro_order = _json.loads(user.block_order_intro) if user.block_order_intro else None
+    return jsonify({'profile': profile_order, 'intro': intro_order, 'intro_enabled': bool(user.intro_page_enabled)})
+
+
+@user_bp.route('/api/user/block-order', methods=['POST'])
+def save_block_order():
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({'error': '로그인이 필요합니다.'}), 401
+    user = User.query.get(uid)
+    if not user:
+        return jsonify({'error': '사용자를 찾을 수 없습니다.'}), 404
+    data = request.get_json() or {}
+    page = data.get('page', 'profile')
+    order = data.get('order')
+    if not isinstance(order, list):
+        return jsonify({'error': 'order는 배열이어야 합니다.'}), 400
+    order_json = _json.dumps(order, ensure_ascii=False)
+    if page == 'intro':
+        user.block_order_intro = order_json
+    else:
+        user.block_order_profile = order_json
+    db.session.commit()
+    return jsonify({'success': True})
+
+
+@user_bp.route('/api/user/intro-page/toggle', methods=['POST'])
+def toggle_intro_page():
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({'error': '로그인이 필요합니다.'}), 401
+    user = User.query.get(uid)
+    if not user:
+        return jsonify({'error': '사용자를 찾을 수 없습니다.'}), 404
+    data = request.get_json() or {}
+    enabled = data.get('enabled', True)
+    user.intro_page_enabled = bool(enabled)
+    db.session.commit()
+    return jsonify({'success': True, 'intro_enabled': user.intro_page_enabled})
 
 

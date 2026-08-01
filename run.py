@@ -103,6 +103,21 @@ def create_app():
                     with db.engine.connect() as _conn:
                         _conn.execute(_sa_text('ALTER TABLE tong_bot_schedule ADD COLUMN repeat_lastday BOOLEAN DEFAULT FALSE'))
                         _conn.commit()
+            # 블록 순서 필드 (인트로페이지)
+            if 'user' in _tbls:
+                _ucols = [c['name'] for c in _inspector.get_columns('user')]
+                if 'block_order_profile' not in _ucols:
+                    with db.engine.connect() as _conn:
+                        _conn.execute(_sa_text("ALTER TABLE \"user\" ADD COLUMN block_order_profile TEXT"))
+                        _conn.commit()
+                if 'block_order_intro' not in _ucols:
+                    with db.engine.connect() as _conn:
+                        _conn.execute(_sa_text("ALTER TABLE \"user\" ADD COLUMN block_order_intro TEXT"))
+                        _conn.commit()
+                if 'intro_page_enabled' not in _ucols:
+                    with db.engine.connect() as _conn:
+                        _conn.execute(_sa_text("ALTER TABLE \"user\" ADD COLUMN intro_page_enabled BOOLEAN DEFAULT FALSE"))
+                        _conn.commit()
             print("[OK] 신규 컬럼 마이그레이션 완료")
         except Exception as e:
             print(f"[SKIP] 컬럼 마이그레이션: {e}")
