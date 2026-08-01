@@ -12,9 +12,8 @@ interface Props {
   onClose?: () => void
 }
 
-const METERS_PER_RING = 3
+const METERS_PER_RING = 10
 const MIN_RINGS = 3
-const MAX_RINGS = 20
 const ARRIVAL_THRESHOLD = 3
 const LS_KEY = 'compass_dest'
 
@@ -149,16 +148,19 @@ export default function CompassNav({ destLat, destLng, destName, waypoints, onCl
     if (!ctx) return
 
     const draw = () => {
-      const w = canvas.width = canvas.offsetWidth * 2
-      const h = canvas.height = canvas.offsetHeight * 2
+      const displayW = canvas.offsetWidth
+      const displayH = canvas.offsetHeight
+      const side = Math.min(displayW, displayH)
+      canvas.width = side * 2
+      canvas.height = side * 2
       ctx.scale(2, 2)
-      const cw = w / 2
-      const ch = h / 2
+      const cw = side / 2
+      const ch = side / 2
       const maxRadius = Math.min(cw, ch) - 20
 
-      ctx.clearRect(0, 0, cw, ch)
+      ctx.clearRect(0, 0, side, side)
 
-      const rings = Math.max(MIN_RINGS, Math.min(MAX_RINGS, Math.ceil(distance / METERS_PER_RING)))
+      const rings = Math.max(MIN_RINGS, Math.ceil(distance / METERS_PER_RING))
       const ringSpacing = maxRadius / rings
 
       ctx.save()
@@ -198,12 +200,11 @@ export default function CompassNav({ destLat, destLng, destName, waypoints, onCl
       ctx.fillStyle = 'rgba(0,0,0,0.35)'
       ctx.font = '9px sans-serif'
       ctx.textAlign = 'center'
-      ctx.fillText('3m', 0, -ringSpacing - 2)
+      ctx.fillText(`${METERS_PER_RING}m`, 0, -ringSpacing - 2)
 
       const destAngle = toRad(bearing - heading)
-      const destDist = Math.min(distance / (rings * METERS_PER_RING), 1) * maxRadius
-      const dx = Math.sin(destAngle) * destDist
-      const dy = -Math.cos(destAngle) * destDist
+      const dx = Math.sin(destAngle) * maxRadius
+      const dy = -Math.cos(destAngle) * maxRadius
 
       const markerColor = isLastStep ? '#dc3545' : '#ffc107'
       ctx.beginPath()
@@ -219,6 +220,12 @@ export default function CompassNav({ destLat, destLng, destName, waypoints, onCl
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
       ctx.fillText(isLastStep ? '★' : `${stepIndex + 1}`, dx, dy)
+
+      ctx.fillStyle = 'rgba(0,0,0,0.6)'
+      ctx.font = 'bold 11px sans-serif'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'top'
+      ctx.fillText(formatDistance(distance), dx, dy + 14)
 
       ctx.restore()
 
@@ -321,7 +328,7 @@ export default function CompassNav({ destLat, destLng, destName, waypoints, onCl
         </div>
       )}
 
-      <div className="flex-grow-1 position-relative">
+      <div className="flex-grow-1 d-flex align-items-center justify-content-center position-relative" style={{ aspectRatio: '1 / 1', maxHeight: 'calc(100vh - 180px)' }}>
         <canvas ref={canvasRef} style={{ width: '100%', height: '100%' }} />
       </div>
 

@@ -219,6 +219,7 @@ export interface MeResponse {
   managed_pages?: string[];
   town?: string; village?: string; email?: string;
   is_verified_resident?: boolean;
+  intro_page_enabled?: boolean;
 }
 
 export interface PaginatedResponse<T> {
