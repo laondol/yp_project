@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
+import { Link } from 'react-router-dom';
 
 let _notifBeepCtx: AudioContext | null = null
 function notifBeep(freq: number, pattern: number[]) {
@@ -25,7 +26,7 @@ function notifBeep(freq: number, pattern: number[]) {
 }
 
 export default function NavBar() {
-  const { user, loading } = useAuth()
+  const { user, loading, introEnabled } = useAuth()
   const host = window.location.hostname
   const siteName = host === 'localhost' || host === '127.0.0.1' ? '함께사는로컬'
     : host === 'test.unocum.kr' ? '함께사는테스트' : '함께사는양평'
@@ -117,10 +118,10 @@ export default function NavBar() {
       <div className="container">
         {/* Left: logo + quick menu */}
         <div className="d-flex align-items-center flex-shrink-0">
-          <a className="navbar-brand d-flex align-items-center me-1" href="/intro">
-            <img src="/static/images/logo.png" alt="양평" height="36" title={siteName} />
+          <Link className="navbar-brand d-flex align-items-center me-1" to={ introEnabled ? `/user/${user?.id}` : '/intro'}>          
+            <img src="/static/images/logo.png" alt="Yangpyeong community logo - navigate to home" height="36" title={siteName} />
             <span className="fw-bold text-success d-none d-lg-inline ms-2" style={{ fontSize: '1.2rem' }}>{siteName}</span>
-          </a>
+          </Link>
           <div className="d-inline-flex align-items-center position-relative" id="navQuick">
             <button className="btn btn-sm btn-outline-warning px-2 py-0" style={{ fontSize: '0.9rem' }}
               onClick={() => document.getElementById('quickMenu')?.classList.toggle('d-none')}>⭐</button>

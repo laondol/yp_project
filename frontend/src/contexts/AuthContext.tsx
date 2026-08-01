@@ -7,18 +7,23 @@ interface AuthContextType {
   loading: boolean
   refresh: () => Promise<void>
   logout: () => Promise<void>
+  introEnabled: boolean;
+  setIntroEnabled: (enabled: boolean) => void;  
 }
 
 const AuthContext = createContext<AuthContextType>({
   user: null,
   loading: true,
-  refresh: async () => {},
-  logout: async () => {},
+  refresh: async () => { },
+  logout: async () => { },  
+  introEnabled: false,
+  setIntroEnabled: () => { }
 })
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<MeResponse | null>(null)
   const [loading, setLoading] = useState(true)
+  const [introEnabled, setIntroEnabled] = useState(false);
 
   const refresh = async () => {
     try {
@@ -47,7 +52,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, refresh, logout }}>
+    <AuthContext.Provider value={{ user, loading, refresh, logout, introEnabled, setIntroEnabled }}>
       {children}
     </AuthContext.Provider>
   )

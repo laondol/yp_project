@@ -81,7 +81,6 @@ import ShareMapPage from './pages/ShareMapPage'
 import PsychoAdminPage from './pages/PsychoAdminPage'
 import PsychoAdminAppointmentsPage from './pages/PsychoAdminAppointmentsPage'
 import UserProfilePage from './pages/UserProfilePage'
-import IntroProfilePage from './pages/IntroProfilePage'
 import EditProfilePage from './pages/EditProfilePage'
 import SchedulePopupPage from './pages/SchedulePopupPage'
 import MemoPage from './pages/MemoPage'
@@ -175,9 +174,9 @@ export default function App() {
             <Route path="/epub/edit/:id" element={<ProtectedRoute><EpubEditor /></ProtectedRoute>} />
             <Route path="/guide" element={<ProtectedRoute><GuideList /></ProtectedRoute>} />
             <Route path="/guide/templates" element={<ProtectedRoute><GuideTemplates /></ProtectedRoute>} />
-            <Route path="/user/edit-profile" element={<ProtectedRoute><EditProfilePage /></ProtectedRoute>} />
             <Route path="/user/:userId" element={<ProtectedRoute><UserProfilePage /></ProtectedRoute>} />
-            <Route path="/intro-profile" element={<ProtectedRoute><IntroProfilePage /></ProtectedRoute>} />
+            <Route path="/user/edit-profile" element={<ProtectedRoute><EditProfilePage /></ProtectedRoute>} />
+            <Route path="/user/:userId" element={<ProtectedRoute><UserProfilePage /></ProtectedRoute>} />            
             <Route path="/news" element={<ProtectedRoute><NewsList /></ProtectedRoute>} />
             <Route path="/news/:id" element={<ProtectedRoute><NewsDetail /></ProtectedRoute>} />
             <Route path="/world-news" element={<ProtectedRoute><NewsTabsPage /></ProtectedRoute>} />
