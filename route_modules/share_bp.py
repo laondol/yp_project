@@ -865,6 +865,7 @@ def api_me():
                     "recall_reason": bot.recall_reason or ''
                 },
                 "intro_page_enabled": bool(user.intro_page_enabled),
+                "password_v2": bool(user.password_v2),
             })
     return jsonify({"id": None})
 

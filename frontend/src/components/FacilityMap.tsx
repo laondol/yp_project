@@ -3,10 +3,6 @@ import { useAuth } from '../contexts/AuthContext'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 
-declare global {
-  interface Window { naver: any }
-}
-
 interface Facility {
   id: number; name: string; lat: number; lng: number; address?: string
   status: string; is_community: boolean; source?: string
@@ -79,10 +75,13 @@ export default function FacilityMap({ type = 'toilet' }: Props) {
   const [addType, setAddType] = useState<string>('toilet')
   const [addForm, setAddForm] = useState<any>({ name: '', open_hr: '', notes: '', male: false, female: false, shared: false, accessible: false })
   const [reportForm, setReportForm] = useState({ comment: '' })
+  const [editing, setEditing] = useState<Facility | null>(null)
+  const [editPos, setEditPos] = useState<{ x: number; y: number } | null>(null)
+  const [editForm, setEditForm] = useState<any>({ name: '', open_hr: '', notes: '', male: false, female: false, shared: false, accessible: false })
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<FilterType>('all')
   const [facFilter, setFacFilter] = useState<string>('all')
-  const [provider, setProvider] = useState<'naver' | 'leaflet' | null>(null)
+  const [provider, setProvider] = useState<'leaflet' | null>(null)
   const [typePopup, setTypePopup] = useState<{ lat: number; lng: number; x: number; y: number } | null>(null)
   const [myPos, setMyPos] = useState<{ lat: number; lng: number } | null>(null)
   const myPosRef = useRef(myPos)
@@ -112,38 +111,6 @@ export default function FacilityMap({ type = 'toilet' }: Props) {
 
   useEffect(() => {
     let cancelled = false
-    let naverLoaded = false
-    const fallbackToLeaflet = () => { if (!cancelled && !naverLoaded) setProvider('leaflet') }
-
-    const checkNaverAuth = (clientId: string): Promise<boolean> => new Promise(resolve => {
-      const time = Date.now()
-      const cb = `__naverAuth${time}`
-      const s = document.createElement('script')
-      s.src = `https://oapi.map.naver.com/v3/auth?ncpKeyId=${clientId}&url=${encodeURIComponent(location.origin)}&time=${time}&callback=${cb}`
-      ;(window as any)[cb] = (data: any) => {
-        delete (window as any)[cb]
-        resolve(!!(data && data.result))
-      }
-      s.onerror = () => { delete (window as any)[cb]; resolve(false) }
-      setTimeout(() => { if ((window as any)[cb]) { delete (window as any)[cb]; resolve(false) } }, 8000)
-      document.head.appendChild(s)
-    })
-
-    const loadMap = (clientId: string) => {
-      if (window.naver && window.naver.maps) { naverLoaded = true; setProvider('naver'); return }
-      if (document.getElementById('naver-map-sdk')) { naverLoaded = true; setProvider('naver'); return }
-      checkNaverAuth(clientId).then(ok => {
-        if (cancelled) return
-        if (!ok) { fallbackToLeaflet(); return }
-        const s = document.createElement('script')
-        s.id = 'naver-map-sdk'
-        s.src = `https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=${clientId}`
-        s.onload = () => { naverLoaded = true; setProvider('naver') }
-        s.onerror = () => fallbackToLeaflet()
-        document.head.appendChild(s)
-        setTimeout(() => { if (!window.naver?.maps) fallbackToLeaflet() }, 10000)
-      })
-    }
 
     fetch(`/api/facilities/map?type=all`)
       .then(r => r.json())
@@ -151,8 +118,7 @@ export default function FacilityMap({ type = 'toilet' }: Props) {
         if (cancelled) return
         setFacilities(d.facilities || [])
         setLoading(false)
-        if (d.naver_map_key) loadMap(d.naver_map_key)
-        else { setProvider('leaflet') }
+        setProvider('leaflet')
       })
       .catch(() => { if (!cancelled) { setLoading(false); setProvider('leaflet') } })
 
@@ -164,41 +130,25 @@ export default function FacilityMap({ type = 'toilet' }: Props) {
 
     const startLat = myPosRef.current?.lat ?? 37.49
     const startLng = myPosRef.current?.lng ?? 127.57
-    const maxZoom = provider === 'naver' ? 20 : 19
+    const maxZoom = 19
 
-    if (provider === 'naver') {
-      const naver = window.naver
-      if (!naver?.maps) return
-      const center = new naver.maps.LatLng(startLat, startLng)
-      mapObj.current = new naver.maps.Map(mapRef.current, { center, zoom: maxZoom, logoControl: false })
-      naver.maps.Event.addListener(mapObj.current, 'click', (e: any) => {
-        if (!user) return
-        const lat = e.coord.getLat(), lng = e.coord.getLng()
-        const projection = mapObj.current.getProjection()
-        const pixel = projection.fromCoordToOffset(new naver.maps.LatLng(lat, lng))
-        setSelected(null); setShowAdd(false)
-        setTypePopup({ lat, lng, x: pixel.x, y: pixel.y })
-      })
-    } else {
-      const map = L.map(mapRef.current).setView([startLat, startLng], maxZoom)
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; OpenStreetMap contributors',
-        maxZoom: 19,
-      }).addTo(map)
-      map.on('click', (e: any) => {
-        if (!user) return
-        const { lat, lng } = e.latlng
-        const point = map.latLngToContainerPoint([lat, lng])
-        setSelected(null); setShowAdd(false)
-        setTypePopup({ lat, lng, x: point.x, y: point.y })
-      })
-      mapObj.current = map
-    }
+    const map = L.map(mapRef.current).setView([startLat, startLng], maxZoom)
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors',
+      maxZoom: 19,
+    }).addTo(map)
+    map.on('click', (e: any) => {
+      if (!user) return
+      const { lat, lng } = e.latlng
+      const point = map.latLngToContainerPoint([lat, lng])
+      setSelected(null); setShowAdd(false); setEditing(null); setEditPos(null)
+      setTypePopup({ lat, lng, x: point.x, y: point.y })
+    })
+    mapObj.current = map
 
     return () => {
       if (mapObj.current) {
-        if (provider === 'naver') mapObj.current.destroy()
-        else mapObj.current.remove()
+        mapObj.current.remove()
       }
       mapObj.current = null
       markersRef.current = []
@@ -209,13 +159,7 @@ export default function FacilityMap({ type = 'toilet' }: Props) {
   useEffect(() => {
     const map = mapObj.current
     if (!map || !provider || !displayPos) return
-    if (provider === 'naver') {
-      const naver = window.naver
-      map.setCenter(new naver.maps.LatLng(displayPos.lat, displayPos.lng))
-      map.setZoom(20)
-    } else {
-      map.setView([displayPos.lat, displayPos.lng], 19)
-    }
+    map.setView([displayPos.lat, displayPos.lng], 19)
   }, [displayPos, provider])
 
   useEffect(() => {
@@ -223,8 +167,7 @@ export default function FacilityMap({ type = 'toilet' }: Props) {
     if (!map || !provider) return
 
     markersRef.current.forEach(m => {
-      if (provider === 'naver') m.setMap(null)
-      else map.removeLayer(m)
+      map.removeLayer(m)
     })
     markersRef.current = []
 
@@ -240,31 +183,23 @@ export default function FacilityMap({ type = 'toilet' }: Props) {
     filtered.forEach(f => {
       if (!f.lat || !f.lng) return
       const html = markerContent(f)
-      if (provider === 'naver') {
-        const naver = window.naver
-        const icon = {
-          content: html,
-          size: { width: 28, height: 28 },
-          anchor: { x: 14, y: 14 },
+      const icon = L.divIcon({
+        className: '',
+        html,
+        iconSize: [28, 28],
+        iconAnchor: [14, 14],
+      })
+      const marker = L.marker([f.lat, f.lng], { icon }).addTo(map)
+      marker.on('click', (e: any) => {
+        const mapEl = mapRef.current
+        if (mapEl) {
+          const p = map.latLngToContainerPoint(e.latlng)
+          const rect = mapEl.getBoundingClientRect()
+          setEditPos({ x: rect.left + p.x, y: rect.top + p.y })
         }
-        const marker = new naver.maps.Marker({ position: new naver.maps.LatLng(f.lat, f.lng), map, icon })
-        naver.maps.Event.addListener(marker, 'click', () => {
-          setSelected(f); setTypePopup(null); setShowAdd(false)
-        })
-        markersRef.current.push(marker)
-      } else {
-        const icon = L.divIcon({
-          className: '',
-          html,
-          iconSize: [28, 28],
-          iconAnchor: [14, 14],
-        })
-        const marker = L.marker([f.lat, f.lng], { icon }).addTo(map)
-        marker.on('click', () => {
-          setSelected(f); setTypePopup(null); setShowAdd(false)
-        })
-        markersRef.current.push(marker)
-      }
+        setSelected(f); setEditing(null); setTypePopup(null); setShowAdd(false)
+      })
+      markersRef.current.push(marker)
     })
   }, [facilities, filter, facFilter, provider])
 
@@ -272,8 +207,7 @@ export default function FacilityMap({ type = 'toilet' }: Props) {
     const map = mapObj.current
     if (!map || !provider || !displayPos || !myPos) return
     if (myMarkerRef.current) {
-      if (provider === 'naver') myMarkerRef.current.setMap(null)
-      else map.removeLayer(myMarkerRef.current)
+      map.removeLayer(myMarkerRef.current)
       myMarkerRef.current = null
     }
     const onDragEnd = (newLat: number, newLng: number) => {
@@ -282,39 +216,18 @@ export default function FacilityMap({ type = 'toilet' }: Props) {
       try { localStorage.setItem(GPS_CALIB_KEY, JSON.stringify(off)) } catch {}
     }
     const personHtml = `<div style="width:26px;height:26px;border-radius:50%;background:#007bff;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;font-size:15px;line-height:1;overflow:hidden;">🧍</div>`
-    if (provider === 'naver') {
-      const naver = window.naver
-      const pos = new naver.maps.LatLng(displayPos.lat, displayPos.lng)
-      const marker = new naver.maps.Marker({
-        position: pos,
-        map,
-        draggable: true,
-        icon: {
-          content: personHtml,
-          size: { width: 26, height: 26 },
-          anchor: { x: 13, y: 13 },
-        },
-        zIndex: 100,
-      })
-      naver.maps.Event.addListener(marker, 'dragend', (e: any) => {
-        const p = (e.coord || marker.getPosition())
-        onDragEnd(p.getLat(), p.getLng())
-      })
-      myMarkerRef.current = marker
-    } else {
-      const icon = L.divIcon({
-        className: '',
-        html: personHtml,
-        iconSize: [26, 26],
-        iconAnchor: [13, 13],
-      })
-      const marker = L.marker([displayPos.lat, displayPos.lng], { icon, zIndexOffset: 1000, draggable: true }).addTo(map)
-      marker.on('dragend', () => {
-        const ll = marker.getLatLng()
-        onDragEnd(ll.lat, ll.lng)
-      })
-      myMarkerRef.current = marker
-    }
+    const icon = L.divIcon({
+      className: '',
+      html: personHtml,
+      iconSize: [26, 26],
+      iconAnchor: [13, 13],
+    })
+    const marker = L.marker([displayPos.lat, displayPos.lng], { icon, zIndexOffset: 1000, draggable: true }).addTo(map)
+    marker.on('dragend', () => {
+      const ll = marker.getLatLng()
+      onDragEnd(ll.lat, ll.lng)
+    })
+    myMarkerRef.current = marker
   }, [displayPos, myPos, provider])
 
   const handleTypeSelect = (facType: string) => {
@@ -376,6 +289,65 @@ export default function FacilityMap({ type = 'toilet' }: Props) {
 
   const genderLabel = (g?: string) => g === 'mixed' ? '남여공용' : g === 'separate' ? '남여분리' : g === 'male_only' ? '남자만' : g === 'female_only' ? '여자만' : '공용'
 
+  const computeEditPos = (f: Facility) => {
+    const map = mapObj.current
+    const el = mapRef.current
+    if (!map || !el) return null
+    const p = map.latLngToContainerPoint([f.lat, f.lng])
+    const rect = el.getBoundingClientRect()
+    return { x: rect.left + p.x, y: rect.top + p.y }
+  }
+
+  const startEdit = (f: Facility) => {
+    const g = f.gender_type || 'mixed'
+    setEditForm({
+      name: f.name || '',
+      open_hr: f.open_hr || '',
+      notes: f.notes || '',
+      male: g === 'male_only' || g === 'separate',
+      female: g === 'female_only' || g === 'separate',
+      shared: g === 'mixed',
+      accessible: !!f.accessible,
+    })
+    setEditPos(computeEditPos(f))
+    setEditing(f)
+  }
+
+  const handleEditSave = async () => {
+    if (!editing) return
+    const g = editForm.male && editForm.female ? 'separate' : editForm.male ? 'male_only' : editForm.female ? 'female_only' : editForm.shared ? 'mixed' : 'mixed'
+    try {
+      const res = await fetch(`/api/facilities/${editing.id}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: editForm.name.trim() || editing.name,
+          open_hr: editForm.open_hr,
+          notes: editForm.notes,
+          gender_type: editing.facility_type === 'toilet' ? g : 'mixed',
+          accessible: editing.facility_type === 'toilet' ? editForm.accessible : false,
+        }),
+      })
+      const d = await res.json()
+      if (d.success) {
+        setEditing(null)
+        setEditPos(null)
+        setSelected(null)
+        const r2 = await fetch(`/api/facilities/map?type=all`)
+        setFacilities((await r2.json()).facilities || [])
+      } else if (res.status === 401) {
+        setEditing(null)
+        setEditPos(null)
+        if (confirm('로그인이 필요합니다. 로그인 페이지로 이동할까요?')) {
+          window.location.href = '/login'
+        }
+      } else {
+        alert(d.error || '수정에 실패했습니다.')
+      }
+    } catch (e) {
+      alert('수정 중 오류가 발생했습니다: ' + (e as Error).message)
+    }
+  }
+
   if (loading) return <div className="text-center py-4"><div className="spinner-border spinner-border-sm" /></div>
 
   const filteredCount = facilities.filter(f => {
@@ -407,49 +379,48 @@ export default function FacilityMap({ type = 'toilet' }: Props) {
         ] as const).map(([k, l, c]) => (
           <button key={k} className="btn btn-sm"
             style={{ background: filter === k ? c : '#e9ecef', color: filter === k ? '#fff' : '#333', border: 'none', borderRadius: 20, fontSize: 11 }}
-            onClick={() => setFilter(k as FilterType)}>{l}</button>
+            onClick={() => setFilter(k as FilterType)}>{l}          </button>
         ))}
-        {provider === 'leaflet' && (
-          <span className="ms-auto align-self-center" style={{ fontSize: 10, color: '#888' }}>대체지도(OSM)</span>
-        )}
       </div>
 
-      <div ref={mapRef} id="map" style={{ width: '100%', height: 400, borderRadius: 12, border: '1px solid #dee2e6', position: 'relative', zIndex: 1 }} />
+      <div style={{ position: 'relative' }}>
+        <div ref={mapRef} id="map" style={{ width: '100%', height: 400, borderRadius: 12, border: '1px solid #dee2e6', position: 'relative', zIndex: 1 }} />
 
-      {typePopup && (
-        <div style={{
-          position: 'absolute',
-          left: typePopup.x + 14,
-          top: typePopup.y - 50,
-          display: 'flex', flexDirection: 'column', gap: 4,
-          background: '#fff', borderRadius: 10, padding: '6px',
-          boxShadow: '0 2px 12px rgba(0,0,0,.25)',
-          zIndex: 1000,
-          transform: 'translateX(-50%)',
-        }}>
-          <div style={{ fontSize: 10, color: '#666', padding: '2px 4px' }}>무엇을 등록할까요?</div>
-          {FACILITY_TYPES.map(ft => (
-            <button key={ft.type} onClick={() => handleTypeSelect(ft.type)}
+        {typePopup && (
+          <div style={{
+            position: 'absolute',
+            left: typePopup.x + 14,
+            top: typePopup.y - 50,
+            display: 'flex', flexDirection: 'column', gap: 4,
+            background: '#fff', borderRadius: 10, padding: '6px',
+            boxShadow: '0 2px 12px rgba(0,0,0,.25)',
+            zIndex: 1000,
+            transform: 'translateX(-50%)',
+          }}>
+            <div style={{ fontSize: 10, color: '#666', padding: '2px 4px' }}>무엇을 등록할까요?</div>
+            {FACILITY_TYPES.map(ft => (
+              <button key={ft.type} onClick={() => handleTypeSelect(ft.type)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  border: 'none', background: '#f8f9fa', borderRadius: 8,
+                  padding: '5px 8px', cursor: 'pointer', fontSize: 12, textAlign: 'left',
+                  transition: 'background 0.15s',
+                }}
+                onMouseEnter={e => (e.currentTarget.style.background = ft.color + '22')}
+                onMouseLeave={e => (e.currentTarget.style.background = '#f8f9fa')}
+              ><span style={{ fontSize: 16 }}>{ft.icon}</span> {ft.label}</button>
+            ))}
+            <button onClick={() => setTypePopup(null)}
               style={{
-                display: 'flex', alignItems: 'center', gap: 6,
-                border: 'none', background: '#f8f9fa', borderRadius: 8,
-                padding: '5px 8px', cursor: 'pointer', fontSize: 12, textAlign: 'left',
-                transition: 'background 0.15s',
-              }}
-              onMouseEnter={e => (e.currentTarget.style.background = ft.color + '22')}
-              onMouseLeave={e => (e.currentTarget.style.background = '#f8f9fa')}
-            ><span style={{ fontSize: 16 }}>{ft.icon}</span> {ft.label}</button>
-          ))}
-          <button onClick={() => setTypePopup(null)}
-            style={{
-              width: 20, height: 20, borderRadius: '50%',
-              background: '#e9ecef', border: 'none',
-              color: '#666', fontSize: 11, lineHeight: 1,
-              cursor: 'pointer', position: 'absolute', top: -6, right: -6,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>✕</button>
-        </div>
-      )}
+                width: 20, height: 20, borderRadius: '50%',
+                background: '#e9ecef', border: 'none',
+                color: '#666', fontSize: 11, lineHeight: 1,
+                cursor: 'pointer', position: 'absolute', top: -6, right: -6,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}              >✕</button>
+          </div>
+        )}
+      </div>
 
       <div className="mt-2 d-flex gap-3" style={{ fontSize: 11, color: '#666' }}>
         <span>총 <strong>{filteredCount}</strong>개</span>
@@ -476,52 +447,107 @@ export default function FacilityMap({ type = 'toilet' }: Props) {
         <div className="mt-1" style={{ fontSize: 11, color: '#888' }}>📍 내 위치(🧍)를 드래그하면 그 위치만큼 GPS가 보정됩니다.</div>
       )}
 
-      {selected && (
-        <div className="card mt-2 border-0 shadow-sm" style={{ borderRadius: 12 }}>
-          <div className="card-body p-3">
-            <div className="d-flex justify-content-between align-items-start">
-              <div>
-                <h6 className="fw-bold mb-1">
-                  {selected.facility_type === 'tourist_info' ? '🗺️' : selected.facility_type === 'shelter' ? '🏠' : '🚻'} {selected.name}
-                  {selected.is_community && <span className="badge bg-primary bg-opacity-10 text-primary ms-2" style={{ fontSize: 10 }}>주민</span>}
-                </h6>
-                <div style={{ fontSize: 12, color: '#888' }}>
-                  {typeLabel(selected.facility_type)}
-                  {selected.facility_type === 'toilet' && ` · ${genderLabel(selected.gender_type)}`}
-                  {selected.accessible && ' ♿ 장애인가능'}
-                </div>
-                {selected.address && <small className="text-muted d-block">{selected.address}</small>}
-                {selected.open_hr && <small className="text-muted d-block">🕐 {selected.open_hr}</small>}
-                {selected.notes && <small className="text-muted d-block">📝 {selected.notes}</small>}
-                <div className="d-flex gap-3 mt-1" style={{ fontSize: 12 }}>
-                  <span>✅ {selected.verified_count}</span><span>❌ {selected.reject_count}</span>
-                  {selected.facility_type === 'toilet' && rejectRatio(selected) > 0 && (
-                    <span className="text-danger">⚠ 사용불가 {Math.round(rejectRatio(selected) * 100)}%</span>
-                  )}
-                </div>
+      {selected && editPos && (
+        <div style={{
+          position: 'fixed',
+          left: Math.min(editPos.x + 14, window.innerWidth - 260),
+          top: Math.max(8, Math.min(editPos.y - 40, window.innerHeight - 460)),
+          width: 240,
+          background: '#fff',
+          borderRadius: 12,
+          padding: '10px 12px',
+          boxShadow: '0 4px 16px rgba(0,0,0,.25)',
+          zIndex: 3000,
+          maxHeight: 440,
+          overflowY: 'auto',
+        }}>
+          <div className="d-flex justify-content-between align-items-start">
+            <div>
+              <h6 className="fw-bold mb-1" style={{ fontSize: 13 }}>
+                {selected.facility_type === 'tourist_info' ? '🗺️' : selected.facility_type === 'shelter' ? '🏠' : '🚻'} {selected.name}
+                {selected.is_community && <span className="badge bg-primary bg-opacity-10 text-primary ms-2" style={{ fontSize: 10 }}>주민</span>}
+              </h6>
+              <div style={{ fontSize: 12, color: '#888' }}>
+                {typeLabel(selected.facility_type)}
+                {selected.facility_type === 'toilet' && ` · ${genderLabel(selected.gender_type)}`}
+                {selected.accessible && ' ♿ 장애인가능'}
               </div>
-              <button className="btn btn-sm btn-outline-secondary" onClick={() => setSelected(null)}>✕</button>
+              {selected.address && <small className="text-muted d-block">{selected.address}</small>}
+              {selected.open_hr && <small className="text-muted d-block">🕐 {selected.open_hr}</small>}
+              {selected.notes && <small className="text-muted d-block">📝 {selected.notes}</small>}
+              <div className="d-flex gap-3 mt-1" style={{ fontSize: 12 }}>
+                <span>✅ {selected.verified_count}</span><span>❌ {selected.reject_count}</span>
+                {selected.facility_type === 'toilet' && rejectRatio(selected) > 0 && (
+                  <span className="text-danger">⚠ 사용불가 {Math.round(rejectRatio(selected) * 100)}%</span>
+                )}
+              </div>
             </div>
-              <a
-                className="btn btn-sm btn-outline-primary w-100 mt-2"
-                href={`/compass?popup=1&lat=${selected.lat}&lng=${selected.lng}&name=${encodeURIComponent(selected.name || typeLabel(selected.facility_type))}`}
-              >🧭 나침반 내비</a>
-            {user && (
-              <div className="mt-2 pt-2 border-top">
-                <div className="d-flex gap-2 mb-2">
-                  <button className={`btn btn-sm ${selected.my_report === 'verify' ? 'btn-success' : 'btn-outline-success'}`}
-                    onClick={() => handleReport(selected.id, 'verify')}>✅ 사용가능</button>
-                  <button className={`btn btn-sm ${selected.my_report === 'reject' ? 'btn-danger' : 'btn-outline-danger'}`}
-                    onClick={() => handleReport(selected.id, 'reject')}>❌ 사용불가</button>
-                </div>
-                <div className="input-group input-group-sm">
-                  <input type="text" className="form-control" placeholder="메모"
-                    value={reportForm.comment} onChange={e => setReportForm({ comment: e.target.value })} />
-                  <button className="btn btn-outline-secondary" onClick={() => handleReport(selected.id, 'memo')}>메모</button>
-                </div>
-              </div>
-            )}
+            <button className="btn btn-sm py-0 px-1" style={{ fontSize: 12 }} onClick={() => { setSelected(null); setEditPos(null); setEditing(null) }}>✕</button>
           </div>
+          <a
+            className="btn btn-sm btn-outline-primary w-100 mt-2"
+            href={`/compass?popup=1&lat=${selected.lat}&lng=${selected.lng}&name=${encodeURIComponent(selected.name || typeLabel(selected.facility_type))}`}
+          >🧭 나침반 내비</a>
+          {!editing && selected.is_community && (
+            <button className="btn btn-sm btn-outline-secondary w-100 mt-1"
+              onClick={() => startEdit(selected)}>✏️ 수정</button>
+          )}
+          {editing && (
+            <>
+              <div className="d-flex justify-content-between align-items-center mt-2">
+                <div style={{ fontSize: 12, fontWeight: 600, color: '#b8860b' }}>✏️ 수정 중</div>
+                <button className="btn btn-sm py-0 px-1" style={{ fontSize: 12 }} onClick={() => setEditing(null)}>편집 취소</button>
+              </div>
+              <input type="text" className="form-control form-control-sm mb-1" placeholder="이름"
+                value={editForm.name} onChange={e => setEditForm({ ...editForm, name: e.target.value })} />
+              {editing.facility_type === 'toilet' && (
+                <>
+                  <div className="mb-1" style={{ fontSize: 11, color: '#666' }}>화장실 유형 선택 (여러 개 선택 가능)</div>
+                  <div className="d-flex gap-2 flex-wrap mb-1">
+                    {([
+                      ['accessible', '♿ 장애인', '#28a745'],
+                      ['male', '♂ 남자', '#0d6efd'],
+                      ['female', '♀ 여자', '#dc3545'],
+                      ['shared', '🚻 공용', '#6c757d'],
+                    ] as const).map(([key, label, color]) => (
+                      <label key={key} className="form-check form-check-inline mb-0" style={{ fontSize: 12 }}>
+                        <input className="form-check-input" type="checkbox"
+                          checked={!!editForm[key]}
+                          onChange={() => setEditForm({ ...editForm, [key]: !editForm[key] })} />
+                        <label className="form-check-label" style={{ fontSize: 12 }}>
+                          <span style={{ display: 'inline-block', width: 12, height: 12, borderRadius: '50%', background: color, verticalAlign: 'middle', marginRight: 3 }} />
+                          {label}
+                        </label>
+                      </label>
+                    ))}
+                  </div>
+                </>
+              )}
+              <input type="text" className="form-control form-control-sm mb-1" placeholder="운영시간 (선택)"
+                value={editForm.open_hr} onChange={e => setEditForm({ ...editForm, open_hr: e.target.value })} />
+              <input type="text" className="form-control form-control-sm mb-2" placeholder="메모 (선택)"
+                value={editForm.notes} onChange={e => setEditForm({ ...editForm, notes: e.target.value })} />
+              <div className="d-flex gap-2">
+                <button className="btn btn-sm btn-warning" onClick={handleEditSave}>저장</button>
+                <button className="btn btn-sm btn-outline-secondary" onClick={() => setEditing(null)}>취소</button>
+              </div>
+            </>
+          )}
+          {user && (
+            <div className="mt-2 pt-2 border-top">
+              <div className="d-flex gap-2 mb-2">
+                <button className={`btn btn-sm ${selected.my_report === 'verify' ? 'btn-success' : 'btn-outline-success'}`}
+                  onClick={() => handleReport(selected.id, 'verify')}>✅ 사용가능</button>
+                <button className={`btn btn-sm ${selected.my_report === 'reject' ? 'btn-danger' : 'btn-outline-danger'}`}
+                  onClick={() => handleReport(selected.id, 'reject')}>❌ 사용불가</button>
+              </div>
+              <div className="input-group input-group-sm">
+                <input type="text" className="form-control" placeholder="메모"
+                  value={reportForm.comment} onChange={e => setReportForm({ comment: e.target.value })} />
+                <button className="btn btn-outline-secondary" onClick={() => handleReport(selected.id, 'memo')}>메모</button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

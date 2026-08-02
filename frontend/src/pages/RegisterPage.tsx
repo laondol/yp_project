@@ -238,7 +238,8 @@ export default function RegisterPage() {
     setError(''); setLoading(true)
     try {
       const fd = new FormData()
-      fd.append('password', password)
+      const { hashPassword } = await import('../lib/password')
+      fd.append('password_hash', await hashPassword(password))
       fd.append('real_name', realName)
       if (homeAddress) fd.append('home_address', homeAddress)
       if (officeAddress) fd.append('office_address', officeAddress)

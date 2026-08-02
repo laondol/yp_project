@@ -220,6 +220,7 @@ export interface MeResponse {
   town?: string; village?: string; email?: string;
   is_verified_resident?: boolean;
   intro_page_enabled?: boolean;
+  password_v2?: boolean;
 }
 
 export interface PaginatedResponse<T> {

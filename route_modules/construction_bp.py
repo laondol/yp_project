@@ -876,14 +876,21 @@ def api_facilities_update(fid):
     if not uid:
         return jsonify({"error": "로그인이 필요합니다."}), 401
     f = PublicFacility.query.get_or_404(fid)
-    if not f.is_community and f.submitted_by != uid:
-        role = session.get('role', '')
+    role = session.get('role', '')
+    if f.is_community:
+        # 주민 등록 시설은 등록자 본인 또는 관리자/마을지기만 수정 가능
+        if f.submitted_by != uid and role not in ('admin', 'leader'):
+            return jsonify({"error": "수정 권한이 없습니다."}), 403
+    else:
+        # 공공 시설은 관리자/마을지기만 수정 가능
         if role not in ('admin', 'leader'):
             return jsonify({"error": "수정 권한이 없습니다."}), 403
     data = request.get_json()
-    for field in ['name', 'address', 'open_hr', 'tel', 'notes', 'status', 'photo_url']:
+    for field in ['name', 'address', 'open_hr', 'tel', 'notes', 'status', 'photo_url', 'gender_type']:
         if field in data:
             setattr(f, field, (data[field] or '').strip() if isinstance(data[field], str) else data[field])
+    if 'accessible' in data:
+        f.accessible = bool(data['accessible'])
     for field in ['latitude', 'longitude']:
         if field in data and data[field] is not None:
             setattr(f, field, float(data[field]))

@@ -21,10 +21,12 @@ export default function ResetConfirmPage() {
     if (password !== confirm) { setError('비밀번호가 일치하지 않습니다.'); return }
     setError(''); setMessage(''); setLoading(true)
     try {
+      const { hashPassword } = await import('../lib/password')
+      const password_hash = await hashPassword(password)
       const res = await fetch('/reset-password/confirm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token, password }),
+        body: JSON.stringify({ token, password_hash }),
       })
       const data = await res.json()
       if (!res.ok) {

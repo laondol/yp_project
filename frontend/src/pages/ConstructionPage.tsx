@@ -241,7 +241,7 @@ export default function ConstructionPage() {
 
   const tabs = [
     { key: 'heritage', label: '🏛️ 국가유산' },
-    { key: 'scenery', label: '🌄 풍경' + (sceneryVillage ? `(${sceneryVillage})` : '') },
+    { key: 'scenery', label: '🌄 ' + (sceneryVillage || '풍경') },
     { key: 'home', label: '🏠 집으로' },
     { key: 'building', label: '🏗️ 건축공사' },
   ]
@@ -285,6 +285,7 @@ export default function ConstructionPage() {
                       <div className="d-flex gap-1 flex-wrap mb-2">
                         <a href={`https://ko.wikipedia.org/w/index.php?search=${encodeURIComponent(h.name)}`} target="_blank" className="btn btn-sm btn-outline-secondary" rel="noopener noreferrer">📖 위키백과</a>
                         <a href={`https://search.naver.com/search.naver?query=${encodeURIComponent(h.name + ' 문화재')}`} target="_blank" className="btn btn-sm btn-outline-success" rel="noopener noreferrer">🔍 자세히보기</a>
+                        <a href={`/compass?popup=1&lat=${h.lat}&lng=${h.lng}&name=${encodeURIComponent(h.name || '국가유산')}`} className="btn btn-sm btn-outline-primary">🧭 나침반</a>
                       </div>
                       <div className="d-flex gap-1 flex-wrap">
                         <a href={`https://www.google.com/maps/dir/?api=1&origin=${heritageLat},${heritageLng}&destination=${h.lat},${h.lng}`} target="_blank" className="btn btn-sm btn-outline-secondary" rel="noopener noreferrer">Google</a>

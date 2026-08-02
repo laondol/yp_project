@@ -118,6 +118,10 @@ def create_app():
                     with db.engine.connect() as _conn:
                         _conn.execute(_sa_text("ALTER TABLE \"user\" ADD COLUMN intro_page_enabled BOOLEAN DEFAULT FALSE"))
                         _conn.commit()
+                if 'password_v2' not in _ucols:
+                    with db.engine.connect() as _conn:
+                        _conn.execute(_sa_text("ALTER TABLE \"user\" ADD COLUMN password_v2 BOOLEAN DEFAULT FALSE"))
+                        _conn.commit()
             print("[OK] 신규 컬럼 마이그레이션 완료")
         except Exception as e:
             print(f"[SKIP] 컬럼 마이그레이션: {e}")

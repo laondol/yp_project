@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
+import { hashPassword } from '../lib/password'
 
 export default function LoginPage() {
   const navigate = useNavigate()
@@ -11,34 +12,79 @@ export default function LoginPage() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
+  const [showUpgrade, setShowUpgrade] = useState(false)
+  const [upgradePw, setUpgradePw] = useState('')
+  const [upgradePw2, setUpgradePw2] = useState('')
+  const [upgradeShow, setUpgradeShow] = useState(false)
+  const [upgradeMsg, setUpgradeMsg] = useState('')
+  const [upgradeError, setUpgradeError] = useState('')
+  const [upgrading, setUpgrading] = useState(false)
+
   const [linkEmail, setLinkEmail] = useState('')
   const [linkSent, setLinkSent] = useState(false)
   const [linkLoading, setLinkLoading] = useState(false)
   const [debugUrl, setDebugUrl] = useState('')
   const [showLinkBox, setShowLinkBox] = useState(false)
 
+  const doRedirect = () => {
+    // 로그인 응답의 intro_page_enabled를 사용합니다.
+    // 1) 작업 중이던 페이지가 있으면(next) 그 페이지로
+    // 2) 없으면 회원정보 페이지에서 인트로로 지정한 곳으로 (지정=회원정보, 미지정=인트로)
+    const loggedInUserId = (window as any).__yp_user_id__;
+    const introOn = (window as any).__yp_intro_on__ === true;
+    const next = searchParams.get('next')
+      || (introOn && loggedInUserId ? `/user/${loggedInUserId}` : '/intro');
+    navigate(next)
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
     setLoading(true)
     try {
-      const res = await fetch('/api/auth/login', {
+      // 1차 시도: 클라이언트 해시만 전송 (평문은 DevTools에 노출 안 됨)
+      const password_hash = await hashPassword(password)
+      let res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ username, password_hash }),
         credentials: 'include',
       })
-      const data = await res.json()
+      let data = await res.json()
+
+      // 레거시(평문 저장) 계정 → 평문으로 재시도 (기존 동작 유지)
+      if (data.needs_plaintext) {
+        res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password }),
+          credentials: 'include',
+        })
+        data = await res.json()
+      }
+
       if (!res.ok) {
         setError(data.error || data.msg || '로그인 실패')
         return
       }
+
+      // 전역 상태를 새 회원 정보로 갱신합니다.
       await refresh()
+
       if (data.unread_count > 0) {
         alert(`📨 읽지 않은 편지가 ${data.unread_count}통 있습니다.`)
       }
-      const next = searchParams.get('next') || '/intro'
-      navigate(next)
+
+      ;(window as any).__yp_user_id__ = data.user?.id
+      ;(window as any).__yp_intro_on__ = data.user?.intro_page_enabled === true
+
+      // 레거시 계정이면 전환 안내 모달 (거절하면 그대로 진행)
+      if (data.user?.password_v2 === false) {
+        setShowUpgrade(true)
+        return
+      }
+
+      doRedirect()
     } catch {
       setError('서버 연결에 실패했습니다.')
     } finally {
@@ -46,11 +92,39 @@ export default function LoginPage() {
     }
   }
 
+  const handleUpgrade = async () => {
+    if (upgradePw.length < 8) { setUpgradeError('비밀번호는 8자 이상이어야 합니다.'); return }
+    if (upgradePw !== upgradePw2) { setUpgradeError('비밀번호가 일치하지 않습니다.'); return }
+    setUpgradeError(''); setUpgrading(true); setUpgradeMsg('')
+    try {
+      const password_hash = await hashPassword(upgradePw)
+      const res = await fetch('/api/auth/upgrade-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password_hash }),
+        credentials: 'include',
+      })
+      const data = await res.json()
+      if (!res.ok) { setUpgradeError(data.msg || '전환 실패'); return }
+      setUpgradeMsg('더 안전한 로그인 방식으로 전환되었습니다.')
+      ;(window as any).__yp_user_id__ = undefined
+      ;(window as any).__yp_intro_on__ = undefined
+      await refresh()
+      setTimeout(() => {
+        setShowUpgrade(false)
+        doRedirect()
+      }, 1200)
+    } catch { setUpgradeError('서버 연결 실패') }
+    finally { setUpgrading(false) }
+  }
+
   const handleSendLink = async () => {
     if (!linkEmail) { setError('이메일을 입력해주세요.'); return }
     setError(''); setLinkLoading(true); setDebugUrl('')
     try {
       const fd = new FormData(); fd.append('email', linkEmail)
+      const next = searchParams.get('next')
+      if (next) fd.append('next', next)
       const res = await fetch('/login/send-link', { method: 'POST', body: fd, credentials: 'include' })
       const data = await res.json()
       if (data.status === 'error') { setError(data.msg || '전송 실패'); return }
@@ -127,6 +201,45 @@ export default function LoginPage() {
           </div>
         </div>
       </div>
+
+      {showUpgrade && (
+        <div className="position-fixed top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center"
+          style={{ background: 'rgba(0,0,0,0.5)', zIndex: 5000 }}>
+          <div className="card border-0 shadow-lg" style={{ maxWidth: 440, width: '100%', borderRadius: 16 }}>
+            <div className="card-body p-4">
+              <h5 className="fw-bold mb-1 text-success">🔐 더 안전한 로그인 방식</h5>
+              <p className="small text-muted mb-3">
+                함께사는양평이 로그인 보안을 강화했습니다.<br />
+                새 비밀번호를 설정하면 비밀번호가 네트워크에 전송되는 것을 막아 더 안전하게 로그인할 수 있습니다.
+              </p>
+              {upgradeMsg && <div className="alert alert-success py-2 small">{upgradeMsg}</div>}
+              {upgradeError && <div className="alert alert-danger py-2 small">{upgradeError}</div>}
+              {!upgradeMsg && (
+                <>
+                  <div className="input-group mb-2">
+                    <input type={upgradeShow ? 'text' : 'password'} className="form-control" placeholder="새 비밀번호 (8자 이상)"
+                      value={upgradePw} onChange={e => setUpgradePw(e.target.value)} />
+                    <button type="button" className="btn btn-outline-secondary" tabIndex={-1}
+                      onClick={() => setUpgradeShow(s => !s)} title={upgradeShow ? '비밀번호 숨기기' : '비밀번호 보기'}>
+                      {upgradeShow ? '🙈' : '👁️'}
+                    </button>
+                  </div>
+                  <input type="password" className="form-control mb-3" placeholder="새 비밀번호 확인"
+                    value={upgradePw2} onChange={e => setUpgradePw2(e.target.value)} />
+                  <button className="btn btn-success w-100 mb-2 fw-bold" onClick={handleUpgrade} disabled={upgrading}>
+                    {upgrading ? '전환 중...' : '전환하기'}
+                  </button>
+                </>
+              )}
+              {!upgradeMsg && (
+                <button className="btn btn-outline-secondary w-100 btn-sm" onClick={() => { setShowUpgrade(false); doRedirect() }}>
+                  다음에 하기
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

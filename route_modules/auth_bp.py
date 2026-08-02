@@ -4,6 +4,16 @@ from flask import Blueprint, render_template, request, redirect, url_for, jsonif
 from werkzeug.security import generate_password_hash, check_password_hash
 from models import db, User, PointHistory, Message
 
+KST = timezone(timedelta(hours=9))
+
+def _kst(utc_dt):
+    """UTC datetime → KST(한국 시간) 표기용 문자열 'YYYY-MM-DD HH:MM'"""
+    if utc_dt is None:
+        return ''
+    if utc_dt.tzinfo is None:
+        utc_dt = utc_dt.replace(tzinfo=timezone.utc)
+    return utc_dt.astimezone(KST).strftime('%Y-%m-%d %H:%M')
+
 auth_bp = Blueprint('auth', __name__)
 
 @auth_bp.route('/register/send-code', methods=['POST'])
@@ -162,11 +172,18 @@ def reset_password_confirm(token):
 def reset_password_confirm_post():
     data = request.get_json()
     token = data.get('token','')
-    password = data.get('password','')
+    password_hash = data.get('password_hash', '')
+    password = data.get('password', '')
     user = User.query.filter_by(reset_token=token).first()
     if not user or not user.reset_token_expiry or user.reset_token_expiry < datetime.utcnow():
         return jsonify({"status":"error","msg":"만료된 링크입니다."})
-    user.password = generate_password_hash(password)
+    # v2: 클라이언트 해시 저장(신규 기본). 레거시 폴백: 평문(기존 동작)
+    if password_hash:
+        user.password = generate_password_hash(password_hash)
+        user.password_v2 = True
+    else:
+        user.password = generate_password_hash(password)
+        user.password_v2 = False
     user.reset_token = None
     user.reset_token_expiry = None
     db.session.commit()
@@ -300,6 +317,17 @@ def login():
             session.update({'user_id': u.id, 'username': u.username, 'role': u.role, 'email': u.email or '', 'real_name': u.real_name or '', 'managed_pages': u.managed_pages or ''})
             now = datetime.now(timezone.utc)
             u.last_login = now
+            # 로그인 알림 이메일 발송
+            try:
+                from services.email_service import EmailService
+                login_time = _kst(now)
+                EmailService.send(
+                    u.email or login_id,
+                    '[함께사는양평] 로그인 알림',
+                    f"{u.real_name or u.username}님,\n\n함께사는양평에 로그인 하셨습니다. 확인차 연락 드립니다.\n로그인 시각: {login_time}\n\n본인이 아닌 로그인이라면 비밀번호를 변경해 주세요.\n문의: yp@unocum.kr",
+                )
+            except Exception as e:
+                current_app.logger.warning(f'login alert email failed: {e}')
             # 로그인 위치 기록 (GPS from form)
             lat = request.form.get('lat', type=float)
             lon = request.form.get('lon', type=float)
@@ -323,7 +351,7 @@ def login():
             else:
                 u.last_payout = now
                 db.session.commit()
-            return redirect(next_url or url_for('user.user_profile', user_id=u.id))
+            return redirect(next_url or (f'/user/{u.id}' if u.intro_page_enabled else url_for('page.intro')))
         return jsonify({"status":"error","msg":"로그인 정보가 올바르지 않습니다."}), 401
     return _serve_spa()
 
@@ -443,6 +471,8 @@ def oauth_callback(provider):
     next_url = request.args.get('next') or url_for('news.world_news')
     if not next_url.startswith('/'):
         next_url = url_for('news.world_news')
+    if not request.args.get('next'):
+        next_url = f'/user/{user.id}' if user.intro_page_enabled else '/intro'
     return redirect(next_url)
 
 # --- [이메일 인증] ---
@@ -506,12 +536,55 @@ def api_login():
     data = request.get_json()
     login_id = data.get('username', '')
     u = User.query.filter_by(email=login_id).first()
-    if u and check_password_hash(u.password, data.get('password', '')):
-        session.update({'user_id': u.id, 'username': u.username, 'role': u.role, 'email': u.email or '', 'real_name': u.real_name or '', 'managed_pages': u.managed_pages or ''})
-        u.last_login = datetime.now(timezone.utc)
-        db.session.commit()
-        return jsonify({'status': 'success', 'user': {'id': u.id, 'username': u.username, 'role': u.role, 'email': u.email, 'real_name': u.real_name, 'managed_pages': u.managed_pages, 'points': u.points, 'town': u.town, 'village': u.village}, 'unread_count': Message.query.filter_by(receiver_id=u.id, is_read=False).count()})
-    return jsonify({'status': 'error', 'msg': '로그인 정보가 올바르지 않습니다.'}), 401
+    # 검증값 선택: v2=클라이언트 해시(password_hash), 레거시=평문(password)
+    pw_hash = data.get('password_hash', '')
+    pw_plain = data.get('password', '')
+    if not u:
+        return jsonify({'status': 'error', 'msg': '로그인 정보가 올바르지 않습니다.'}), 401
+    # 레거시 계정인데 해시만 보내온 경우 → 클라이언트에게 평문 재전송 요청
+    if not u.password_v2 and pw_hash and not pw_plain:
+        return jsonify({'status': 'error', 'msg': '보안 방식 전환 안내가 필요합니다.', 'needs_plaintext': True}), 400
+    verified = False
+    if u.password_v2:
+        verified = bool(pw_hash) and check_password_hash(u.password, pw_hash)
+    else:
+        verified = bool(pw_plain) and check_password_hash(u.password, pw_plain)
+    if not verified:
+        return jsonify({'status': 'error', 'msg': '로그인 정보가 올바르지 않습니다.'}), 401
+    session.update({'user_id': u.id, 'username': u.username, 'role': u.role, 'email': u.email or '', 'real_name': u.real_name or '', 'managed_pages': u.managed_pages or ''})
+    u.last_login = datetime.now(timezone.utc)
+    db.session.commit()
+    # 로그인 알림 이메일 발송
+    try:
+        from services.email_service import EmailService
+        login_time = _kst(u.last_login)
+        EmailService.send(
+            u.email or login_id,
+            '[함께사는양평] 로그인 알림',
+            f"{u.real_name or u.username}님,\n\n함께사는양평에 로그인 하셨습니다. 확인차 연락 드립니다.\n로그인 시각: {login_time}\n\n본인이 아닌 로그인이라면 비밀번호를 변경해 주세요.\n문의: yp@unocum.kr",
+        )
+    except Exception as e:
+        current_app.logger.warning(f'login alert email failed: {e}')
+    return jsonify({'status': 'success', 'user': {'id': u.id, 'username': u.username, 'role': u.role, 'email': u.email, 'real_name': u.real_name, 'managed_pages': u.managed_pages, 'points': u.points, 'town': u.town, 'village': u.village, 'intro_page_enabled': bool(u.intro_page_enabled), 'password_v2': bool(u.password_v2)}, 'unread_count': Message.query.filter_by(receiver_id=u.id, is_read=False).count()})
+
+@auth_bp.route('/api/auth/upgrade-password', methods=['POST'])
+def api_upgrade_password():
+    """레거시(평문) 회원 → 클라이언트 해시(v2) 방식 전환"""
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({'status': 'error', 'msg': '로그인이 필요합니다.'}), 401
+    data = request.get_json() or {}
+    password_hash = data.get('password_hash', '')
+    if not password_hash:
+        return jsonify({'status': 'error', 'msg': '새 비밀번호 해시가 없습니다.'}), 400
+    u = User.query.get(uid)
+    if not u:
+        return jsonify({'status': 'error', 'msg': '사용자를 찾을 수 없습니다.'}), 404
+    u.password = generate_password_hash(password_hash)
+    u.password_v2 = True
+    db.session.commit()
+    return jsonify({'status': 'success', 'msg': '더 안전한 로그인 방식으로 전환되었습니다.', 'password_v2': True})
+
 
 @auth_bp.route('/login/send-link', methods=['POST'])
 def login_send_link():
@@ -528,7 +601,11 @@ def login_send_link():
         db.session.delete(existing)
         db.session.commit()
     token = secrets.token_urlsafe(32)
-    record = TempEmailVerify(email=email, token=token, redirect='/intro')
+    # 로그인 후 이동: 1) 요청의 next 2) 인트로 지정 시 회원정보 3) 기본 인트로
+    next_url = (request.form.get('next') or (request.get_json(silent=True) or {}).get('next') or '').strip()
+    if not (next_url and str(next_url).startswith('/')):
+        next_url = f'/user/{u.id}' if u.intro_page_enabled else '/intro'
+    record = TempEmailVerify(email=email, token=token, redirect=next_url)
     db.session.add(record)
     db.session.commit()
     login_url = url_for('auth.login_link_confirm', token=token, _external=True)
@@ -585,6 +662,7 @@ def api_register():
     verified_email = session.pop('email_verified_for_register', None)
     if not verified_email:
         return jsonify({'status': 'error', 'msg': '이메일 인증을 먼저 완료해 주세요.'}), 400
+    password_hash = data.get('password_hash', '')
     password = data.get('password', '')
     real_name = data.get('real_name', '')
     username = data.get('username', '').strip()
@@ -609,9 +687,11 @@ def api_register():
     if User.query.filter_by(email=verified_email).first():
         session.pop('verify_email', None)
         return jsonify({'status': 'error', 'msg': '이미 등록된 이메일입니다.'}), 400
-    hashed_pw = generate_password_hash(password)
+    # v2: 클라이언트 해시(password_hash) 저장. 레거시 폴백: 평문 저장(기존 동작)
+    hashed_pw = generate_password_hash(password_hash) if password_hash else generate_password_hash(password)
+    is_v2 = bool(password_hash)
     now = datetime.now(timezone.utc)
-    new_user = User(username=username, password=hashed_pw, real_name=real_name, email=verified_email, email_verified=True, town=town, village=village, reg_town=town, reg_village=village, curr_town=town, curr_village=village, curr_address=home_address[:200] if home_address else None, office_address=office_address[:200] if office_address else None, is_neighbor=neighbor, location_updated_at=now, points=1000)
+    new_user = User(username=username, password=hashed_pw, real_name=real_name, email=verified_email, email_verified=True, town=town, village=village, reg_town=town, reg_village=village, curr_town=town, curr_village=village, curr_address=home_address[:200] if home_address else None, office_address=office_address[:200] if office_address else None, is_neighbor=neighbor, location_updated_at=now, points=1000, password_v2=is_v2)
     profile_img = request.files.get('profile_img')
     if profile_img and profile_img.filename:
         import os

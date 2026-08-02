@@ -5,7 +5,7 @@ import { authApi } from '../lib/api'
 interface AuthContextType {
   user: MeResponse | null
   loading: boolean
-  refresh: () => Promise<void>
+  refresh: () => Promise<any>
   logout: () => Promise<void>
   introEnabled: boolean;
   setIntroEnabled: (enabled: boolean) => void;  
@@ -34,7 +34,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (typeof data.intro_page_enabled === 'boolean') {
         setIntroEnabled(data.intro_page_enabled)
       }
-      
+      // 🌟 [추가] 중요! 가져온 데이터 원본을 그대로 반환해 줍니다.
+      return data; 
+
     } catch {
       setUser(null)
     } finally {

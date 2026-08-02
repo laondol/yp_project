@@ -257,6 +257,7 @@ def api_user_profile(user_id):
         'recent_friends': recent_friends,
         'profile_initial': (user.real_name or user.username)[0] if (user.real_name or user.username) else '?',
         'intro_page_enabled': bool(user.intro_page_enabled),
+        'password_v2': bool(user.password_v2),
         'block_order_profile': _json.loads(user.block_order_profile) if user.block_order_profile else None,
     })
 

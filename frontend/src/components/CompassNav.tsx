@@ -10,6 +10,7 @@ interface Props {
   destName: string
   waypoints?: Waypoint[]
   onClose?: () => void
+  onChangeDest?: () => void
 }
 
 const METERS_PER_RING = 10
@@ -17,7 +18,7 @@ const MIN_RINGS = 3
 const ARRIVAL_THRESHOLD = 3
 const LS_KEY = 'compass_dest'
 
-export default function CompassNav({ destLat, destLng, destName, waypoints, onClose }: Props) {
+export default function CompassNav({ destLat, destLng, destName, waypoints, onClose, onChangeDest }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [distance, setDistance] = useState(0)
   const [bearing, setBearing] = useState(0)
@@ -163,21 +164,17 @@ export default function CompassNav({ destLat, destLng, destName, waypoints, onCl
       const rings = Math.max(MIN_RINGS, Math.ceil(distance / METERS_PER_RING))
       const ringSpacing = maxRadius / rings
 
-      ctx.save()
-      ctx.translate(cw, ch)
-      ctx.rotate(toRad(-heading))
-
       for (let i = 1; i <= rings; i++) {
         const r = i * ringSpacing
         const alpha = 0.15 + 0.05 * (i / rings)
         ctx.beginPath()
-        ctx.arc(0, 0, r, 0, Math.PI * 2)
+        ctx.arc(cw, ch, r, 0, Math.PI * 2)
         ctx.strokeStyle = `rgba(0, 123, 255, ${alpha})`
         ctx.lineWidth = 1
         ctx.stroke()
         if (i === 1) {
           ctx.beginPath()
-          ctx.arc(0, 0, r, 0, Math.PI * 2)
+          ctx.arc(cw, ch, r, 0, Math.PI * 2)
           ctx.strokeStyle = 'rgba(0, 123, 255, 0.7)'
           ctx.lineWidth = 2
           ctx.stroke()
@@ -188,23 +185,24 @@ export default function CompassNav({ destLat, destLng, destName, waypoints, onCl
           ctx.fillStyle = 'rgba(0, 0, 0, 0.3)'
           ctx.font = '10px sans-serif'
           ctx.textAlign = 'center'
-          ctx.fillText(`${i * METERS_PER_RING}m`, 0, -r + 12)
+          ctx.fillText(`${i * METERS_PER_RING}m`, cw, ch - r + 12)
         }
       }
 
       ctx.fillStyle = 'rgba(0, 123, 255, 0.25)'
       ctx.beginPath()
-      ctx.arc(0, 0, ringSpacing, 0, Math.PI * 2)
+      ctx.arc(cw, ch, ringSpacing, 0, Math.PI * 2)
       ctx.fill()
 
       ctx.fillStyle = 'rgba(0,0,0,0.35)'
       ctx.font = '9px sans-serif'
       ctx.textAlign = 'center'
-      ctx.fillText(`${METERS_PER_RING}m`, 0, -ringSpacing - 2)
+      ctx.fillText(`${METERS_PER_RING}m`, cw, ch - ringSpacing - 2)
 
-      const destAngle = toRad(bearing - heading)
-      const dx = Math.sin(destAngle) * maxRadius
-      const dy = -Math.cos(destAngle) * maxRadius
+      // 목적지 마커는 절대 방위각(bearing) 기준 고정 (헤딩과 무관하게 멈춰 있음)
+      const destAngle = toRad(bearing)
+      const dx = cw + Math.sin(destAngle) * maxRadius
+      const dy = ch - Math.cos(destAngle) * maxRadius
 
       const markerColor = isLastStep ? '#dc3545' : '#ffc107'
       ctx.beginPath()
@@ -227,25 +225,23 @@ export default function CompassNav({ destLat, destLng, destName, waypoints, onCl
       ctx.textBaseline = 'top'
       ctx.fillText(formatDistance(distance), dx, dy + 14)
 
-      ctx.restore()
+      // 북쪽(N) 인디케이터는 헤딩에 따라 회전 (가운데가 움직임)
+      const northAngle = toRad(-heading)
+      const nx = cw + Math.sin(northAngle) * (maxRadius - 16)
+      const ny = ch - Math.cos(northAngle) * (maxRadius - 16)
 
-      ctx.fillStyle = 'rgba(0,0,0,0.35)'
-      ctx.font = 'bold 11px sans-serif'
-      ctx.textAlign = 'center'
-      ctx.fillText('N', cw, ch - maxRadius - 6)
-
-      ctx.strokeStyle = 'rgba(0, 123, 255, 0.9)'
+      ctx.strokeStyle = 'rgba(220, 53, 69, 0.9)'
       ctx.lineWidth = 3
       ctx.beginPath()
-      ctx.moveTo(cw, ch - 18)
-      ctx.lineTo(cw, ch - 6)
+      ctx.moveTo(cw, ch)
+      ctx.lineTo(nx, ny)
       ctx.stroke()
-      ctx.beginPath()
-      ctx.moveTo(cw, ch - 18)
-      ctx.lineTo(cw - 4, ch - 10)
-      ctx.moveTo(cw, ch - 18)
-      ctx.lineTo(cw + 4, ch - 10)
-      ctx.stroke()
+
+      ctx.fillStyle = '#dc3545'
+      ctx.font = 'bold 12px sans-serif'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText('N', nx, ny)
 
       ctx.beginPath()
       ctx.arc(cw, ch, 8, 0, Math.PI * 2)
@@ -300,7 +296,12 @@ export default function CompassNav({ destLat, destLng, destName, waypoints, onCl
   return (
     <div className="d-flex flex-column" style={{ height: '100vh', background: '#f8f9fa', overflow: 'hidden' }}>
       <div className="d-flex align-items-center justify-content-between p-2 bg-white border-bottom">
-        <button className="btn btn-sm btn-outline-secondary" onClick={onClose}>✕</button>
+        <div className="d-flex align-items-center gap-1">
+          <button className="btn btn-sm btn-outline-secondary" onClick={onClose}>✕</button>
+          {onChangeDest && (
+            <button className="btn btn-sm btn-outline-primary" onClick={onChangeDest}>🔄 목적지 변경</button>
+          )}
+        </div>
         <div className="text-center">
           {totalSteps > 1 && (
             <div style={{ fontSize: 11, color: '#007bff' }}>
