@@ -141,6 +141,12 @@ export default function LoginPage() {
           <h4 className="fw-bold text-center mb-1 text-success">함께사는양평 로그인</h4>
           <p className="text-muted text-center small mb-4">양평의 맑은 소통에 참여하세요.</p>
 
+          <div className="alert alert-success text-center py-2 small mb-3" role="alert">
+            🔐 <strong>보안 강화 안내</strong><br />
+            기존 회원님께서는 더 안전한 로그인을 위해<br />
+            <strong>새 비밀번호 설정이 필요</strong>할 수 있습니다.
+          </div>
+
           {error && <div className="alert alert-danger text-center py-2 small">{error}</div>}
 
           <form onSubmit={handleSubmit}>
