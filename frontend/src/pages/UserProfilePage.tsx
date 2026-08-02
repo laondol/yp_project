@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
+import { useAuth } from '../contexts/AuthContext'
 import Loading from '../components/common/Loading'
 import ErrorMessage from '../components/common/ErrorMessage'
 import SortableBlocks from '../components/SortableBlocks'
@@ -61,6 +62,7 @@ const CHANGE_LABELS: Record<string, string> = {
 export default function UserProfilePage() {
   const { userId } = useParams()
   const navigate = useNavigate()
+  const { setIntroEnabled } = useAuth(); // 🌟 전역 상태의 함수를 가져옵니다.
   const [data, setData] = useState<{
     profile_user: ProfileUser; is_own: boolean; is_admin: boolean; is_friend: boolean;
     p_is_village: boolean; point_history: PointHistory[]; messages: Message[];
@@ -152,7 +154,11 @@ export default function UserProfilePage() {
                     <div className="ms-auto">
                       <button
                         className={`btn btn-sm ${introEnabled ? 'btn-success' : 'btn-outline-secondary'}`}
-                        onClick={() => toggleIntro(!introEnabled)}
+                        onClick={() => { 
+                          const nextState = !introEnabled;
+                          toggleIntro(nextState);
+                          setIntroEnabled(nextState);
+                        }}
                         title={introEnabled ? '인트로페이지로 설정됨' : '이 페이지를 인트로로 설정'}
                         style={{ fontSize: '1.1rem', padding: '2px 8px' }}
                       >

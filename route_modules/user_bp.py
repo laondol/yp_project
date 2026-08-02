@@ -260,28 +260,11 @@ def api_user_profile(user_id):
         'block_order_profile': _json.loads(user.block_order_profile) if user.block_order_profile else None,
     })
 
-
 @user_bp.route('/user/<int:user_id>')
 def user_profile(user_id):
     if not session.get('username'):
         return redirect(url_for('auth.login', next=request.path))
     return _serve_spa()
-
-
-@user_bp.route('/intro-profile')
-def intro_profile_page():
-    if not session.get('username'):
-        return redirect(url_for('auth.login', next=request.path))
-    return _serve_spa()
-
-
-@user_bp.route('/api/user/me/profile')
-def api_user_me_profile():
-    if not session.get('username'):
-        return jsonify({'error': 'login'}), 401
-    uid = session['user_id']
-    return api_user_profile(uid)
-
 
 @user_bp.route('/user/location/refresh', methods=['POST'])
 def user_location_refresh():

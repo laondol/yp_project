@@ -118,7 +118,7 @@ export default function NavBar() {
       <div className="container">
         {/* Left: logo + quick menu */}
         <div className="d-flex align-items-center flex-shrink-0">
-          <Link className="navbar-brand d-flex align-items-center me-1" to={ introEnabled ? `/user/${user?.id}` : '/intro'}>          
+          <Link className="navbar-brand d-flex align-items-center me-1" to={!loading && user?.id && introEnabled ? `/user/${user.id}` : '/intro'}>          
             <img src="/static/images/logo.png" alt="Yangpyeong community logo - navigate to home" height="36" title={siteName} />
             <span className="fw-bold text-success d-none d-lg-inline ms-2" style={{ fontSize: '1.2rem' }}>{siteName}</span>
           </Link>
