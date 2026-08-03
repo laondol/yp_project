@@ -27,6 +27,7 @@ export default function SchedulePage() {
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<number | string | null>(null)
   const [showDelModal, setShowDelModal] = useState<number | string | null>(null)
+  const [expandedRoute, setExpandedRoute] = useState<number | string | null>(null)
   const [saving, setSaving] = useState(false)
   const formRef = useRef<HTMLDivElement>(null)
 
@@ -220,59 +221,171 @@ export default function SchedulePage() {
                 <EmptyState icon="📅" title="등록된 일정이 없습니다." />
               ) : dayScheds.map((s) => {
                 let transitBtns: React.ReactNode = null
-                const isTransit = (s.title && (s.title.includes('이동') || s.title.includes('집으로'))) && s.content
+                let routeDetail: React.ReactNode = null
+                let route = JSON.parse(s.content || 'null')
+                const isTransit = (s.title && (s.title.includes('이동') || s.title.includes('집으로'))) && route && route.from_lat && route.to_lat
                 if (isTransit) {
                   try {
-                    const r = JSON.parse(s.content || 'null')
-                    if (r && r.from_lat && r.to_lat) {
-                      const dl = encodeURIComponent(s.departure_location || '출발')
-                      const al = encodeURIComponent(s.return_location || s.location || '도착')
-                      const fromLat = parseFloat(r.from_lat).toFixed(7)
-                      const fromLng = parseFloat(r.from_lng).toFixed(7)
-                      const toLat = parseFloat(r.to_lat).toFixed(7)
-                      const toLng = parseFloat(r.to_lng).toFixed(7)
-                      const ts = s.end_date || s.event_date
-                      let arrTs = ''
-                      if (ts) {
-                        try {
-                          const parts = ts.split(' ')
-                          const dp = parts[0].split('-')
-                          const tp = parts[1].split(':')
-                          const d = new Date(Date.UTC(parseInt(dp[0]), parseInt(dp[1]) - 1, parseInt(dp[2]), parseInt(tp[0]), parseInt(tp[1])))
-                          if (!isNaN(d.getTime())) arrTs = Math.floor(d.getTime() / 1000).toString()
-                        } catch {}
+                    const r = route
+                    const dl = encodeURIComponent(s.departure_location || '출발')
+                    const al = encodeURIComponent(s.return_location || s.location || '도착')
+                    const fromLat = parseFloat(r.from_lat).toFixed(7)
+                    const fromLng = parseFloat(r.from_lng).toFixed(7)
+                    const toLat = parseFloat(r.to_lat).toFixed(7)
+                    const toLng = parseFloat(r.to_lng).toFixed(7)
+                    const ts = s.end_date || s.event_date
+                    let arrTs = ''
+                    if (ts) {
+                      try {
+                        const parts = ts.split(' ')
+                        const dp = parts[0].split('-')
+                        const tp = parts[1].split(':')
+                        const d = new Date(Date.UTC(parseInt(dp[0]), parseInt(dp[1]) - 1, parseInt(dp[2]), parseInt(tp[0]), parseInt(tp[1])))
+                        if (!isNaN(d.getTime())) arrTs = Math.floor(d.getTime() / 1000).toString()
+                      } catch {}
+                    }
+                    const isHome = s.title.includes('집으로')
+                    const dataParam = isHome
+                      ? '!3m1!4b1!4m4!4m3!2m1!6e2!3e3'
+                      : '!3m1!4b1!4m6!4m5!2m3!6e1!7e2!8j' + (arrTs || '') + '!3e3'
+                    // 도보 단계가 있으면 해당 단계 도착 좌표를 나침반 목적지/경유점으로 자동 입력
+                    const steps = r.steps || []
+                    const walkSteps = steps.filter((st: any) => (st.mode || '').includes('도보'))
+                    const compassWaypoints: any[] = []
+                    walkSteps.forEach((st: any, wi: number) => {
+                      const wlat = (st.to_lat != null && !isNaN(parseFloat(st.to_lat))) ? parseFloat(st.to_lat) : parseFloat(r.to_lat)
+                      const wlng = (st.to_lng != null && !isNaN(parseFloat(st.to_lng))) ? parseFloat(st.to_lng) : parseFloat(r.to_lng)
+                      compassWaypoints.push({ lat: wlat, lng: wlng, name: st.to || st.from || `도보 ${wi + 1}`, mode: st.mode, detail: st.detail })
+                    })
+                    const hasWalk = walkSteps.length > 0
+                    if (!hasWalk && steps.length > 0) {
+                      const st = steps[steps.length - 1]
+                      compassWaypoints.push({
+                        lat: (st.to_lat != null && !isNaN(parseFloat(st.to_lat))) ? parseFloat(st.to_lat) : parseFloat(r.to_lat),
+                        lng: (st.to_lng != null && !isNaN(parseFloat(st.to_lng))) ? parseFloat(st.to_lng) : parseFloat(r.to_lng),
+                        name: st.to || st.from || '목적지', mode: st.mode, detail: st.detail,
+                      })
+                    }
+                    const wpParam = encodeURIComponent(JSON.stringify(compassWaypoints))
+                    transitBtns = (
+                      <div className="d-flex gap-1 mt-1 flex-wrap">
+                        <a className="btn btn-sm btn-outline-danger py-0" target="_blank" rel="noopener noreferrer"
+                          href={`https://www.google.co.kr/maps/dir/${fromLat},${fromLng}/${toLat},${toLng}/data=${dataParam}`}>🌐Google</a>
+                        <a className="btn btn-sm btn-outline-info py-0" target="_blank" rel="noopener noreferrer"
+                          href={`https://map.naver.com/p/directions/${r.from_lng},${r.from_lat},${dl}/${r.to_lng},${r.to_lat},${al}/-/transit`}>🗺️네이버</a>
+                        <a className="btn btn-sm btn-outline-success py-0" target="_blank" rel="noopener noreferrer"
+                          href={`https://map.kakao.com/link/by/traffic/${dl},${r.from_lat},${r.from_lng}/${al},${r.to_lat},${r.to_lng}`}>📱카카오</a>
+                        <a className={`btn btn-sm py-0 ${hasWalk ? 'btn-primary' : 'btn-outline-primary'}`} target="_blank" rel="noopener noreferrer"
+                          href={`/compass?popup=1&lat=${r.to_lat}&lng=${r.to_lng}&name=${encodeURIComponent(s.title || '목적지')}&waypoints=${wpParam}`}>
+                          {hasWalk ? '🧭 도보 나침반' : '🧭나침반'}
+                        </a>
+                      </div>
+                    )
+                    // 접이식 상세 도식 카드
+                    const stripRegion = (name: string) => (name || '').replace(/^(서울|수도권|부산|대구|대전|광주|인천|경기|세종|울산)\s*/i, '')
+                    const isTrain = (t: string) => /기차|열차|KTX|ITX|SRT|무궁화|새마을|누리로|NURIR|RAIL|TRAIN|특급|고속철/i.test(t)
+                    const LINE_COLORS: Record<string, string> = {
+                      '1호선': '#0052A4', '2호선': '#00A84D', '3호선': '#EF7C1C', '4호선': '#00A5DE',
+                      '5호선': '#996CAC', '6호선': '#CD7C2F', '7호선': '#747F00', '8호선': '#E6186C', '9호선': '#BB8336',
+                      '경의중앙선': '#77C4A3', '수인분당선': '#FABE00', '신분당선': '#D4003B', '공항철도': '#0090D2',
+                      '서해선': '#8FC31F', '경강선': '#003DA5', '경춘선': '#178C72',
+                    }
+                    const lineColorOf = (name: string) => {
+                      const n = stripRegion(name)
+                      const m = n.match(/(\d+)\s*호선/)
+                      if (m) return LINE_COLORS[`${m[1]}호선`] || '#525252'
+                      return LINE_COLORS[n.trim()] || '#3b6ea5'
+                    }
+                    const railBadge = (name: string) => {
+                      const n = stripRegion(name)
+                      const m = n.match(/(\d+)\s*호선/)
+                      const color = lineColorOf(name)
+                      if (m) {
+                        return (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                            width: 26, height: 26, borderRadius: '50%', background: color, color: '#fff',
+                            fontSize: 14, fontWeight: 800, lineHeight: 1 }}>{m[1]}</span>
+                        )
                       }
-                      const isHome = s.title.includes('집으로')
-                      const dataParam = isHome
-                        ? '!3m1!4b1!4m4!4m3!2m1!6e2!3e3'
-                        : '!3m1!4b1!4m6!4m5!2m3!6e1!7e2!8j' + (arrTs || '') + '!3e3'
-                      const compassWaypoints = (r.steps || []).map((st: any) => ({
-                        lat: st.mode === '도보' ? parseFloat(r.from_lat) : parseFloat(r.to_lat),
-                        lng: st.mode === '도보' ? parseFloat(r.from_lng) : parseFloat(r.to_lng),
-                        name: st.to || st.from || '',
-                        mode: st.mode,
-                        detail: st.detail,
-                      }))
-                      if (compassWaypoints.length > 0) {
-                        compassWaypoints[compassWaypoints.length - 1].lat = parseFloat(r.to_lat)
-                        compassWaypoints[compassWaypoints.length - 1].lng = parseFloat(r.to_lng)
-                      }
-                      const wpParam = encodeURIComponent(JSON.stringify(compassWaypoints))
-                      transitBtns = (
-                        <div className="d-flex gap-1 mt-1 flex-wrap">
-                          <a className="btn btn-sm btn-outline-danger py-0" target="_blank" rel="noopener noreferrer"
-                            href={`https://www.google.co.kr/maps/dir/${fromLat},${fromLng}/${toLat},${toLng}/data=${dataParam}`}>🌐Google</a>
-                          <a className="btn btn-sm btn-outline-info py-0" target="_blank" rel="noopener noreferrer"
-                            href={`https://map.naver.com/p/directions/${r.from_lng},${r.from_lat},${dl}/${r.to_lng},${r.to_lat},${al}/-/transit`}>🗺️네이버</a>
-                          <a className="btn btn-sm btn-outline-success py-0" target="_blank" rel="noopener noreferrer"
-                            href={`https://map.kakao.com/link/by/traffic/${dl},${r.from_lat},${r.from_lng}/${al},${r.to_lat},${r.to_lng}`}>📱카카오</a>
-                          <a className="btn btn-sm btn-outline-primary py-0" target="_blank" rel="noopener noreferrer"
-                            href={`/compass?popup=1&lat=${r.to_lat}&lng=${r.to_lng}&name=${encodeURIComponent(s.title || '목적지')}&waypoints=${wpParam}`}>🧭나침반</a>
-                        </div>
+                      return (
+                        <span style={{ display: 'inline-block', background: color, color: '#fff', borderRadius: 999,
+                          padding: '3px 14px', fontSize: 12, fontWeight: 700 }}>{n}</span>
                       )
                     }
+                    const busBadge = (no: string) => (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, background: '#3b7cdd',
+                        color: '#fff', borderRadius: 8, padding: '2px 9px', fontSize: 12, fontWeight: 700 }}>
+                        <span style={{ fontSize: 13 }}>🚌</span>
+                        {(no || '').replace(/[^0-9\-]/g, '')}
+                      </span>
+                    )
+                    const trainBadge = (name: string) => (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: '#2C3E50',
+                        color: '#fff', borderRadius: 999, padding: '2px 12px', fontSize: 12, fontWeight: 700 }}>
+                        <span style={{ fontSize: 14 }}>🚄</span>
+                        {stripRegion(name)}
+                      </span>
+                    )
+                    const modeBadge = (st: any) => {
+                      const mode = st.mode || ''
+                      const nm = st.subway_name || ''
+                      if (mode.includes('자전거')) return <span style={{ fontSize: 20 }}>🚲</span>
+                      if (mode.includes('택시')) return <span style={{ fontSize: 20 }}>🚕</span>
+                      if (mode.includes('도보')) return <span style={{ fontSize: 20, color: '#6c757d' }}>🚶</span>
+                      if (mode.includes('버스')) return busBadge(st.bus_no)
+                      if (isTrain(mode) || isTrain(nm)) return trainBadge(nm || (st.detail || '').split(' ')[0] || '기차')
+                      if (mode.includes('지하철') || mode.includes('전철')) return railBadge(nm || (st.detail || '').split(' ')[0] || '전철')
+                      return railBadge(nm || st.mode || '')
+                    }
+                    const startName = s.departure_location || '출발'
+                    const destName = s.return_location || s.location || '도착'
+                    const nodes: any[] = []
+                    let lastPlace = ''
+                    steps.forEach((st: any, i: number) => {
+                      const fromName = st.from || (i > 0 ? steps[i - 1].to : startName)
+                      if (fromName && fromName !== lastPlace) { nodes.push({ kind: 'place', name: fromName }); lastPlace = fromName }
+                      nodes.push({ kind: 'badge', st })
+                      const toName = st.to || (i === steps.length - 1 ? destName : '')
+                      if (toName) { nodes.push({ kind: 'place', name: toName }); lastPlace = toName }
+                    })
+                    const lastNode = nodes[nodes.length - 1]
+                    const rows = nodes.map((nd: any, idx: number) => {
+                      if (nd.kind === 'badge') {
+                        return <div key={idx} className="d-flex justify-content-center py-1">{modeBadge(nd.st)}</div>
+                      }
+                      const isDest = lastNode && lastNode.kind === 'place' && idx === nodes.length - 1
+                      return (
+                        <div key={idx} className="d-flex justify-content-center py-1">
+                          <span style={{
+                            background: isDest ? '#d9f2e3' : '#fff',
+                            border: isDest ? '2px solid #28a745' : '1px solid #d7dde3',
+                            borderRadius: isDest ? 8 : 999,
+                            padding: isDest ? '4px 14px' : '2px 12px',
+                            fontSize: isDest ? 13 : 12, fontWeight: isDest ? 700 : 500,
+                            color: isDest ? '#155724' : '#3c4146',
+                          }}>{nd.name}{isDest && ' 📍'}</span>
+                        </div>
+                      )
+                    })
+                    const totalH = Math.floor(r.total_min / 60)
+                    const totalM = r.total_min % 60
+                    routeDetail = (
+                      <div className="mt-2 pt-2 border-top" style={{ background: '#f8f9fa', borderRadius: 10, padding: '0.5rem 0.75rem' }}>
+                        <div className="d-flex justify-content-between align-items-center mb-2">
+                          <small className="fw-bold">🕐 {r.departure || ''} 출발 → {r.arrival || ''} 도착</small>
+                          <small className="text-muted" style={{ fontSize: 11 }}>총 {totalH > 0 ? `${totalH}시간${totalM}분` : `${totalM}분`} · {r.distance_km}km</small>
+                        </div>
+                        {r.estimate && (
+                          <div className="badge bg-warning text-dark mb-1" style={{ fontSize: 10 }}>⚠ 정확 경로 미제공 (추정)</div>
+                        )}
+                        {rows.length > 0 ? rows : (
+                          <div className="text-muted" style={{ fontSize: 11 }}>{r.narrative || '경로 정보가 없습니다.'}</div>
+                        )}
+                      </div>
+                    )
                   } catch {}
                 }
+                const routeExpanded = expandedRoute === s.id
                 return (
                   <div key={s.id}>
                     <div className="card border-0 shadow-sm mb-1" style={{
@@ -286,6 +399,11 @@ export default function SchedulePage() {
                             {s.is_recurring && <span className="badge bg-light text-dark ms-1" style={{ fontSize: '0.65rem' }}>🔄</span>}
                           </div>
                           <div className="d-flex gap-1">
+                            {isTransit && (
+                              <button className="btn btn-sm btn-outline-secondary py-0 px-1" onClick={() => setExpandedRoute(routeExpanded ? null : s.id)}>
+                                {routeExpanded ? '▴ 상세 닫기' : '▾ 상세보기'}
+                              </button>
+                            )}
                             <button className="btn btn-sm btn-outline-secondary py-0 px-1" onClick={() => openEdit(s)}>✏️</button>
                             <button className="btn btn-sm btn-outline-danger py-0 px-1" onClick={() => deleteClick(s.id)}>🗑️</button>
                           </div>
@@ -300,6 +418,7 @@ export default function SchedulePage() {
                           <div className="small text-muted mt-1" style={{ whiteSpace: 'pre-wrap' }} dangerouslySetInnerHTML={{ __html: (s.description || s.memo || '').replace(/\n/g, '<br>') }} />
                         )}
                         {transitBtns}
+                        {routeExpanded && routeDetail}
                       </div>
                     </div>
 

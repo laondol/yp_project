@@ -230,9 +230,23 @@ def odsay_transit(from_lat, from_lng, to_lat, to_lng, api_key, arrival_min=None)
         t = sp.get("trafficType")
         sec = sp.get("sectionTime") or 0
         dist = sp.get("distance") or 0
+        s_lat, s_lng, e_lat, e_lng = None, None, None, None
+        try:
+            s_lng, s_lat = float(sp.get("startX")), float(sp.get("startY"))
+        except (TypeError, ValueError):
+            pass
+        try:
+            e_lng, e_lat = float(sp.get("endX")), float(sp.get("endY"))
+        except (TypeError, ValueError):
+            pass
+        _coords = {}
+        if s_lat is not None and s_lng is not None:
+            _coords["from_lat"], _coords["from_lng"] = s_lat, s_lng
+        if e_lat is not None and e_lng is not None:
+            _coords["to_lat"], _coords["to_lng"] = e_lat, e_lng
         if t == 3:
             steps.append({"mode": "🚶 도보", "from": "", "to": "",
-                          "detail": f"도보 {sec}분 ({round(dist/1000,1)}km)", "time_min": sec})
+                          "detail": f"도보 {sec}분 ({round(dist/1000,1)}km)", "time_min": sec, **_coords})
         elif t == 1:
             lane = (sp.get("lane") or [{}])[0]
             name = lane.get("name") or ""
@@ -240,16 +254,32 @@ def odsay_transit(from_lat, from_lng, to_lat, to_lng, api_key, arrival_min=None)
             end = sp.get("endName") or ""
             steps.append({"mode": "🚄 지하철", "from": start, "to": end,
                           "detail": f"{name} {start}→{end} ({sec}분, {sp.get('stationCount',0)}정거장)",
-                          "time_min": sec, "subway_name": name})
+                          "time_min": sec, "subway_name": name, **_coords})
         elif t == 2:
             lane = (sp.get("lane") or [{}])[0]
             name = lane.get("name") or lane.get("busNo") or ""
             start = sp.get("startName") or ""
             end = sp.get("endName") or ""
             steps.append({"mode": "🚌 버스", "from": start, "to": end,
-                          "detail": f"{name} {start}→{end} ({sec}분)", "time_min": sec, "bus_no": name})
+                          "detail": f"{name} {start}→{end} ({sec}분)", "time_min": sec, "bus_no": name, **_coords})
         else:
-            steps.append({"mode": "🚉 기타", "from": "", "to": "", "detail": f"{sec}분", "time_min": sec})
+            steps.append({"mode": "🚉 기타", "from": "", "to": "", "detail": f"{sec}분", "time_min": sec, **_coords})
+    # ODSay는 도보 구간에 좌표를 주지 않으므로 인접 단계/전체 출발·도착 좌표에서 파생
+    for i, st in enumerate(steps):
+        if "도보" not in st.get("mode", ""):
+            continue
+        if "from_lat" not in st:
+            prev_to = steps[i - 1].get("to_lat") if i > 0 else None
+            if prev_to is not None:
+                st["from_lat"], st["from_lng"] = steps[i - 1]["to_lat"], steps[i - 1]["to_lng"]
+            else:
+                st["from_lat"], st["from_lng"] = float(from_lat), float(from_lng)
+        if "to_lat" not in st:
+            nxt_from = steps[i + 1].get("from_lat") if i < len(steps) - 1 else None
+            if nxt_from is not None:
+                st["to_lat"], st["to_lng"] = steps[i + 1]["from_lat"], steps[i + 1]["from_lng"]
+            else:
+                st["to_lat"], st["to_lng"] = float(to_lat), float(to_lng)
     _odsay_cache_set(from_lat, from_lng, to_lat, to_lng, steps, total_min, round(info.get("pointDistance", 0)/1000, 1))
     dep_min = (arrival_min - total_min) if arrival_min is not None else 0
     return {"steps": steps, "total_min": total_min,
