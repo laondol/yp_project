@@ -206,12 +206,13 @@ def _ensure_day_routes(uid, evt_date, exclude_ids=None):
     naver_secret = current_app.config.get('NAVER_CLIENT_SECRET', os.getenv('NAVER_CLIENT_SECRET', ''))
     odsay_key = os.getenv('ODSAY_API_KEY', current_app.config.get('ODSAY_API_KEY', ''))
     google_key = os.getenv('GOOGLE_MAPS_API_KEY', current_app.config.get('GOOGLE_MAPS_API_KEY', ''))
-    # Remove existing 이동/귀가 for this day
+# Remove existing 이동/귀가 for this day (사용자가 수동 편집한 custom_route는 보호)
     q = TongBotSchedule.query.filter(
         TongBotSchedule.user_id == uid,
         TongBotSchedule.event_date >= day_start,
         TongBotSchedule.event_date <= day_end,
-        or_(TongBotSchedule.title.like('%이동%'), TongBotSchedule.title.like('%귀가%'))
+        or_(TongBotSchedule.title.like('%이동%'), TongBotSchedule.title.like('%귀가%')),
+        or_(TongBotSchedule.kind == None, TongBotSchedule.kind != 'custom_route')
     )
     if exclude_ids:
         q = q.filter(TongBotSchedule.id.notin_(exclude_ids))
@@ -278,6 +279,20 @@ def _ensure_day_routes(uid, evt_date, exclude_ids=None):
 
     if not events and not all_day_events: return []
     auto_created = []
+    # 사용자가 수동 편집한 custom_route: 같은 날짜·같은 목적지면 새 경로 생성을 건너뜀
+    custom_routes = TongBotSchedule.query.filter(
+        TongBotSchedule.user_id == uid,
+        TongBotSchedule.kind == 'custom_route',
+        TongBotSchedule.event_date >= day_start,
+        TongBotSchedule.event_date <= day_end,
+    ).all()
+    custom_move_locs = { (cr.return_location or '').strip() for cr in custom_routes }
+    # 귀가 custom_route: '(출발위치) → (귀가목적지)' 세트
+    custom_return_keys = {
+        ( (cr.departure_location or '').strip(), (cr.return_location or '').strip() )
+        for cr in custom_routes
+        if getattr(cr, 'title', '') and ('귀가' in (cr.title or '') or cr.title == '집으로 이동')
+    }
     prev_location = home_addr
     prev_lat, prev_lng = home_lat, home_lng
     prev_end_dt = None
@@ -298,6 +313,12 @@ def _ensure_day_routes(uid, evt_date, exclude_ids=None):
         else:
             from_time = prev_location
             from_lat, from_lng = prev_lat, prev_lng
+        # 사용자가 수동 편집한 custom_route가 같은 목적지로 존재하면 재생성 스킵
+        if (evt.location or '').strip() in custom_move_locs:
+            prev_location = evt.location
+            prev_lat, prev_lng = loc_lat, loc_lng
+            prev_end_dt = evt.end_date or (evt_start + timedelta(hours=1))
+            continue
         plan_to = plan_segment(from_time, from_lat, from_lng, evt.location, loc_lat, loc_lng,
             arr_dt.strftime("%H:%M"), home_town=user.town or '', home_village=user.village or '',
             naver_id=naver_id, naver_secret=naver_secret, odsay_key=odsay_key, google_key=google_key)
@@ -319,8 +340,10 @@ def _ensure_day_routes(uid, evt_date, exclude_ids=None):
         prev_location = evt.location
         prev_lat, prev_lng = loc_lat, loc_lng
         prev_end_dt = evt.end_date or (evt_start + timedelta(hours=1))
-    # 귀가: 이동 일정이 하나라도 만들어졌을 때만 생성
-    if auto_created:
+    # 귀가: 이동 일정(자동 또는 사용자 custom_route)이 하나라도 존재할 때만 생성
+    # (custom_route로 이동이 보호되어 auto_created가 비어있어도 귀가는 생성)
+    has_move = bool(auto_created) or bool(custom_move_locs)
+    if has_move:
         all_events = sorted(events + all_day_events, key=lambda e: e.event_date)
         if all_events:
             last_evt = all_events[-1]
@@ -341,6 +364,10 @@ def _ensure_day_routes(uid, evt_date, exclude_ids=None):
                         return_title = "임시숙소로 이동"
                         return_dest = f"[임시] {user.temp_address}"
                         return_lat, return_lng = user.temp_latitude, user.temp_longitude
+            if not skip_return and last_lat and last_lng and return_lat and return_lng:
+                # 사용자가 수동 편집한 귀가 custom_route가 같은 구간으로 존재하면 재생성 스킵
+                if ( (last_loc or '').strip(), (return_dest or '').strip() ) in custom_return_keys:
+                    skip_return = True
             if not skip_return and last_lat and last_lng and return_lat and return_lng:
                 target_arrival = "22:00"
                 plan_home = plan_segment(last_loc, last_lat, last_lng, return_dest, return_lat, return_lng, target_arrival,
@@ -387,9 +414,10 @@ def _ensure_day_routes(uid, evt_date, exclude_ids=None):
     return auto_created
 
 
-def recalc_user_routes(uid, commit=True):
-    """사용자의 모든 이동/귀가 경로를 현재 일정 기준으로 재계산·저장.
-    핸들러 / 백그라운드 워커가 공유하는 단일 엔트리 포인트.
+def recalc_user_routes(uid, commit=True, only_dirty=True):
+    """사용자의 이동/귀가 경로를 현재 일정 기준으로 재계산·저장.
+    기본 동작: route_dirty=True 인 모일정이 있는 날짜만 재계산 후 플래그 해제.
+    only_dirty=False 이면 전체 날짜 재계산(초기 구축/수동 강제용).
     commit=False 이면 세션만 flush 하고 커밋하지 않음(검증/트랜잭션 제어용)."""
     sources = TongBotSchedule.query.filter(
         TongBotSchedule.user_id == uid,
@@ -402,21 +430,45 @@ def recalc_user_routes(uid, commit=True):
             TongBotSchedule.kind == 'occurrence')
     ).all()
     days = set()
-    for s in sources:
-        if not s.event_date:
-            continue
-        days.add(s.event_date.date())
-        for occ in _gen_occurrences(s):
-            days.add(occ if hasattr(occ,'year') and not hasattr(occ,'hour') else occ.date())
-    # 기존 이동/귀가 전체 삭제 후 재생성 (정합성 보장)
-    TongBotSchedule.query.filter(
-        TongBotSchedule.user_id == uid,
-        or_(TongBotSchedule.kind == None, TongBotSchedule.kind == 'route'),
-        or_(TongBotSchedule.title.like('%이동%'), TongBotSchedule.title.like('%귀가%'))
-    ).delete(synchronize_session=False)
-    db.session.flush()
+    if only_dirty:
+        # dirty 인 모일정(또는 발생 템플릿)만 대상 날짜 수집
+        for s in sources:
+            if s.route_dirty:
+                if not s.event_date:
+                    continue
+                days.add(s.event_date.date())
+                for occ in _gen_occurrences(s):
+                    days.add(occ if hasattr(occ,'year') and not hasattr(occ,'hour') else occ.date())
+    else:
+        for s in sources:
+            if not s.event_date:
+                continue
+            days.add(s.event_date.date())
+            for occ in _gen_occurrences(s):
+                days.add(occ if hasattr(occ,'year') and not hasattr(occ,'hour') else occ.date())
+    if not days:
+        return 0
+    # 대상 날짜의 이동/귀가만 재생성 (custom_route(사용자 편집)는 보호)
     for d in sorted(days):
         _ensure_day_routes(uid, datetime(d.year, d.month, d.day))
+    if only_dirty:
+        # 처리 완료한 dirty 플래그 해제
+        for s in sources:
+            if s.route_dirty:
+                s.route_dirty = False
+    if commit:
+        db.session.commit()
+    return len(days)
+
+
+def recalc_user_days(uid, days, commit=True):
+    """지정된 날짜들에 대해서만 이동/귀가 경로를 재계산·저장.
+    모일정이 삭제됐을 때 해당 날짜의 잔여 이동/귀가를 정리하기 위한 헬퍼."""
+    for d in sorted(days):
+        if hasattr(d, 'year') and not hasattr(d, 'hour'):
+            _ensure_day_routes(uid, datetime(d.year, d.month, d.day))
+        else:
+            _ensure_day_routes(uid, d)
     if commit:
         db.session.commit()
     return len(days)

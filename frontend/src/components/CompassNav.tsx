@@ -17,6 +17,9 @@ const METERS_PER_RING = 10
 const MIN_RINGS = 3
 const ARRIVAL_THRESHOLD = 3
 const LS_KEY = 'compass_dest'
+const TILE_SIZE = 256
+const MAP_MAX_ZOOM = 19
+const MAP_MIN_ZOOM = 13
 
 export default function CompassNav({ destLat, destLng, destName, waypoints, onClose, onChangeDest }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -28,6 +31,9 @@ export default function CompassNav({ destLat, destLng, destName, waypoints, onCl
   const [posError, setPosError] = useState('')
   const [isOnline, setIsOnline] = useState(navigator.onLine)
   const [stepIndex, setStepIndex] = useState(0)
+  const [pos, setPos] = useState<{ lat: number; lng: number } | null>(null)
+  const [mapZoom, setMapZoom] = useState(15)
+  const tileCacheRef = useRef<Record<string, HTMLImageElement>>({})
   const watchId = useRef<number | null>(null)
   const animFrame = useRef<number>(0)
   const seekDoneRef = useRef(false)
@@ -117,6 +123,14 @@ export default function CompassNav({ destLat, destLng, destName, waypoints, onCl
         const b = calcBearing(lat, lng, target.lat, target.lng)
         setDistance(d)
         setBearing(b)
+        setPos({ lat, lng })
+        // 목적지에 가까워질수록 지도 배율(zoom)이 비례해서 증가.
+        // 화면 반경 반지름을 ~160px로 가정하고, 목적지가 그 반지름에 맞도록 zoom 산출.
+        const visHalfPx = 160
+        const mpp = Math.max(d, 8) / visHalfPx
+        const zRaw = Math.log2(156543.03392 * Math.cos(lat * Math.PI / 180) / mpp)
+        const z = Math.min(MAP_MAX_ZOOM, Math.max(MAP_MIN_ZOOM, Math.round(zRaw)))
+        setMapZoom(prev => (Math.abs(prev - z) >= 1 ? z : prev))
         setPosError('')
 
         if (d < ARRIVAL_THRESHOLD) {
@@ -161,6 +175,59 @@ export default function CompassNav({ destLat, destLng, destName, waypoints, onCl
 
       ctx.clearRect(0, 0, side, side)
 
+      // heading-up 모드: 폰 정면(heading)이 화면 위로 오도록 세계 좌표를 회전.
+      // 세계의 회전각이 N 인디케이터와 같아 실제 북쪽(지도 위쪽)이 항상 N과 일치한다.
+      // ---- 지도 배경: 현재 위치 중심, north-up 고정 (회전하지 않음) ----
+      // 목적지 마커 좌표를 먼저 계산 (지도 위 실제 위치 → 스크린 좌표)
+      let markerX = NaN
+      let markerY = NaN
+      if (pos) {
+        const z = mapZoom
+        const n = 2 ** z
+        const latRad = pos.lat * Math.PI / 180
+        const worldX = (pos.lng + 180) / 360 * n * TILE_SIZE
+        const worldY = (1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2 * n * TILE_SIZE
+
+        // 목적지는 지도 위 실제 좌표 (절대 위치) → north-up 스크린 좌표로 환산
+        const dlatRad = current.lat * Math.PI / 180
+        const destWorldX = (current.lng + 180) / 360 * n * TILE_SIZE
+        const destWorldY = (1 - Math.log(Math.tan(dlatRad) + 1 / Math.cos(dlatRad)) / Math.PI) / 2 * n * TILE_SIZE
+        const ox = destWorldX - worldX
+        const oy = destWorldY - worldY
+        markerX = cw + ox
+        markerY = ch + oy
+
+        // 화면상 필요한 타일 범위 (지도는 회전하지 않으므로 화면 크기만큼)
+        const tilesAcross = Math.ceil(side / TILE_SIZE) + 2
+        const startX = Math.floor((worldX - cw) / TILE_SIZE)
+        const startY = Math.floor((worldY - ch) / TILE_SIZE)
+        for (let ty = startY; ty < startY + tilesAcross; ty++) {
+          for (let tx = startX; tx < startX + tilesAcross; tx++) {
+            const xt = ((tx % n) + n) % n
+            const yt = Math.max(0, Math.min(n - 1, ty))
+            const key = `${z}/${xt}/${yt}`
+            let img = tileCacheRef.current[key]
+            if (!img) {
+              img = new Image()
+              img.crossOrigin = 'anonymous'
+              img.src = `https://tile.openstreetmap.org/${z}/${xt}/${yt}.png`
+              tileCacheRef.current[key] = img
+            }
+            if (img && img.complete && img.naturalWidth > 0) {
+              const px = tx * TILE_SIZE - worldX + cw
+              const py = ty * TILE_SIZE - worldY + ch
+              ctx.drawImage(img, px, py, TILE_SIZE, TILE_SIZE)
+            }
+          }
+        }
+
+        // 지도 위 반투명 반경 표시 (가독성 유지)
+        ctx.fillStyle = 'rgba(255,255,255,0.35)'
+        ctx.beginPath()
+        ctx.arc(cw, ch, maxRadius, 0, Math.PI * 2)
+        ctx.fill()
+      }
+
       const rings = Math.max(MIN_RINGS, Math.ceil(distance / METERS_PER_RING))
       const ringSpacing = maxRadius / rings
 
@@ -199,10 +266,10 @@ export default function CompassNav({ destLat, destLng, destName, waypoints, onCl
       ctx.textAlign = 'center'
       ctx.fillText(`${METERS_PER_RING}m`, cw, ch - ringSpacing - 2)
 
-      // 목적지 마커는 절대 방위각(bearing) 기준 고정 (헤딩과 무관하게 멈춰 있음)
-      const destAngle = toRad(bearing)
-      const dx = cw + Math.sin(destAngle) * maxRadius
-      const dy = ch - Math.cos(destAngle) * maxRadius
+      // 목적지 마커는 지도 위 실제 위치(markerX, markerY) 기준 고정.
+      // 이 좌표는 회전 변환을 적용해 계산했으므로 헤딩과 무관하게 지도 위 그 자리에 멈춰 있음.
+      const dx = Number.isFinite(markerX) ? markerX : cw
+      const dy = Number.isFinite(markerY) ? markerY : ch
 
       const markerColor = isLastStep ? '#dc3545' : '#ffc107'
       ctx.beginPath()
@@ -219,29 +286,38 @@ export default function CompassNav({ destLat, destLng, destName, waypoints, onCl
       ctx.textBaseline = 'middle'
       ctx.fillText(isLastStep ? '★' : `${stepIndex + 1}`, dx, dy)
 
-      ctx.fillStyle = 'rgba(0,0,0,0.6)'
-      ctx.font = 'bold 11px sans-serif'
-      ctx.textAlign = 'center'
-      ctx.textBaseline = 'top'
-      ctx.fillText(formatDistance(distance), dx, dy + 14)
-
-      // 북쪽(N) 인디케이터는 헤딩에 따라 회전 (가운데가 움직임)
-      const northAngle = toRad(-heading)
-      const nx = cw + Math.sin(northAngle) * (maxRadius - 16)
-      const ny = ch - Math.cos(northAngle) * (maxRadius - 16)
+      // 지도는 north-up 고정이므로 북쪽(N)은 항상 화면 위쪽.
+      const nTop = ch - (maxRadius - 16)
 
       ctx.strokeStyle = 'rgba(220, 53, 69, 0.9)'
-      ctx.lineWidth = 3
+      ctx.lineWidth = 2
       ctx.beginPath()
-      ctx.moveTo(cw, ch)
-      ctx.lineTo(nx, ny)
+      ctx.moveTo(cw, ch - 10)
+      ctx.lineTo(cw, nTop + 4)
       ctx.stroke()
 
       ctx.fillStyle = '#dc3545'
       ctx.font = 'bold 12px sans-serif'
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
-      ctx.fillText('N', nx, ny)
+      ctx.fillText('N', cw, nTop)
+
+      // 폰이 북을 기준으로 어느 방향을 향하는지(heading) 바늘로 표시.
+      // north-up 지도에서 heading=0 이면 화면 위쪽(북), heading 만큼 시계방향 회전.
+      const headAngle = toRad(heading)
+      const hl = maxRadius * 0.4
+
+      ctx.save()
+      ctx.translate(cw, ch)
+      ctx.rotate(headAngle)
+      ctx.beginPath()
+      ctx.moveTo(0, -hl)
+      ctx.lineTo(-6, 6)
+      ctx.lineTo(6, 6)
+      ctx.closePath()
+      ctx.fillStyle = 'rgba(0, 123, 255, 0.8)'
+      ctx.fill()
+      ctx.restore()
 
       ctx.beginPath()
       ctx.arc(cw, ch, 8, 0, Math.PI * 2)

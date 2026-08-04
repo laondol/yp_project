@@ -6,12 +6,82 @@ from services.geo import _geocode_location
 from services.route_recalc import _ensure_day_routes
 from services.route_recalc import _is_occurrence, _gen_occurrences
 from services.route_recalc import recalc_user_routes
+from services.route_recalc import recalc_user_days
 from services.route_worker import enqueue_recalc
 from services.rag import build_context
 from datetime import datetime, timezone, timedelta, timezone
 import os, uuid
 
 tongbot_bp = Blueprint('tongbot', __name__)
+
+def _normalize_mode(mode):
+    """메모 파싱에서 나온 이동수단을 프론트 배지와 일치하는 표기로 변환"""
+    m = (mode or '').lower()
+    if any(k in m for k in ['자전거', 'bike', '자전']): return '🚲 자전거'
+    if any(k in m for k in ['택시', 'taxi']): return '🚕 택시'
+    if any(k in m for k in ['걸어', '도보', 'walk', '걷']): return '🚶 도보'
+    if any(k in m for k in ['버스', 'bus']): return '🚌 버스'
+    if any(k in m for k in ['기차', '열차', 'ktx', 'srt', '무궁화', '새마을', '고속철']): return '🚄 기차'
+    if any(k in m for k in ['지하철', '전철', '지하', 'subway', 'metro']): return '🚄 지하철'
+    return '🚌 버스'
+
+def _groq_json(prompt, key, system=''):
+    """Groq 호출 후 첫 JSON 배열/객체 반환. 실패 시 None"""
+    import re as _re
+    try:
+        resp = requests.post('https://api.groq.com/openai/v1/chat/completions',
+            headers={'Authorization': f'Bearer {key}', 'Content-Type': 'application/json'},
+            json={'model': 'llama-3.1-8b-instant',
+                  'messages': [{'role': 'system', 'content': system} for system in ([system] if system else [])] +
+                              [{'role': 'user', 'content': prompt}],
+                  'temperature': 0.1, 'max_tokens': 2000}, timeout=20)
+        ai_text = resp.json()['choices'][0]['message']['content'].strip()
+        m = _re.search(r'\[.*\]|\{.*\}', ai_text, _re.DOTALL)
+        if not m:
+            return None
+        return json.loads(m.group())
+    except Exception:
+        return None
+
+
+def _parse_memo_to_steps(memo, title, origin_hint, dest_hint):
+    """AI로 자연어 메모를 steps 배열로 파싱. 실패 시 None"""
+    groq_key = current_app.config.get('GROQ_API_KEY', os.getenv('GROQ_API_KEY', ''))
+    if not groq_key:
+        return None
+    system = ("당신은 이동 경로를 분석하는 도우미입니다. 사용자가 적은 이동 메모에서 이동수단별 구간을 추출합니다. "
+              "출력은 반드시 JSON 배열이어야 하며, 배열 항목은 {\"mode\":\"도보|버스|지하철|기차|택시|자전거\","
+              "\"from\":\"출발장소\",\"to\":\"도착장소\",\"time_min\":숫자,\"detail\":\"한줄설명\","
+              "\"subway_name\":\"노선명/공백\",\"bus_no\":\"버스번호/공백\"} 형식입니다. "
+              "도보/버스/지하철/기차만 사용하고, 추정은 숫자로 기재하세요. JSON 외의 문구는 출력하지 마세요.")
+    prompt = (
+        f"메모: {memo or ''}\n"
+        f"일정 제목: {title or ''}\n"
+        f"출발지 힌트: {origin_hint or ''}, 도착지 힌트: {dest_hint or ''}\n"
+        "위 내용에서 이동 구간을 순서대로 JSON 배열로 추출하세요. 이동 수단·장소·소요시간을 보다 정확히."
+    )
+    return _groq_json(prompt, groq_key, system)
+
+
+def _memo_narrative(steps, dest_name):
+    """steps로부터 사용자가 저장한 narrative 재구성"""
+    parts = []
+    cur = ''
+    for st in steps:
+        fm = st.get('from') or cur
+        to = st.get('to') or ''
+        dur = st.get('time_min') or 0
+        nm = st.get('mode') or ''
+        cur = to or cur
+        if '도보' in nm: parts.append(f"{fm}에서 {dur}분 걸어서")
+        elif '버스' in nm: parts.append(f"{fm}에서 {st.get('bus_no') or '버스'}를 타고 {dur}분 가서 {to}에서 내려서")
+        elif '기차' in nm: parts.append(f"{fm}에서 {st.get('subway_name') or '기차'}를 타고 {dur}분 가서 {to}역에서 내려서")
+        elif '지하철' in nm: parts.append(f"{fm}에서 {st.get('subway_name') or '지하철'}으로 지하철을 타고 {dur}분 가서 {to}역에서 내려서")
+        elif '택시' in nm: parts.append(f"{fm}에서 택시를 타고 {dur}분 가서 {to}에 도착해서")
+        elif '자전거' in nm: parts.append(f"{fm}에서 자전거를 타고 {dur}분 가서 {to}에 도착해서")
+        else: parts.append(f"{fm}에서 {dur}분 이동해서 {to}에 도착해서")
+    return f"{' '.join(parts)} {dest_name}입니다."
+
 
 def _serve_spa():
     import os
@@ -1221,8 +1291,8 @@ def _search_shopping(query):
     """네이버 쇼핑 검색 + 최저/최고가"""
     try:
         # 검색API 전용키 우선, 없으면 config 기본값
-        ncid = os.getenv('NAVER_SEARCH_CLIENT_ID','') or 'Vi403Ckfdg8NGRPDfBin'
-        ncsec = os.getenv('NAVER_SEARCH_CLIENT_SECRET','') or 'bepKiJZvWx'
+        ncid = os.getenv('NAVER_SEARCH_CLIENT_ID','')
+        ncsec = os.getenv('NAVER_SEARCH_CLIENT_SECRET','')
         if not ncid:
             return None
         resp = requests.get('https://openapi.naver.com/v1/search/shop.json', params={
@@ -1783,6 +1853,10 @@ def bot_schedule():
         s.return_time = datetime.fromisoformat(data['return_time']) if data['return_time'] else None
     db.session.add(s)
     db.session.flush()
+    # 모일정 생성: 이동/귀가 재생성이 필요함을 표시
+    is_move_created = '이동' in (data.get('title') or '') or '귀가' in (data.get('title') or '')
+    if not is_move_created:
+        s.route_dirty = True
 
     db.session.commit()
     enqueue_recalc(uid)
@@ -2091,7 +2165,12 @@ def bot_schedule_update():
     if data.get('title'): s.title = data['title']
     if data.get('location') is not None: s.location = data['location']
     if data.get('description'): s.description = data['description']
-    if data.get('memo'): s.memo = data['memo']
+    memo_changed = data.get('memo') is not None and data.get('memo') != s.memo
+    if 'memo' in data:
+        s.memo = data['memo'] or ''
+    # 사용자가 이동/귀가 일정의 메모(경로)를 직접 편집하면 자동 재생성 대상에서 제외
+    if memo_changed and is_move_event and s.kind == 'route':
+        s.kind = 'custom_route'
     if data.get('departure_location') is not None: s.departure_location = data['departure_location']
     if data.get('return_location') is not None: s.return_location = data['return_location']
     if data.get('event_date'):
@@ -2127,6 +2206,41 @@ def bot_schedule_update():
         s.repeat_infinite = False
         s.repeat_end_date = None
     db.session.commit()
+    parsed = False
+    if is_move_event and memo_changed and s.memo:
+        try:
+            ai_steps = _parse_memo_to_steps(s.memo, s.title, s.departure_location or '', s.return_location or s.location or '')
+            if ai_steps and isinstance(ai_steps, list) and ai_steps:
+                steps = []
+                for st in ai_steps:
+                    if not isinstance(st, dict): continue
+                    mode = _normalize_mode(st.get('mode', ''))
+                    steps.append({
+                        'mode': mode,
+                        'from': st.get('from') or '',
+                        'to': st.get('to') or '',
+                        'time_min': max(0, int(float(st.get('time_min', 0) or 0))),
+                        'detail': st.get('detail') or '',
+                        'subway_name': st.get('subway_name') or '',
+                        'bus_no': st.get('bus_no') or '',
+                    })
+                if steps:
+                    total = sum(x['time_min'] for x in steps)
+                    dest_name = s.return_location or s.location or '목적지'
+                    narrative = _memo_narrative(steps, dest_name)
+                    route_data = json.loads(s.content) if s.content else {}
+                    route_data['steps'] = steps
+                    route_data['total_min'] = total
+                    route_data['narrative'] = narrative
+                    route_data.pop('estimate', None)
+                    route_data.pop('from_lat', None); route_data.pop('from_lng', None)
+                    route_data.pop('to_lat', None); route_data.pop('to_lng', None)
+                    s.content = json.dumps(route_data, ensure_ascii=False)
+                    s.description = narrative
+                    parsed = True
+        except Exception:
+            parsed = False
+    db.session.commit()
     if not is_move_event:
         new_date = s.event_date
         new_loc = s.location
@@ -2135,13 +2249,16 @@ def bot_schedule_update():
         date_changed = data.get('event_date') is not None and new_date != old_date
         end_changed = data.get('end_date') is not None and new_end != old_end
         if loc_changed or date_changed or end_changed or (old_is_recurring != s.is_recurring) or (old_repeat_type != s.repeat_type) or (old_repeat_weekdays != s.repeat_weekdays) or (old_repeat_wom != s.repeat_week_of_month) or (old_repeat_moy != s.repeat_month_of_year) or (old_repeat_infinite != s.repeat_infinite) or (old_repeat_end != s.repeat_end_date):
+            # 모일정 변경: 이동/귀가 재생성이 필요함을 표시 후 백그라운드 재계산
+            s.route_dirty = True
+            db.session.commit()
             enqueue_recalc(uid)
     warning = None
     if s.location and not is_move_event:
         _lat, _lng = _geocode_location(s.location)
         if not (_lat and _lng):
             warning = "장소가 분명하지 않습니다"
-    return jsonify({"success": True, "warning": warning})
+    return jsonify({"success": True, "warning": warning, "route_parsed": parsed, "estimate": parsed})
 
 @tongbot_bp.route('/api/bot/schedule/delete', methods=['POST'])
 def bot_schedule_delete():
@@ -2198,11 +2315,23 @@ def bot_schedule_delete():
     _rec_moy = s.repeat_month_of_year
     _rec_infinite = s.repeat_infinite
     _rec_end = s.repeat_end_date
+    # 삭제 대상 날짜 수집 (모일정 삭제 시 해당 날짜의 잔여 이동/귀가 정리용)
+    _affected_days = set()
+    if evt_date:
+        _affected_days.add(evt_date.date())
+    if _was_recurring and evt_date:
+        try:
+            for _o in _gen_occurrences(s):
+                _a = _o if (hasattr(_o, 'year') and not hasattr(_o, 'hour')) else _o.date()
+                _affected_days.add(_a)
+        except Exception:
+            pass
     db.session.delete(s)
     db.session.flush()
     db.session.commit()
-    if not is_move:
-        enqueue_recalc(uid)
+    if not is_move and _affected_days:
+        # 해당 날짜들의 이동/귀가만 재계산 (모일정 제거 반영)
+        enqueue_recalc(uid, days=sorted(_affected_days))
     return jsonify({"success":True})
 
 @tongbot_bp.route('/schedule')
@@ -2210,11 +2339,7 @@ def bot_schedule_delete():
 def schedule_page():
     if not session.get('user_id'):
         return redirect(url_for('auth.login', next=request.path))
-    resp = make_response(render_template('schedule2.html'))
-    resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
-    resp.headers['Pragma'] = 'no-cache'
-    resp.headers['Expires'] = '0'
-    return resp
+    return _serve_spa()
 
 @tongbot_bp.route('/memo')
 def memo_page():
@@ -2747,9 +2872,46 @@ def bot_route_detail(schedule_id):
         try: route_data = json.loads(s.content)
         except: route_data = None
     evt = s.event_date.strftime("%Y-%m-%d %H:%M") if s.event_date else ""
-    return jsonify({"schedule":{"id":s.id,"title":s.title,"event_date":evt,
+    schedule_info = {"id":s.id,"title":s.title,"event_date":evt,
         "location":s.location,"departure_location":s.departure_location,
-        "return_location":s.return_location,"memo":s.memo,"description":s.description},"route":route_data})
+        "return_location":s.return_location,"memo":s.memo,"description":s.description}
+    # 기차/도보 구간에 실제 시각표·도보 정보 부여 (상세보기를 유용하게)
+    train_times = {}
+    walk_stops = {}
+    bus_stops = {}
+    if route_data and isinstance(route_data.get("steps"), list):
+        try:
+            from services.directions import next_trains_for_station, bus_stop_timetable
+            odsay_key = os.getenv('ODSAY_API_KEY', current_app.config.get('ODSAY_API_KEY', ''))
+            steps = route_data["steps"]
+            import datetime as _dt
+            now = _dt.datetime.now()
+            prev_walk_end = now.hour * 60 + now.minute
+            for i, step in enumerate(steps):
+                mode = step.get("mode", "")
+                if '도보' in mode:
+                    wdur = step.get("time_min") or 0
+                    walk_stops[i] = {"from": step.get("from") or "", "to": step.get("to") or "",
+                                     "time_min": wdur, "after_min": prev_walk_end}
+                    prev_walk_end += wdur
+                elif '지하철' in mode or '전철' in mode or '기차' in mode or '열차' in mode:
+                    board = step.get("from") or ""
+                    # 상행(서울/용산 방면) 탑승이라 가정, 도보 종착 시각 이후 기차 3대
+                    trains = next_trains_for_station(board, prev_walk_end, "up", odsay_key)
+                    train_times[i] = {"station": board, "to": step.get("to") or "",
+                                      "after_walk_min": prev_walk_end, "trains": trains or []}
+                elif '버스' in mode or 'BUS' in mode:
+                    stop = step.get("from") or ""
+                    dest = step.get("to") or ""
+                    if stop:
+                        info = bus_stop_timetable(stop, dest)
+                        if info:
+                            bus_stops[i] = {"stop": stop, "to": dest,
+                                            "after_walk_min": prev_walk_end, "info": info}
+        except Exception:
+            pass
+    return jsonify({"schedule":schedule_info, "route":route_data,
+                    "train_times":train_times, "walk_stops":walk_stops, "bus_stops":bus_stops})
 
 @tongbot_bp.route('/api/bot/route/<int:schedule_id>/save', methods=['POST'])
 def bot_route_save(schedule_id):
@@ -2761,12 +2923,21 @@ def bot_route_save(schedule_id):
     steps = data.get('steps',[])
     route_data = {"steps":steps,"total_min":data.get('total_min',0),"distance_km":data.get('distance_km',0),
                   "departure":data.get('departure',''),"arrival":data.get('arrival','')}
+    if data.get('narrative'): route_data["narrative"] = data['narrative']
+    if data.get('compact'): route_data["compact"] = data['compact']
+    if data.get('from_lat') is not None: route_data["from_lat"] = data['from_lat']
+    if data.get('from_lng') is not None: route_data["from_lng"] = data['from_lng']
+    if data.get('to_lat') is not None: route_data["to_lat"] = data['to_lat']
+    if data.get('to_lng') is not None: route_data["to_lng"] = data['to_lng']
+    if data.get('estimate'): route_data["estimate"] = True
     s.content = json.dumps(route_data, ensure_ascii=False)
     if data.get('title'): s.title = data['title']
     if data.get('departure_location'): s.departure_location = data['departure_location']
     if data.get('return_location'): s.return_location = data['return_location']
     db.session.commit()
     return jsonify({"success":True,"route":route_data})
+
+
 
 @tongbot_bp.route('/api/bot/route/<int:schedule_id>/share', methods=['POST'])
 def bot_route_share(schedule_id):

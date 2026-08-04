@@ -28,6 +28,9 @@ export default function SchedulePage() {
   const [editingId, setEditingId] = useState<number | string | null>(null)
   const [showDelModal, setShowDelModal] = useState<number | string | null>(null)
   const [expandedRoute, setExpandedRoute] = useState<number | string | null>(null)
+  const [liveDetail, setLiveDetail] = useState<Record<string, any>>({})
+  const [editRoute, setEditRoute] = useState<any>(null)
+  const [savingRoute, setSavingRoute] = useState(false)
   const [saving, setSaving] = useState(false)
   const formRef = useRef<HTMLDivElement>(null)
 
@@ -48,12 +51,35 @@ export default function SchedulePage() {
     try {
       const d = await fetch('/api/bot/schedule').then(r => r.json())
       setSchedules(Array.isArray(d.schedules) ? d.schedules : [])
+      const scheds: ScheduleItem[] = Array.isArray(d.schedules) ? d.schedules : []
+      scheds.forEach((s: ScheduleItem) => {
+        try {
+          const rc = JSON.parse(s.content || '{}')
+          const hasRail = Array.isArray(rc.steps) && rc.steps.some((st: any) => /지하철|전철|기차|열차/.test(st.mode || ''))
+          if (hasRail) {
+            fetch(`/api/bot/route/${s.id}`).then(r => r.json()).then(dd => {
+              setLiveDetail(prev => ({ ...prev, [String(s.id)]: dd }))
+            }).catch(() => {})
+          }
+        } catch {}
+      })
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : '불러오기 실패')
     } finally { setLoading(false) }
   }, [])
 
   useEffect(() => { load() }, [load])
+
+  const toggleLiveDetail = async (sid: number | string) => {
+    const nid = expandedRoute === sid ? null : sid
+    setExpandedRoute(nid)
+    if (nid !== null) {
+      try {
+        const d = await fetch(`/api/bot/route/${typeof sid === 'string' ? parseInt(sid.split('_')[0]) : sid}`).then(r => r.json())
+        setLiveDetail(prev => ({ ...prev, [String(sid)]: d }))
+      } catch {}
+    }
+  }
 
   const daysInMonth = new Date(year, month, 0).getDate()
   const firstDay = new Date(year, month - 1, 1).getDay()
@@ -124,7 +150,8 @@ export default function SchedulePage() {
       }
       if (editingId) {
         body.id = typeof editingId === 'string' ? parseInt(editingId.split('_')[0]) : editingId
-        await fetch('/api/bot/schedule/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json())
+        const r = await fetch('/api/bot/schedule/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json())
+        if (r && r.route_parsed) alert('✅ 메모를 바탕으로 이동 경로를 만들었습니다.')
       } else {
         await fetch('/api/bot/schedule', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json())
       }
@@ -222,17 +249,19 @@ export default function SchedulePage() {
               ) : dayScheds.map((s) => {
                 let transitBtns: React.ReactNode = null
                 let routeDetail: React.ReactNode = null
+                let summaryEl: React.ReactNode = null
                 let route = JSON.parse(s.content || 'null')
-                const isTransit = (s.title && (s.title.includes('이동') || s.title.includes('집으로'))) && route && route.from_lat && route.to_lat
+                const isTransit = (s.title && (s.title.includes('이동') || s.title.includes('집으로'))) && route && Array.isArray(route.steps) && route.steps.length > 0
                 if (isTransit) {
                   try {
                     const r = route
                     const dl = encodeURIComponent(s.departure_location || '출발')
                     const al = encodeURIComponent(s.return_location || s.location || '도착')
-                    const fromLat = parseFloat(r.from_lat).toFixed(7)
-                    const fromLng = parseFloat(r.from_lng).toFixed(7)
-                    const toLat = parseFloat(r.to_lat).toFixed(7)
-                    const toLng = parseFloat(r.to_lng).toFixed(7)
+                    const hasCoords = !!(r.from_lat && r.to_lat && r.from_lng && r.to_lng)
+                    const fromLat = hasCoords ? parseFloat(r.from_lat).toFixed(7) : ''
+                    const fromLng = hasCoords ? parseFloat(r.from_lng).toFixed(7) : ''
+                    const toLat = hasCoords ? parseFloat(r.to_lat).toFixed(7) : ''
+                    const toLng = hasCoords ? parseFloat(r.to_lng).toFixed(7) : ''
                     const ts = s.end_date || s.event_date
                     let arrTs = ''
                     if (ts) {
@@ -269,6 +298,7 @@ export default function SchedulePage() {
                     const wpParam = encodeURIComponent(JSON.stringify(compassWaypoints))
                     transitBtns = (
                       <div className="d-flex gap-1 mt-1 flex-wrap">
+                        {hasCoords && <>
                         <a className="btn btn-sm btn-outline-danger py-0" target="_blank" rel="noopener noreferrer"
                           href={`https://www.google.co.kr/maps/dir/${fromLat},${fromLng}/${toLat},${toLng}/data=${dataParam}`}>🌐Google</a>
                         <a className="btn btn-sm btn-outline-info py-0" target="_blank" rel="noopener noreferrer"
@@ -279,6 +309,7 @@ export default function SchedulePage() {
                           href={`/compass?popup=1&lat=${r.to_lat}&lng=${r.to_lng}&name=${encodeURIComponent(s.title || '목적지')}&waypoints=${wpParam}`}>
                           {hasWalk ? '🧭 도보 나침반' : '🧭나침반'}
                         </a>
+                        </>}
                       </div>
                     )
                     // 접이식 상세 도식 카드
@@ -349,13 +380,63 @@ export default function SchedulePage() {
                       if (toName) { nodes.push({ kind: 'place', name: toName }); lastPlace = toName }
                     })
                     const lastNode = nodes[nodes.length - 1]
+                    const ld = liveDetail[String(s.id)] || {}
+                    const stationTimes: Record<string, any[]> = {}
+                    Object.values(ld.train_times || {}).forEach((t: any) => {
+                      if (t && t.station && Array.isArray(t.trains)) {
+                        stationTimes[t.station] = t.trains
+                      }
+                    })
+                    const busStops: Record<string, any> = {}
+                    Object.values(ld.bus_stops || {}).forEach((b: any) => {
+                      if (b && b.stop) busStops[b.stop] = b
+                    })
+                    const stopInfoEl = (nm: string) => {
+                      const b = busStops[nm]
+                      if (!b) return null
+                      const info = b.info || {}
+                      const rt = info.realtime || []
+                      if (rt.length) {
+                        const reco = [...rt].sort((a: any, b: any) => ((b.recommended ? 1 : 0) - (a.recommended ? 1 : 0)))
+                        return (
+                          <div className="mt-1 small" style={{ fontSize: 10, color: '#495057', maxWidth: 280 }}>
+                            {reco.slice(0, 4).map((r: any, i: number) => (
+                              <span key={i} className="me-2" style={r.recommended ? { fontWeight: 700, color: '#c0392b' } : undefined}>
+                                🚌{r.route} {r.min}분 후{r.dest ? `(${r.dest})` : ''}{r.end ? '·막차' : ''}{r.recommended ? '·추천' : ''}
+                              </span>
+                            ))}
+                          </div>
+                        )
+                      }
+                      const lanes = info.lanes || []
+                      if (!lanes.length) return null
+                      const shown = lanes.slice(0, 4)
+                      return (
+                        <div className="mt-1 small" style={{ fontSize: 10, color: '#495057', maxWidth: 280 }}>
+                          {shown.map((l: any, i: number) => (
+                            <div key={i}>🚌 {l.busNo} {l.first}~{l.last}{l.interval && ` · ${l.interval}간격`}</div>
+                          ))}
+                        </div>
+                      )
+                    }
                     const rows = nodes.map((nd: any, idx: number) => {
                       if (nd.kind === 'badge') {
-                        return <div key={idx} className="d-flex justify-content-center py-1">{modeBadge(nd.st)}</div>
+                        const isRail = (nd.st.mode || '').match(/지하철|전철|기차|열차/)
+                        return (
+                          <div key={idx} className="d-flex flex-column align-items-center py-1">
+                            {modeBadge(nd.st)}
+                            {isRail && nd.st.car_advice && (
+                              <small style={{ fontSize: 10, color: '#7d5b0f', marginTop: 2, maxWidth: 260, textAlign: 'center' }}>
+                                🚃 {nd.st.car_advice}
+                              </small>
+                            )}
+                          </div>
+                        )
                       }
                       const isDest = lastNode && lastNode.kind === 'place' && idx === nodes.length - 1
+                      const tms = stationTimes[nd.name] || []
                       return (
-                        <div key={idx} className="d-flex justify-content-center py-1">
+                        <div key={idx} className="d-flex flex-column align-items-center py-1">
                           <span style={{
                             background: isDest ? '#d9f2e3' : '#fff',
                             border: isDest ? '2px solid #28a745' : '1px solid #d7dde3',
@@ -363,12 +444,52 @@ export default function SchedulePage() {
                             padding: isDest ? '4px 14px' : '2px 12px',
                             fontSize: isDest ? 13 : 12, fontWeight: isDest ? 700 : 500,
                             color: isDest ? '#155724' : '#3c4146',
-                          }}>{nd.name}{isDest && ' 📍'}</span>
+                          }}>{nd.name}{isDest && ' 📍'}{tms.map((t: any, ti: number) => (
+                            <span key={ti} className="ms-1" style={{ fontWeight: 700, fontSize: 11, color: t.express ? '#c0392b' : '#1f4e8c' }}>
+                              {t.time}{t.express ? '급' : ''}
+                            </span>
+                          ))}</span>
+                          {stopInfoEl(nd.name)}
                         </div>
                       )
                     })
                     const totalH = Math.floor(r.total_min / 60)
                     const totalM = r.total_min % 60
+                    const summaryRow = (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 3, overflowX: 'auto', whiteSpace: 'nowrap', paddingBottom: 2, fontSize: 0 }}>
+                        {nodes.map((nd: any, idx: number) => {
+                          if (nd.kind === 'badge') {
+                            return <span key={idx} style={{ display: 'inline-flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+                              {modeBadge(nd.st)}
+                              {nd.st.time_min > 0 && <small style={{ fontSize: 10, color: '#868e96' }}>{nd.st.time_min}분</small>}
+                            </span>
+                          }
+                          const isDest = lastNode && lastNode.kind === 'place' && idx === nodes.length - 1
+                          const tms = stationTimes[nd.name] || []
+                          const bstop = busStops[nd.name]
+                          const brt = bstop && bstop.info && (bstop.info.realtime || []).length
+                            ? [...(bstop.info.realtime || [])].sort((x: any, y: any) => ((y.recommended ? 1 : 0) - (x.recommended ? 1 : 0))).slice(0, 2)
+                            : []
+                          return (
+                            <span key={idx} style={{
+                              flexShrink: 0,
+                              background: isDest ? '#d9f2e3' : '#f1f3f5',
+                              border: isDest ? '1px solid #28a745' : '1px solid #dee2e6',
+                              borderRadius: 999,
+                              padding: '1px 7px',
+                              fontSize: 11, fontWeight: isDest ? 700 : 500,
+                              color: isDest ? '#155724' : '#495057',
+                            }}>{nd.name}{isDest && ' 📍'}{tms.map((t: any, ti: number) => (
+                              <span key={ti} className="ms-1" style={{ fontWeight: 700, color: t.express ? '#c0392b' : '#1f4e8c' }}>
+                                {t.time}{t.express ? '급' : ''}
+                              </span>
+                            ))}
+                            {brt.length > 0 && <span className="ms-1" style={{ fontWeight: 700, color: '#0a7d32' }}>🚌{brt[0].min}분 후</span>}
+                            </span>
+                          )
+                        })}
+                      </div>
+                    )
                     routeDetail = (
                       <div className="mt-2 pt-2 border-top" style={{ background: '#f8f9fa', borderRadius: 10, padding: '0.5rem 0.75rem' }}>
                         <div className="d-flex justify-content-between align-items-center mb-2">
@@ -381,11 +502,22 @@ export default function SchedulePage() {
                         {rows.length > 0 ? rows : (
                           <div className="text-muted" style={{ fontSize: 11 }}>{r.narrative || '경로 정보가 없습니다.'}</div>
                         )}
+                        <div className="d-flex gap-1 mt-2">
+                          <button className="btn btn-sm btn-outline-secondary flex-fill" onClick={() => setEditRoute({ id: s.id, item: s, steps: steps.map((st: any) => ({ ...st })) })}>✏️ 경로 수정</button>
+                        </div>
+                      </div>
+                    )
+                    summaryEl = (
+                      <div className="small mt-1">
+                        <div className="d-flex align-items-center gap-1 mb-1" style={{ justifyContent: 'space-between' }}>
+                          <span className="fw-bold" style={{ fontSize: 11 }}>🚏 이동 경로</span>
+                          <span className="text-muted" style={{ fontSize: 10 }}>총 {totalH > 0 ? `${totalH}시간${totalM}분` : `${totalM}분`}</span>
+                        </div>
+                        {summaryRow}
                       </div>
                     )
                   } catch {}
                 }
-                const routeExpanded = expandedRoute === s.id
                 return (
                   <div key={s.id}>
                     <div className="card border-0 shadow-sm mb-1" style={{
@@ -400,8 +532,8 @@ export default function SchedulePage() {
                           </div>
                           <div className="d-flex gap-1">
                             {isTransit && (
-                              <button className="btn btn-sm btn-outline-secondary py-0 px-1" onClick={() => setExpandedRoute(routeExpanded ? null : s.id)}>
-                                {routeExpanded ? '▴ 상세 닫기' : '▾ 상세보기'}
+                              <button className="btn btn-sm btn-outline-secondary py-0 px-1" onClick={() => toggleLiveDetail(s.id)}>
+                                {expandedRoute === s.id ? '▴ 접기' : '▾ 상세'}
                               </button>
                             )}
                             <button className="btn btn-sm btn-outline-secondary py-0 px-1" onClick={() => openEdit(s)}>✏️</button>
@@ -414,11 +546,12 @@ export default function SchedulePage() {
                           )}
                           {s.location && <span> · 📍 {s.location}</span>}
                         </div>
+                        {summaryEl}
+                        {expandedRoute === s.id && routeDetail}
                         {(s.description || s.memo) && (
                           <div className="small text-muted mt-1" style={{ whiteSpace: 'pre-wrap' }} dangerouslySetInnerHTML={{ __html: (s.description || s.memo || '').replace(/\n/g, '<br>') }} />
                         )}
                         {transitBtns}
-                        {routeExpanded && routeDetail}
                       </div>
                     </div>
 
@@ -501,6 +634,125 @@ export default function SchedulePage() {
             <button className="btn btn-sm btn-outline-danger w-100 mb-2" onClick={() => handleDelete('this_after')}>이 일정 포함 이후</button>
             <button className="btn btn-sm btn-outline-secondary w-100 mb-2" onClick={() => handleDelete('this_only')}>이 일정만</button>
             <button className="btn btn-sm btn-light w-100" onClick={() => setShowDelModal(null)}>취소</button>
+          </div>
+        </div>
+      )}
+
+      {editRoute && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+          <div style={{ background: '#fff', borderRadius: 16, padding: 16, width: 480, maxWidth: '100%', maxHeight: '86vh', overflow: 'auto', boxShadow: '0 8px 24px rgba(0,0,0,0.2)' }}>
+            <div className="d-flex justify-content-between align-items-center mb-2">
+              <h6 className="fw-bold mb-0">✏️ 이동 경로 수정</h6>
+              <button className="btn btn-sm btn-light" onClick={() => setEditRoute(null)}>✕</button>
+            </div>
+            <p className="small text-muted mb-2">각 구간의 이동수단과 소요시간, 출발/도착 장소를 수정할 수 있습니다.</p>
+            {editRoute.steps.map((st: any, idx: number) => (
+              <div key={idx} className="border rounded p-2 mb-2" style={{ background: '#fafafa' }}>
+                <div className="d-flex justify-content-between align-items-center mb-1">
+                  <span className="small fw-bold text-muted">구간 {idx + 1}</span>
+                  <button className="btn btn-sm btn-outline-danger py-0 px-1" onClick={() => setEditRoute((er: any) => ({ ...er, steps: er.steps.filter((_: any, i: number) => i !== idx) }))}>🗑️</button>
+                </div>
+                <div className="row g-1 mb-1">
+                  <div className="col-5">
+                    <label className="small d-block text-muted">이동수단</label>
+                    <select className="form-select form-select-sm" value={st.mode || ''}
+                      onChange={e => {
+                        const v = e.target.value
+                        setEditRoute((er: any) => ({ ...er, steps: er.steps.map((x: any, i: number) => {
+                          if (i !== idx) return x
+                          const nx = { ...x, mode: v }
+                          if (v.includes('도보')) { nx.bus_no = ''; nx.subway_name = ''; nx.detail = `도보 ${x.time_min || 0}분` }
+                          else if (v.includes('버스')) { nx.subway_name = ''; nx.bus_no = nx.bus_no || ''; nx.detail = `${nx.bus_no || ''} ${x.from || ''}→${x.to || ''} (${x.time_min || 0}분)` }
+                          else if (v.includes('지하철') || v.includes('전철') || v.includes('기차')) { nx.bus_no = ''; nx.subway_name = nx.subway_name || '지하철'; nx.detail = `${nx.subway_name || ''} ${x.from || ''}→${x.to || ''} (${x.time_min || 0}분)` }
+                        return nx
+                      }) }))}
+                      }>
+
+                      <option value="🚶 도보">🚶 도보</option>
+                      <option value="🚌 버스">🚌 버스</option>
+                      <option value="🚄 지하철">🚄 지하철</option>
+                      <option value="🚄 기차">🚄 기차</option>
+                      <option value="🚕 택시">🚕 택시</option>
+                      <option value="🚲 자전거">🚲 자전거</option>
+                    </select>
+                  </div>
+                  <div className="col-4">
+                    <label className="small d-block text-muted">소요시간(분)</label>
+                    <input type="number" min={0} className="form-control form-control-sm" value={st.time_min || 0}
+                      onChange={e => setEditRoute((er: any) => ({ ...er, steps: er.steps.map((x: any, i: number) => i !== idx ? x : { ...x, time_min: Number(e.target.value) || 0 }) }))} />
+                  </div>
+                  <div className="col-3">
+                    <label className="small d-block text-muted">호선/노선</label>
+                    <input className="form-control form-control-sm" placeholder="경의중앙선" value={st.subway_name || st.bus_no || ''}
+                      onChange={e => setEditRoute((er: any) => ({ ...er, steps: er.steps.map((x: any, i: number) => i !== idx ? x : { ...x, subway_name: e.target.value, bus_no: (x.mode || '').includes('버스') ? e.target.value : x.bus_no }) }))} />
+                  </div>
+                </div>
+                {(st.mode || '').match(/지하철|전철|기차|열차/) && (
+                  <div className="mb-1">
+                    <input className="form-control form-control-sm" placeholder="🚃 탈 칸/문 (예: 3번째 칸, 환승 통로와 가까움)" value={st.car_advice || ''}
+                      onChange={e => setEditRoute((er: any) => ({ ...er, steps: er.steps.map((x: any, i: number) => i !== idx ? x : { ...x, car_advice: e.target.value }) }))} />
+                  </div>
+                )}
+                <div className="row g-1">
+                  <div className="col-6">
+                    <input className="form-control form-control-sm" placeholder="출발 장소" value={st.from || ''}
+                      onChange={e => setEditRoute((er: any) => ({ ...er, steps: er.steps.map((x: any, i: number) => i !== idx ? x : { ...x, from: e.target.value }) }))} />
+                  </div>
+                  <div className="col-6">
+                    <input className="form-control form-control-sm" placeholder="도착 장소" value={st.to || ''}
+                      onChange={e => setEditRoute((er: any) => ({ ...er, steps: er.steps.map((x: any, i: number) => i !== idx ? x : { ...x, to: e.target.value }) }))} />
+                  </div>
+                </div>
+              </div>
+            ))}
+            <div className="d-flex gap-1 mb-3">
+              <button className="btn btn-sm btn-outline-secondary flex-fill" onClick={() => setEditRoute((er: any) => ({ ...er, steps: [...er.steps, { mode: '🚶 도보', from: '', to: '', detail: '도보 0분', time_min: 0 }] }))}>+ 구간 추가</button>
+            </div>
+            <div className="d-flex gap-2">
+              <button className="btn btn-sm btn-success flex-fill" disabled={savingRoute} onClick={async () => {
+                setSavingRoute(true)
+                try {
+                  const steps2 = editRoute.steps
+                  const total = steps2.reduce((a: number, s: any) => a + (s.time_min || 0), 0)
+                  const narrParts: string[] = []
+                  const prevRoute = (() => { try { const sv = JSON.parse((editRoute.item?.content) || 'null'); return sv } catch { return null } })()
+                  const prevFrom = prevRoute && prevRoute.from_lat ? prevRoute.from_lat : null
+                  const prevTo = prevRoute && prevRoute.to_lat ? prevRoute.to_lat : null
+                  let curName = editRoute.item?.departure_location || '출발'
+                  steps2.forEach((st: any, i: number) => {
+                    const nm = st.mode || ''
+                    const dur = st.time_min || 0
+                    const from = st.from || curName
+                    const to = st.to || (i === steps2.length - 1 ? (editRoute.item?.return_location || editRoute.item?.location || '목적지') : (steps2[i + 1] && steps2[i + 1].from) || '')
+                    curName = to
+                    if (nm.includes('도보')) narrParts.push(`${from}에서 ${dur}분 걸어서`)
+                    else if (nm.includes('버스')) narrParts.push(`${from}에서 ${st.bus_no || '버스'}를 타고 ${dur}분 가서 ${to}에서 내려서`)
+                    else if (nm.includes('기차')) narrParts.push(`${from}에서 ${st.subway_name || '기차'}를 타고 ${dur}분 가서 ${to}역에서 내려서`)
+                    else if (nm.includes('지하철') || nm.includes('전철')) narrParts.push(`${from}에서 ${st.subway_name || '지하철'}으로 지하철을 타고 ${dur}분 가서 ${to}역에서 내려서`)
+                    else if (nm.includes('택시')) narrParts.push(`${from}에서 택시를 타고 ${dur}분 가서 ${to}에 도착해서`)
+                    else if (nm.includes('자전거')) narrParts.push(`${from}에서 자전거를 타고 ${dur}분 가서 ${to}에 도착해서`)
+                    else narrParts.push(`${from}에서 ${dur}분 이동해서 ${to}에 도착해서`)
+                  })
+                  const destName = editRoute.item?.return_location || editRoute.item?.location || '목적지'
+                  const narrative = `${narrParts.join(' ')} ${destName}입니다.`
+                  const res = await fetch(`/api/bot/route/${editRoute.id}/save`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      steps: steps2, total_min: total, distance_km: 0,
+                      departure: prevRoute && prevRoute.departure || '', arrival: prevRoute && prevRoute.arrival || '',
+                      from_lat: prevFrom, to_lat: prevTo, narrative,
+                    }),
+                  })
+                  const data = await res.json()
+                  if (!data.success) { alert('저장 실패'); return }
+                  setEditRoute(null)
+                  setExpandedRoute(null)
+                  load()
+                } catch { alert('서버 연결 실패') }
+                finally { setSavingRoute(false) }
+              }}>{savingRoute ? '저장 중...' : '저장'}</button>
+              <button className="btn btn-sm btn-outline-secondary" onClick={() => setEditRoute(null)}>취소</button>
+            </div>
           </div>
         </div>
       )}

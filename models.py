@@ -504,6 +504,7 @@ class TongBotSchedule(db.Model):
     kind = db.Column(db.String(20), default='base')  # 'base' | 'occurrence' | 'route'
     parent_id = db.Column(db.Integer, db.ForeignKey('tong_bot_schedule.id', ondelete='CASCADE'), nullable=True)
     occ_date = db.Column(db.Date, nullable=True)  # 발생일 실제 날짜 (occurrence 전용)
+    route_dirty = db.Column(db.Boolean, default=False)  # 모일정 변경 시 이동/귀가 재생성 필요 표시
 
 class ChatRoom(db.Model):
     id = db.Column(db.Integer, primary_key=True)

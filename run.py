@@ -103,6 +103,18 @@ def create_app():
                     with db.engine.connect() as _conn:
                         _conn.execute(_sa_text('ALTER TABLE tong_bot_schedule ADD COLUMN repeat_lastday BOOLEAN DEFAULT FALSE'))
                         _conn.commit()
+                if 'route_dirty' not in _cols:
+                    with db.engine.connect() as _conn:
+                        _conn.execute(_sa_text('ALTER TABLE tong_bot_schedule ADD COLUMN route_dirty BOOLEAN DEFAULT FALSE'))
+                        _conn.commit()
+                    # 초기 마이그레이션(컬럼 최초 추가 시에만): 기존 모든 모일정에 dirty 표시 → 다음 스케줄러 주기에서 전체 재생성
+                    with db.engine.connect() as _conn:
+                        _conn.execute(_sa_text(
+                            "UPDATE tong_bot_schedule SET route_dirty = TRUE WHERE "
+                            "location IS NOT NULL AND location != '' AND "
+                            "(kind IS NULL OR kind IN ('base','occurrence')) AND "
+                            "title NOT LIKE '%이동%' AND title NOT LIKE '%귀가%'"))
+                        _conn.commit()
             # 블록 순서 필드 (인트로페이지)
             if 'user' in _tbls:
                 _ucols = [c['name'] for c in _inspector.get_columns('user')]

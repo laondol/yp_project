@@ -1,4 +1,4 @@
-import requests, math, json, time
+import requests, math, json, time, os
 from math import radians, sin, cos, sqrt, atan2
 
 # In-process TTL cache for ODSay routing results (saves the 1,000 calls/day quota).
@@ -54,6 +54,131 @@ YANGPYEONG_BUS_ROUTES = [
 
 WALK_SPEED = 5  # km/h
 BUS_SPEED = 20  # km/h
+
+# 경의중앙선 역명 → ODSay stationID (시간표 조회용, 실제 검증된 ID)
+ODSAY_STATION_IDS = {
+    "양수": 1306, "신원": 1305, "국수": 1304, "아신": 1303,
+    "양평": 1302, "원덕": 1301, "용문": 1300, "지평": 1299,
+    "오빈": 1394, "도심": 1309, "팔당": 1308, "운길산": 1307,
+    "용산": 1318, "왕십리": 192, "청량리": 191,
+}
+
+_ODSAY_TT_CACHE = {}
+_ODSAY_TT_TTL = 24 * 3600
+
+def _odsay_tt_key(station_id, way, week):
+    return (station_id, way, week)
+
+def odsay_station_timetable(station_id, way_code=1, week_tag=1, api_key=None):
+    """ODSay 지하철역 전체 시간표 조회. weekTag: 1 평일 / 2 토요일 / 3 일요일.
+    wayCode: 1 상행(서울 방면), 2 하행. 역명-기차시각-종착역 목록을 반환."""
+    if not api_key:
+        return None
+    ck = _odsay_tt_key(station_id, way_code, week_tag)
+    hit = _ODSAY_TT_CACHE.get(ck)
+    if hit and (hit[0] + _ODSAY_TT_TTL) > time.time():
+        return hit[1]
+    try:
+        resp = requests.get("https://api.odsay.com/v1/api/subwayTimeTable",
+            params={"apiKey": api_key, "stationID": station_id, "wayCode": way_code,
+                    "showExpressTime": "1", "lang": "0"}, timeout=8)
+        data = resp.json()
+    except Exception:
+        return None
+    result = (data or {}).get("result") or {}
+    key = {1: "OrdList", 2: "SatList", 3: "SunList"}.get(week_tag, "OrdList")
+    lst = (result.get(key) or {}).get("up" if way_code == 1 else "down") or {}
+    out = []
+    try:
+        for tm in lst.get("time") or []:
+            hour = int(tm.get("Idx") or 0)
+            if hour >= 25: hour -= 24
+            # 완행(list) + 급행(expList) 모두 파싱, 급행은 express 표시
+            for token, is_exp in [(t, False) for t in (tm.get("list") or "").split(" ")] + \
+                                 [(t, True) for t in (tm.get("expList") or "").split(" ")]:
+                token = token.strip()
+                if not token: continue
+                if "(" in token:
+                    minute, end = token.split("(")[0], token.split("(")[1].rstrip(")")
+                else:
+                    minute, end = token, ""
+                try:
+                    out.append({"time": f"{hour:02d}:{minute}", "end": end,
+                                "express": bool(is_exp)})
+                except Exception:
+                    continue
+    except Exception:
+        return None
+    out.sort(key=lambda x: x["time"])
+    _ODSAY_TT_CACHE[ck] = (time.time(), out)
+    return out
+
+
+def _hm(t):
+    try:
+        h, m = t.split(":")
+        return int(h) * 60 + int(m)
+    except Exception:
+        return 0
+
+
+def _clean_station_name(s):
+    """AI/사용자가 표기한 역명에서 노선명·접미사를 제거해 역명만 추출.
+    예) '경의중앙선 운길산역' -> '운길산', '수인분당선(수원행) 양수역' -> '양수'"""
+    s = (s or "").strip()
+    # 괄호 내용 제거 (방향/행선지)
+    import re as _re
+    s = _re.sub(r"[\(（\[].*?[\)）\]]", "", s)
+    s = s.rstrip("역").strip()
+    # 노선명 접두어 제거 (경의중앙선/수인분당선/수도권 등)
+    for pre in ("경의중앙선", "수인분당선", "분당선", "경의선", "중앙선", "수인선", "수도권",
+                "4호선", "3호선", "2호선", "1호선", "5호선", "6호선", "7호선", "8호선",
+                "9호선", "공항철도", "GTX", "신분당선", "우이신설선", "서해선", "경춘선", "경강선"):
+        if s.startswith(pre):
+            s = s[len(pre):].strip()
+            break
+    return s
+
+def next_trains_for_station(station_name, after_min=None, direction="up", api_key=None):
+    """역명(경의중앙선) 기준으로 도착 시각(after_min, 기본 현재+0분) 전후로 탈 수 있는 기차 반환.
+    전거 1개 + 후거 2개 = 총 3개. 급행/완행 구분 포함."""
+    sid = ODSAY_STATION_IDS.get((station_name or "").rstrip("역"))
+    if not sid:
+        sid = ODSAY_STATION_IDS.get(_clean_station_name(station_name))
+    if not sid:
+        return None
+    import datetime as _dt
+    now = _dt.datetime.now()
+    if after_min is None:
+        after_min = now.hour * 60 + now.minute
+    weekday = now.weekday()
+    week_tag = 1 if weekday < 5 else (2 if weekday == 5 else 3)
+    tt = odsay_station_timetable(sid, 1 if direction == "up" else 2, week_tag, api_key)
+    if not tt:
+        return None
+    # 마지막 운행이면 다음날 새벽(0시~1시대) 운행도 후거에 포함 가능하도록 1440 더한 목록 고려
+    extended = [t for t in tt] + [{"time": _min_to_hm(_hm(t["time"]) + 1440), "end": t["end"], "express": t.get("express", False)} for t in tt]
+    target = after_min
+    before, after = None, None
+    best_before, best_after = -10**9, 10**9
+    for t in extended:
+        v = _hm(t["time"])
+        if v <= target and v > best_before:
+            best_before, before = v, t
+        if v >= target and v < best_after:
+            best_after, after = v, t
+    result = []
+    # 전거는 도착 시각 20분 이내인 경우에만 (너무 과거면 무의미)
+    if before and (target - _hm(before["time"])) <= 20:
+        result.append(before)
+    # 후거 최대 2개 (전거가 있는 경우 1개만, 없는 경우 2개)
+    for t in extended:
+        if _hm(t["time"]) >= target and t not in result:
+            result.append(t)
+            if len(result) >= 3:
+                break
+    result = sorted(result, key=lambda x: _hm(x["time"]))
+    return result[:3]
 
 def _hm_to_min(t):
     parts = t.split(":")
@@ -669,3 +794,287 @@ def format_memo_narrative(plan, origin_name=None, dest_name=None):
     if not text.endswith("."):
         text += "."
     return text
+
+
+# ---------- 버스 정류장 정보 (ODSay) ----------
+
+_BUS_STOP_CACHE = {}
+_BUS_STOP_TTL = 6 * 3600
+_BUS_REALTIME_TTL = 60
+_BUS_REALTIME_CACHE = {}
+_BUS_ROUTE_CACHE = {}
+_BUS_ROUTE_TTL = 6 * 3600
+
+def _odsay_bus_api():
+    try:
+        from flask import current_app
+        return current_app.config.get('ODSAY_API_KEY', '')
+    except Exception:
+        return os.getenv('ODSAY_API_KEY', '')
+
+def _in_yangpyeong_area(rec):
+    """정류장 좌표가 양평군(위경도 대략 경계) 안이면 True"""
+    try:
+        x = float(rec.get("x") or 0); y = float(rec.get("y") or 0)
+    except Exception:
+        return False
+    return 127.25 <= x <= 127.75 and 37.35 <= y <= 37.65
+
+def _search_bus_stop_api(query, stop_name):
+    """ODSay searchStation 호출 + 결과에서 버스정류장 매칭. (사용자 표기와 실제 정류장명 차이 보정 포함)"""
+    try:
+        r = requests.get("https://api.odsay.com/v1/api/searchStation",
+            params={"apiKey": _odsay_bus_api(), "stationName": query, "lang": "0", "output": "json"}, timeout=8)
+        d = r.json()
+    except Exception:
+        return None
+    sts = (d.get("result") or {}).get("station") or []
+    if isinstance(sts, dict): sts = [sts]
+    out = None
+    yang_priority = None
+    # 검색어에서 지점 접미사 제거한 핵심어 (부분매칭 보조)
+    def _core(s):
+        for suf in ("버스정류장", "버스 정류장", "정류장", "지점", "정류소"):
+            if s.endswith(suf):
+                s = s[: -len(suf)]
+                break
+        return s.strip()
+    core = _core(stop_name)
+    for s in sts:
+        if s.get("stationClass") != 1:
+            continue  # 버스정류장만
+        nm = s.get("stationName") or ""
+        rec = {"stationID": s.get("stationID"), "CID": s.get("CID"),
+               "arsID": s.get("arsID"), "localStationID": s.get("localStationID"),
+               "name": nm, "x": s.get("x"), "y": s.get("y")}
+        # 양평군 좌표 정류장 우선 (양평역 등 중복역명: 서울 것이 먼저 오는 문제 해결)
+        try:
+            px = float(rec.get("x") or 0); py = float(rec.get("y") or 0)
+            if 127.25 <= px <= 127.75 and 37.35 <= py <= 37.65:
+                if yang_priority is None:
+                    yang_priority = rec
+        except Exception:
+            pass
+        if nm == stop_name:
+            out = rec  # 정확 매칭 우선
+            break
+        # 부분매칭: 사용자 표기에 포함되거나, 핵심어(정류장 등 제거)가 정류장명에 포함
+        matched = (stop_name in nm) or (nm in stop_name) or (core and (core in nm or nm in core))
+        if out is None and matched:
+            out = rec
+    if yang_priority and (out is None or (out.get("CID") == 1000 and not _in_yangpyeong_area(out))):
+        out = yang_priority
+    return out
+
+def search_bus_stop(stop_name):
+    """정류장명으로 ODSay 정류장 검색. 이름 정확 매칭 우선, 없으면 부분매칭. (stationID, CID, arsID, localStationID, name) 반환"""
+    if not stop_name:
+        return None
+    ck = ("sb", stop_name)
+    hit = _BUS_STOP_CACHE.get(ck)
+    if hit and (hit[0] + _BUS_STOP_TTL) > time.time():
+        return hit[1]
+    out = _search_bus_stop_api(stop_name, stop_name)
+    # "버스정류장" 접미사 때문에 실패한 경우, 접미사를 제거해 재시도
+    if out is None:
+        for suf in ("버스정류장", "버스 정류장", "정류장", "정류소"):
+            if stop_name.endswith(suf):
+                alt = stop_name[: -len(suf)].strip()
+                if alt:
+                    out = _search_bus_stop_api(alt, stop_name)
+                    break
+    if out:
+        _BUS_STOP_CACHE[ck] = (time.time(), out)
+    return out
+
+def seoul_bus_realtime(stop_name):
+    """서울(CID 1000) 정류장 실시간 도착정보: 노선별 다음 버스 2대 (분 단위 도착). realtimeStation API"""
+    rec = search_bus_stop(stop_name)
+    if not rec or rec.get("CID") != 1000 or not rec.get("stationID"):
+        return None
+    ck = ("rt", rec["stationID"])
+    hit = _BUS_REALTIME_CACHE.get(ck)
+    if hit and (hit[0] + _BUS_REALTIME_TTL) > time.time():
+        return hit[1]
+    try:
+        r = requests.get("https://api.odsay.com/v1/api/realtimeStation",
+            params={"apiKey": _odsay_bus_api(), "stationID": rec["stationID"], "lang": "0", "output": "json"}, timeout=8)
+        d = r.json()
+    except Exception:
+        return None
+    real = ((d.get("result") or {}).get("real")) or []
+    out = []
+    for item in real:
+        route = item.get("routeNm") or item.get("routeId") or ""
+        for kf in ("arrival1", "arrival2"):
+            a = item.get(kf) or {}
+            sec = a.get("arrivalSec")
+            if sec is None:
+                continue
+            try:
+                mins = int(round(int(sec) / 60))
+            except Exception:
+                continue
+            if mins < 0:
+                mins = 0
+            out.append({"route": route, "min": mins,
+                        "bus_no": a.get("busPlateNo") or "",
+                        "left_station": a.get("leftStation") or 0,
+                        "end": a.get("endBusYn") == "Y"})
+        if len(out) >= 2 and route == (out[0].get("route")):
+            break
+    out = out[:6]
+    _BUS_REALTIME_CACHE[ck] = (time.time(), out)
+    return out
+
+def _gg_bus_api():
+    try:
+        from flask import current_app
+        return current_app.config.get('GG_BUS_API_KEY', '')
+    except Exception:
+        return os.getenv('GG_BUS_API_KEY', '')
+
+def gyeonggi_bus_realtime(stop_name):
+    """경기 정류장 실시간 도착 (getBusArrivalListv2, localStationID 사용).
+    반환: [{route, min, dest, end}] — 노선별 다음 버스 (분 단위)"""
+    rec = search_bus_stop(stop_name)
+    if not rec or rec.get("CID") != 1190 or not rec.get("localStationID"):
+        return None
+    key = _gg_bus_api()
+    if not key:
+        return None
+    ck = ("grt", rec["localStationID"])
+    hit = _BUS_REALTIME_CACHE.get(ck)
+    if hit and (hit[0] + _BUS_REALTIME_TTL) > time.time():
+        return hit[1]
+    try:
+        r = requests.get("https://apis.data.go.kr/6410000/busarrivalservice/v2/getBusArrivalListv2",
+            params={"serviceKey": key, "stationId": rec["localStationID"], "format": "json"}, timeout=8)
+        d = r.json()
+    except Exception:
+        return None
+    try:
+        lst = d["response"]["msgBody"]["busArrivalList"]
+    except Exception:
+        lst = []
+    out = []
+    for item in lst or []:
+        route = str(item.get("routeName") or "")
+        for kf in ("predictTime1", "predictTime2"):
+            pt = item.get(kf)
+            if pt in (None, ""):
+                continue
+            try:
+                mins = int(pt)
+            except Exception:
+                continue
+            out.append({"route": route, "min": mins,
+                        "dest": item.get("routeDestName") or "",
+                        "end": item.get("flag") == "END"})
+    # 노선 기준 정렬 (가까운 순), 상위 6개
+    out = sorted(out, key=lambda x: (x["route"], x["min"]))[:6]
+    _BUS_REALTIME_CACHE[ck] = (time.time(), out)
+    return out
+
+def recommend_bus_routes(from_stop, to_stop):
+    """from 정류장에서 to 정류장(목적지)까지 가는 버스 노선 번호를 ODSay 대중교통 경로탐색으로 추천.
+    반환: [{"busNo":..., "type":...}, ...] 목록 (실패 시 None)"""
+    if not from_stop or not to_stop:
+        return None
+    ck = ("br", from_stop, to_stop)
+    hit = _BUS_ROUTE_CACHE.get(ck)
+    if hit and (hit[0] + _BUS_ROUTE_TTL) > time.time():
+        return hit[1]
+    fr = search_bus_stop(from_stop)
+    to = search_bus_stop(to_stop)
+    if not fr or not to:
+        return None
+    try:
+        r = requests.get("https://api.odsay.com/v1/api/searchPubTransPath",
+            params={"apiKey": _odsay_bus_api(), "lang": "0", "output": "json",
+                    "SX": fr["x"], "SY": fr["y"], "EX": to["x"], "EY": to["y"], "OPT": "0"}, timeout=10)
+        d = r.json()
+    except Exception:
+        return None
+    if "error" in d or "result" not in d:
+        return None
+    buses = []
+    seen = set()
+    # 경로탐색 결과 중 버스 구간(subPath trafficType==2)의 노선 번호 수집
+    for path in (d.get("result") or {}).get("path") or []:
+        for sub in path.get("subPath") or []:
+            if sub.get("trafficType") != 2:
+                continue
+            lane = sub.get("lane") or []
+            if isinstance(lane, dict):
+                lane = [lane]
+            for ln in lane:
+                no = ln.get("busNo") or ""
+                if not no or no in seen:
+                    continue
+                seen.add(no)
+                buses.append({"busNo": no, "type": ln.get("type") or ""})
+    if not buses:
+        return None
+    _BUS_ROUTE_CACHE[ck] = (time.time(), buses)
+    return buses
+
+def bus_stop_timetable(stop_name, to_stop=None):
+    """정류장 시간표 정보: 서울이면 실시간 도착(다음 버스 분단위), 경기면 실시간 도착 우선,
+    없으면 첫차/막차/간격 폴백.
+    to_stop이 주어지면 그 목적지로 가는 버스 노선을 추천해 realtime 각 항목에 recommended 포함.
+    반환: {"region":"seoul"|"gyeonggi", "realtime":[...], "recommended":[...] | "lanes":[...]}"""
+    rec = search_bus_stop(stop_name)
+    if not rec:
+        return None
+    cid = rec.get("CID")
+    # 추천 버스 (to_stop 지정 시)
+    reco_routes = None
+    if to_stop and stop_name != to_stop:
+        reco_routes = recommend_bus_routes(stop_name, to_stop)
+    def _mark(rt):
+        if not reco_routes:
+            return rt
+        reco_nos = {b["busNo"] for b in reco_routes}
+        for it in rt:
+            if (it.get("route") or "") in reco_nos:
+                it["recommended"] = True
+        return rt
+    # 양평군 좌표 정류장은 서울로 잡혀도 경기로 처리 (양평역 등 중복역명 방지)
+    if cid == 1000 and not _in_yangpyeong_area(rec):
+        rt = seoul_bus_realtime(stop_name)
+        if rt:
+            return {"region": "seoul", "realtime": _mark(rt), "recommended": reco_routes}
+        return {"region": "seoul", "realtime": [], "recommended": reco_routes}
+    # 경긱 등: 실시간 도착 우선
+    if cid == 1190 or _in_yangpyeong_area(rec):
+        rt = gyeonggi_bus_realtime(stop_name)
+        if rt:
+            return {"region": "gyeonggi", "realtime": _mark(rt), "recommended": reco_routes}
+    # 폴백: busStationInfo 첫차/막차/간격
+    ck = ("tt", rec["stationID"])
+    hit = _BUS_STOP_CACHE.get(ck)
+    if hit and (hit[0] + _BUS_STOP_TTL) > time.time():
+        return hit[1]
+    try:
+        r = requests.get("https://api.odsay.com/v1/api/busStationInfo",
+            params={"apiKey": _odsay_bus_api(), "stationID": rec["stationID"], "lang": "0", "output": "json"}, timeout=8)
+        d = r.json()
+    except Exception:
+        return None
+    if "error" in d:
+        return None
+    res = d.get("result") or {}
+    lanes = []
+    seen = set()
+    for ln in res.get("lane") or []:
+        no = ln.get("busNo") or ""
+        key = (no, ln.get("busDirectionName") or "")
+        if key in seen: continue
+        seen.add(key)
+        lanes.append({"busNo": no, "first": ln.get("busFirstTime") or "",
+                      "last": ln.get("busLastTime") or "", "interval": ln.get("busInterval") or "",
+                      "direction": ln.get("busDirectionName") or ""})
+    out = {"region": "gyeonggi", "lanes": lanes}
+    _BUS_STOP_CACHE[ck] = (time.time(), out)
+    return out
