@@ -134,6 +134,28 @@ def create_app():
                     with db.engine.connect() as _conn:
                         _conn.execute(_sa_text("ALTER TABLE \"user\" ADD COLUMN password_v2 BOOLEAN DEFAULT FALSE"))
                         _conn.commit()
+            # 마을지기 홍보 지도 테이블 (신규: village_place_category / village_place / village_place_report)
+            _place_ddl = [
+                ("CREATE TABLE IF NOT EXISTS village_place_category ("
+                 "id SERIAL PRIMARY KEY, myeon VARCHAR(20), ri VARCHAR(20), name VARCHAR(100) NOT NULL, "
+                 "icon VARCHAR(10) DEFAULT '📍', color VARCHAR(20) DEFAULT '#6c757d', sort_order INTEGER DEFAULT 0, "
+                 "created_by INTEGER, created_at TIMESTAMP)"),
+                ("CREATE TABLE IF NOT EXISTS village_place ("
+                 "id SERIAL PRIMARY KEY, myeon VARCHAR(20), ri VARCHAR(20), category_id INTEGER, name VARCHAR(200) NOT NULL, "
+                 "address VARCHAR(300), latitude FLOAT, longitude FLOAT, description TEXT, story TEXT, "
+                 "open_hr VARCHAR(100), tel VARCHAR(30), website VARCHAR(300), media TEXT DEFAULT '[]', "
+                 "tags VARCHAR(300) DEFAULT '', status VARCHAR(20) DEFAULT 'pending', submitted_by INTEGER, "
+                 "approved_by INTEGER, created_at TIMESTAMP, updated_at TIMESTAMP, "
+                 "FOREIGN KEY(category_id) REFERENCES village_place_category(id))"),
+                ("CREATE TABLE IF NOT EXISTS village_place_report ("
+                 "id SERIAL PRIMARY KEY, place_id INTEGER NOT NULL, user_id INTEGER NOT NULL, "
+                 "report_type VARCHAR(20) NOT NULL, comment TEXT, created_at TIMESTAMP, "
+                 "FOREIGN KEY(place_id) REFERENCES village_place(id))"),
+            ]
+            for _ddl in _place_ddl:
+                with db.engine.connect() as _conn:
+                    _conn.execute(_sa_text(_ddl))
+                    _conn.commit()
             print("[OK] 신규 컬럼 마이그레이션 완료")
         except Exception as e:
             print(f"[SKIP] 컬럼 마이그레이션: {e}")

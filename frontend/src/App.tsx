@@ -102,6 +102,7 @@ import AdminStoreEdit from './pages/AdminStoreEdit'
 import AdminAlertEdit from './pages/AdminAlertEdit'
 import VillagePageEdit from './pages/VillagePageEdit'
 import VillagePageView from './pages/VillagePageView'
+import VillageMapAdminPage from './pages/VillageMapAdminPage'
 import CompassNavPage from './pages/CompassNavPage'
 import PsychoPostEdit from './pages/PsychoPostEdit'
 import FloatingMemo from './components/FloatingMemo'
@@ -208,6 +209,7 @@ export default function App() {
             <Route path="/village" element={<ProtectedRoute><VillagePage /></ProtectedRoute>} />
             <Route path="/village/page" element={<ProtectedRoute><VillagePageEdit /></ProtectedRoute>} />
             <Route path="/village/view/:tmyeon/:tri" element={<ProtectedRoute><VillagePageView /></ProtectedRoute>} />
+            <Route path="/village/map-admin" element={<ProtectedRoute><VillageMapAdminPage /></ProtectedRoute>} />
             <Route path="/village/events" element={<ProtectedRoute><VillageEventList /></ProtectedRoute>} />
             <Route path="/village/events/:id" element={<ProtectedRoute><VillageEventDetail /></ProtectedRoute>} />
             <Route path="/village/my-wishes" element={<ProtectedRoute><VillageMyWishes /></ProtectedRoute>} />

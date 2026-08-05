@@ -781,6 +781,61 @@ class VillageBroadcast(db.Model):
     attachment = db.Column(db.String(300))
     created_at = db.Column(db.DateTime, default=datetime.now)
 
+class VillagePlaceCategory(db.Model):
+    """마을지기 홍보 지도 자유 카테고리"""
+    __tablename__ = 'village_place_category'
+    id = db.Column(db.Integer, primary_key=True)
+    myeon = db.Column(db.String(20))
+    ri = db.Column(db.String(20))
+    name = db.Column(db.String(100), nullable=False)
+    icon = db.Column(db.String(10), default='📍')  # 이모지
+    color = db.Column(db.String(20), default='#6c757d')
+    sort_order = db.Column(db.Integer, default=0)
+    created_by = db.Column(db.Integer, db.ForeignKey('user.id'))
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+
+class VillagePlace(db.Model):
+    """마을지기 홍보 지도 장소/건물 (회원 제안 → 마을지기 승인)"""
+    __tablename__ = 'village_place'
+    id = db.Column(db.Integer, primary_key=True)
+    myeon = db.Column(db.String(20))
+    ri = db.Column(db.String(20))
+    category_id = db.Column(db.Integer, db.ForeignKey('village_place_category.id'), nullable=True)
+    name = db.Column(db.String(200), nullable=False)
+    address = db.Column(db.String(300))
+    latitude = db.Column(db.Float)
+    longitude = db.Column(db.Float)
+    description = db.Column(db.Text)   # 소개
+    story = db.Column(db.Text)         # 이야기/역사
+    open_hr = db.Column(db.String(100))
+    tel = db.Column(db.String(30))
+    website = db.Column(db.String(300))
+    media = db.Column(db.Text, default='[]')  # JSON: [{"type":"image|video","url":"..."}]
+    tags = db.Column(db.String(300), default='')
+    status = db.Column(db.String(20), default='pending')  # pending, approved, rejected, closed
+    submitted_by = db.Column(db.Integer, db.ForeignKey('user.id'))
+    approved_by = db.Column(db.Integer, db.ForeignKey('user.id'))
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+    category = db.relationship('VillagePlaceCategory', foreign_keys=[category_id])
+
+
+class VillagePlaceReport(db.Model):
+    """마을지도 장소 방문/정보 보고 (기존 FacilityReport와 분리)"""
+    __tablename__ = 'village_place_report'
+    id = db.Column(db.Integer, primary_key=True)
+    place_id = db.Column(db.Integer, db.ForeignKey('village_place.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    report_type = db.Column(db.String(20), nullable=False)  # confirm, fix, flag, memo
+    comment = db.Column(db.Text, default='')
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+    place = db.relationship('VillagePlace', backref='reports')
+    user = db.relationship('User', backref='village_place_reports')
+
+
 class ContentPermission(db.Model):
     __tablename__ = 'content_permission'
     id = db.Column(db.Integer, primary_key=True)

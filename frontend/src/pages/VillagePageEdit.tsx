@@ -72,6 +72,7 @@ export default function VillagePageEdit() {
     <div className="container py-4" style={{ maxWidth: 900 }}>
       <h4 className="fw-bold mb-3">
         <a className="text-dark text-decoration-none" href="/village">❤️ 봉사</a> | <a className="text-dark text-decoration-none" href="/village/page">📖 마을 홍보</a>
+        <a className="btn btn-sm btn-outline-secondary ms-3" href="/village/map-admin">🗺️ 마을 지도 관리</a>
       </h4>
 
       <div className="card border-0 shadow-sm mb-3" style={{ borderRadius: 16 }}>
