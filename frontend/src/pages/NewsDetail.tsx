@@ -4,6 +4,7 @@ import { newsApi } from '../lib/api'
 import type { NewsArticle, NewsComment } from '../lib/types'
 import Loading from '../components/common/Loading'
 import ErrorMessage from '../components/common/ErrorMessage'
+import AuthorName from '../components/AuthorName'
 
 export default function NewsDetail() {
   const { id } = useParams<{ id: string }>()
@@ -130,7 +131,7 @@ export default function NewsDetail() {
               {comments.map(c => (
                 <div key={c.id} className="border-bottom pb-3 mb-3">
                   <div className="d-flex justify-content-between">
-                    <strong className="small">{c.author_name || '익명'}</strong>
+                    <strong className="small"><AuthorName name={c.author_name || '익명'} email={c.author_email} userId={c.user_id} /></strong>
                     <small className="text-muted">{c.created_at ? new Date(c.created_at).toLocaleString('ko-KR') : ''}</small>
                   </div>
                   <p className="mb-1 small">{c.content}</p>
@@ -138,7 +139,7 @@ export default function NewsDetail() {
                   {c.replies?.map(r => (
                     <div key={r.id} className="ms-4 mt-2 pt-2 border-start ps-3">
                       <div className="d-flex justify-content-between">
-                        <strong className="small">{r.author_name || '익명'}</strong>
+                        <strong className="small"><AuthorName name={r.author_name || '익명'} email={r.author_email} userId={r.user_id} /></strong>
                         <small className="text-muted">{r.created_at ? new Date(r.created_at).toLocaleString('ko-KR') : ''}</small>
                       </div>
                       <p className="mb-0 small">{r.content}</p>

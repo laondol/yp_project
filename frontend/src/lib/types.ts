@@ -15,6 +15,7 @@ export interface User {
 // Post (제안/꿈꾸기)
 export interface Post {
   id: number; user_id?: number; author_name?: string;
+  author_email?: string;
   title: string; content: string;
   category?: string; status?: string;
   ai_score?: number; ai_summary?: string; ai_reason?: string;
@@ -26,6 +27,7 @@ export interface Post {
 }
 export interface Comment {
   id: number; post_id?: number; user_id?: number; author?: string;
+  author_email?: string;
   content: string; parent_id?: number; total_score?: number;
   created_at?: string; replies?: Comment[];
 }
@@ -117,6 +119,7 @@ export interface NewsArticle {
 export interface NewsComment {
   id: number; news_id: number; user_id?: number; author_name?: string;
   content: string; parent_id?: number; ai_score?: number; is_hidden?: boolean;
+  author_email?: string;
   created_at?: string; replies?: NewsComment[];
 }
 

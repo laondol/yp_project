@@ -1,3 +1,4 @@
+import re
 import requests
 import math
 from flask import current_app
@@ -87,8 +88,52 @@ def haversine(lat1, lon1, lat2, lon2):
     a = math.sin(dlat/2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon/2)**2
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
 
-def gps_to_town_village(lat, lon, kakao_key=None):
-    # 1) 행정안전부 주소기반산업지원서비스 API (좌표→주소)
+_PLACE_CACHE = {}
+
+
+def _cache_key(lat, lon):
+    return (round(float(lat), 4), round(float(lon), 4))
+
+
+def _nominatim_reverse(lat, lon):
+    """전 세계 역지오코딩 (OpenStreetMap Nominatim, 한국어 우선). 실패 시 None."""
+    try:
+        ua = current_app.config.get('SITE_NAME', 'yp')
+        res = requests.get(
+            'https://nominatim.openstreetmap.org/reverse',
+            params={'lat': lat, 'lon': lon, 'format': 'jsonv2',
+                    'accept-language': 'ko', 'zoom': 14},
+            headers={'User-Agent': f'{ua}-share/1.0'},
+            timeout=10)
+        if res.status_code != 200:
+            return None
+        j = res.json()
+        a = j.get('address', {}) or {}
+        # 우편번호 등 디지털 토큰 제거 후, 큰 지역→작은 지역 순서로 깔끔한 지명 문자열 생성
+        toks = [t.strip() for t in (j.get('display_name') or '').split(',')]
+        toks = [t for t in reversed(toks)
+                if t and not re.fullmatch(r'\d{3,7}(-\d{2,5})?', t)]
+        clean = []
+        for t in toks:
+            if t not in clean:
+                clean.append(t)
+        town = (a.get('city') or a.get('town') or a.get('municipality')
+                or a.get('county') or a.get('state') or a.get('country') or '')
+        village = (a.get('village') or a.get('suburb') or a.get('neighbourhood')
+                   or a.get('district') or '')
+        return {'town': town, 'village': village, 'address': ' '.join(clean) or j.get('display_name', ''), 'is_korea': False}
+    except Exception:
+        return None
+
+
+def _resolve_place(lat, lon, kakao_key=None):
+    """좌표 → {'town','village','address','is_korea'} (국내는 행정안전부/Kakao, 해외는 Nominatim).
+    지명 전체를 정확히 표현하기 위해 address 에 시도~읍면/동까지 담는다."""
+    key = _cache_key(lat, lon)
+    if key in _PLACE_CACHE:
+        return _PLACE_CACHE[key]
+
+    # 1) 행정안전부 주소기반산업지원서비스 API (전국 법정동/리)
     try:
         juso_key = current_app.config.get('JUSO_API_KEY', '')
     except RuntimeError:
@@ -100,25 +145,24 @@ def gps_to_town_village(lat, lon, kakao_key=None):
             res = requests.get(url, params=params, timeout=5)
             if res.status_code == 200:
                 data = res.json()
-                results = data.get('results', {})
-                juso = results.get('juso', [])
+                juso = (data.get('results', {}) or {}).get('juso', [])
                 if juso:
-                    addr = juso[0]
-                    # 법정동명에서 읍면/리 추출
-                    full = addr.get('emdNm', '') or addr.get('lnmAdres', '')
-                    if full:
-                        parts = full.split()
-                        for t in YANGPYEONG_BOUNDS:
-                            if t in full:
-                                for v in YANGPYEONG_VILLAGES.get(t, []):
-                                    if v in full:
-                                        return t, v
-                                return t, ''
-            print(f"[Geocode] JUSO API status: {res.status_code}")
+                    full = (juso[0].get('emdNm', '') or juso[0].get('lnmAdres', '') or '')
+                    for t in YANGPYEONG_BOUNDS:
+                        if t in full:
+                            for v in YANGPYEONG_VILLAGES.get(t, []):
+                                if v in full:
+                                    d = {'town': t, 'village': v,
+                                         'address': f'경기도 양평군 {t} {v}', 'is_korea': True}
+                                    _PLACE_CACHE[key] = d
+                                    return d
+                            d = {'town': t, 'village': '', 'address': f'경기도 양평군 {t}', 'is_korea': True}
+                            _PLACE_CACHE[key] = d
+                            return d
         except Exception as e:
             print(f"[Geocode] JUSO API exception: {e}")
 
-    # 2) Kakao API fallback
+    # 2) Kakao API (전국) — 법정동(B) 기준으로 시도~법정리 전체 지명 구성
     if kakao_key is None:
         try:
             kakao_key = current_app.config.get('KAKAO_REST_API_KEY', '')
@@ -131,23 +175,52 @@ def gps_to_town_village(lat, lon, kakao_key=None):
             res = requests.get(url, headers=headers, timeout=5)
             if res.status_code == 200:
                 data = res.json()
-                town, village = '', ''
+                town, village, r1, r2 = '', '', '', ''
                 for doc in data.get('documents', []):
                     rt = doc.get('region_type', '')
-                    r3 = doc.get('region_3depth_name', '')
-                    r4 = doc.get('region_4depth_name', '')
-                    if rt == 'B' and r3:
+                    if rt == 'B':
+                        r1 = doc.get('region_1depth_name', '')
+                        r2 = doc.get('region_2depth_name', '')
+                        r3 = doc.get('region_3depth_name', '')
+                        r4 = doc.get('region_4depth_name', '')
                         town, village = r3, r4 or village
-                    elif rt == 'H' and r3 and not town:
+                    elif rt == 'H' and not town:
+                        r3 = doc.get('region_3depth_name', '')
                         town = r3
                 if town:
-                    return town, village or ''
-            print(f"[Geocode] Kakao API error: {res.status_code}")
+                    address = ' '.join(x for x in (r1, r2, town, village) if x)
+                    d = {'town': town, 'village': village, 'address': address, 'is_korea': True}
+                    _PLACE_CACHE[key] = d
+                    return d
+            if res.status_code != 400:
+                print(f"[Geocode] Kakao API error: {res.status_code}")
         except Exception as e:
             print(f"[Geocode] Kakao API exception: {e}")
 
-    # 3) 최종 폴백: 양평군 bounds lookup
-    return _fallback_lookup(lat, lon)
+    # 3) 해외/실패 → 전 세계 역지오코딩 (Nominatim)
+    d = _nominatim_reverse(lat, lon)
+    if d:
+        _PLACE_CACHE[key] = d
+        return d
+
+    # 4) 최종 폴백: 양평군 bounds lookup
+    town, village = _fallback_lookup(lat, lon)
+    d = {'town': town, 'village': village,
+         'address': f'경기도 양평군 {town} {village}'.strip() if town else '', 'is_korea': False}
+    _PLACE_CACHE[key] = d
+    return d
+
+
+def gps_to_town_village(lat, lon, kakao_key=None):
+    """좌표 → (읍면, 리/동). 국내·해외 모두 가장 가까운 행정구역명 반환."""
+    d = _resolve_place(lat, lon, kakao_key)
+    return d['town'], d['village']
+
+
+def gps_to_address(lat, lon, kakao_key=None):
+    """좌표 → 정확한 전체 지명 문자열 (예: 경기도 양평군 용문면 다문리 / 일본 도쿄도 지요다구)."""
+    d = _resolve_place(lat, lon, kakao_key)
+    return d.get('address', '')
 
 def _fallback_lookup(lat, lon):
     best_town = None

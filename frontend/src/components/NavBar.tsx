@@ -234,8 +234,9 @@ export default function NavBar() {
           </ul>
         </div>
 
-        {/* Right: AI + Notification hub + Profile */}
+        {/* Right: AI(관리자/마을지기만) + Notification hub + Profile */}
         <div className="d-flex align-items-center flex-shrink-0">
+          {user?.role === 'admin' || user?.role === 'leader' ? (
           <a href="/ai/chat" className="btn btn-sm btn-outline-success px-2 py-0 position-relative"
             style={{ fontSize: '1.1rem', borderRadius: '50%', width: 34, height: 34, lineHeight: '1' }} title="양평AI">
             🤖
@@ -246,6 +247,7 @@ export default function NavBar() {
               </span>
             )}
           </a>
+          ) : null}
           {!loading && user?.id ? (
             <div className="d-flex align-items-center ms-1 gap-1">
               {/* Friend requests */}

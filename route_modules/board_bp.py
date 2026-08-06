@@ -4,6 +4,7 @@ from services.security import save_village_file
 from services.ai_service import call_ai_judge
 import base64, os
 from datetime import datetime, timezone
+from route_modules.common import author_email_for as _author_email
 
 board_bp = Blueprint('board', __name__)
 
@@ -215,6 +216,7 @@ def api_posts():
     posts = q.order_by(Post.created_at.desc()).paginate(page=page, per_page=20, error_out=False)
     return jsonify([{
         'id': p.id, 'title': p.title, 'author_name': p.author_name,
+        'author_email': _author_email(p.user_id),
         'category': p.category, 'status': p.status,
         'ai_score': p.ai_score, 'total_score': p.total_score,
         'like_count': p.like_count, 'dislike_count': p.dislike_count,
@@ -232,6 +234,7 @@ def api_board_post(post_id):
         'post': {
             'id': post.id, 'title': post.title, 'content': post.content,
             'author_name': post.author_name, 'user_id': post.user_id,
+            'author_email': _author_email(post.user_id),
             'file_path': post.file_path, 'category': post.category, 'status': post.status,
             'ai_score': post.ai_score, 'ai_summary': post.ai_summary, 'ai_reason': post.ai_reason,
             'admin_score': post.admin_score, 'leader_score': post.leader_score,
@@ -245,6 +248,7 @@ def api_board_post(post_id):
         'comments': [{
             'id': c.id, 'author': c.author, 'content': c.content,
             'parent_id': c.parent_id, 'total_score': c.total_score,
+            'author_email': _author_email(c.user_id),
             'created_at': c.created_at.isoformat() if c.created_at else None,
         } for c in comments],
         'is_owner': post.user_id == uid,
@@ -275,6 +279,7 @@ def api_post_detail(post_id):
     return jsonify({
         'id': post.id, 'title': post.title, 'content': post.content,
         'author_name': post.author_name, 'user_id': post.user_id,
+        'author_email': _author_email(post.user_id),
         'category': post.category, 'status': post.status,
         'ai_score': post.ai_score, 'ai_summary': post.ai_summary, 'ai_reason': post.ai_reason,
         'admin_score': post.admin_score, 'leader_score': post.leader_score, 'member_score': post.member_score,
@@ -285,6 +290,7 @@ def api_post_detail(post_id):
         'comments': [{
             'id': c.id, 'author': c.author, 'content': c.content,
             'total_score': c.total_score, 'parent_id': c.parent_id,
+            'author_email': _author_email(c.user_id),
             'created_at': c.created_at.isoformat() if c.created_at else None,
         } for c in comments],
     })

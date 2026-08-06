@@ -6,6 +6,7 @@ from sqlalchemy import or_
 from models import db, NewsArticle, NewsComment, NewsRecommendation, NewsVote, Post, User, Message, LaborNewsArticle
 from services.ai_service import call_ai_judge
 from services.point_service import add_points
+from route_modules.common import author_email_for as _author_email
 
 news_bp = Blueprint('news', __name__)
 
@@ -525,6 +526,7 @@ def news_comments_fragment(news_id):
     comments = NewsComment.query.filter_by(news_id=news_id).order_by(NewsComment.created_at.asc()).all()
     return jsonify([{
         'id': c.id, 'news_id': c.news_id, 'author_name': c.author_name,
+        'author_email': _author_email(c.user_id),
         'content': c.content, 'parent_id': c.parent_id,
         'ai_score': c.ai_score, 'is_hidden': c.is_hidden,
         'created_at': c.created_at.isoformat() if c.created_at else None,

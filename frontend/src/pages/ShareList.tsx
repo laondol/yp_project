@@ -1,15 +1,17 @@
 import { useEffect, useState } from 'react'
+import AuthorName from '../components/AuthorName'
 
 interface ShareItem {
   id: number; title: string; description: string
   image_path: string | null; extra_images: string
   drawing_path: string | null
   latitude: number; longitude: number
-  town: string; village: string
+  town: string; village: string; address?: string
   ai_category: string; ai_summary: string
   ai_region_news: string; ai_news_links: string
   like_count: number; dislike_count: number
   author_name: string; user_id: number
+  author_email?: string
   status: string; created_at: string
 }
 
@@ -229,7 +231,7 @@ export default function ShareList() {
                 <div className="card-body p-3 d-flex flex-column">
                   <div className="d-flex gap-1 flex-wrap mb-2">
                     <span className="badge bg-info">{r.ai_category}</span>
-                    <span className="badge bg-light text-dark">{r.town} {r.village}</span>
+                    <span className="badge bg-light text-dark">{r.address || `${r.town} ${r.village}`}</span>
                     {r.status !== 'approved' && myId === r.user_id && (
                       <span className="badge bg-danger">{r.status === 'pending_person' ? '보류(인물)' : r.status === 'flagged' ? '차단됨' : '승인대기'}</span>
                     )}
@@ -248,7 +250,7 @@ export default function ShareList() {
 
                   <div className="d-flex justify-content-between align-items-center pt-2 border-top">
                     <small className="text-muted">
-                      📍 {r.town} {r.village}
+                      📍 {r.address || `${r.town} ${r.village}`}
                       {dist !== null && (
                         <span className="text-primary ms-1 fw-bold">{dist.toFixed(1)}km</span>
                       )}
@@ -264,6 +266,10 @@ export default function ShareList() {
 
                   <div className="d-flex justify-content-between align-items-center mt-2">
                     <a href={`/share/detail/${r.id}`} className="text-decoration-none small text-primary">자세히 보기 →</a>
+                  </div>
+
+                  <div className="small text-muted mt-1 pt-2 border-top border-light" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <AuthorName name={r.author_name} email={r.author_email} userId={r.user_id} prefix="👤 " />
                   </div>
                 </div>
               </div>

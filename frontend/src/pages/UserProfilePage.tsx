@@ -127,6 +127,7 @@ export default function UserProfilePage() {
   if (!data) return null
 
   const u = data.profile_user
+  const showRoleBadges = data.is_own || data.is_admin
   const hasAppointments = data.is_own && data.appointments.length > 0
   const hasBotActivity = data.is_own && (data.bot_memory || data.drafts.length > 0)
 
@@ -170,9 +171,9 @@ export default function UserProfilePage() {
                 <div className="d-flex gap-1 flex-wrap mb-2">
                   <span className="badge bg-light text-dark small">{u.town} {u.village}</span>
                   {u.is_neighbor && <span className="badge bg-success small">이웃</span>}
-                  {u.role === 'leader' && <span className="badge bg-primary small">책</span>}
-                  {(u.role === 'admin' || u.managed_pages) && <span className="badge bg-danger small">관</span>}
-                  {data.p_is_village && <span className="badge bg-success small">마</span>}
+                  {showRoleBadges && u.role === 'leader' && <span className="badge bg-primary small">책</span>}
+                  {showRoleBadges && (u.role === 'admin' || u.managed_pages) && <span className="badge bg-danger small">관</span>}
+                  {showRoleBadges && data.p_is_village && <span className="badge bg-success small">마</span>}
                 </div>
                 <button className="text-decoration-none border-0 bg-transparent p-0"
                   onClick={() => setShowNip(!showNip)}>

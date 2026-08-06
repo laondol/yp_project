@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext'
 import type { Post, Comment } from '../lib/types'
 import Loading from '../components/common/Loading'
 import ErrorMessage from '../components/common/ErrorMessage'
+import AuthorName from '../components/AuthorName'
 
 export default function ViewPage() {
   const { postId } = useParams<{ postId: string }>()
@@ -107,7 +108,7 @@ export default function ViewPage() {
             {post.category && <span className="badge bg-success mb-2">{post.category}</span>}
             <h3 className="fw-bold mb-2">{post.title}</h3>
             <div className="d-flex gap-3 small text-muted mb-3">
-              <span>{post.author_name || '익명'}</span>
+              <AuthorName name={post.author_name || '익명'} email={post.author_email} userId={post.user_id} />
               <span>{post.created_at ? new Date(post.created_at).toLocaleString('ko-KR') : ''}</span>
             </div>
 
@@ -163,14 +164,14 @@ export default function ViewPage() {
             {comments.map(c => (
               <div key={c.id} className="mb-3 p-3 bg-light rounded">
                 <div className="d-flex justify-content-between small mb-1">
-                  <strong>{c.author || '익명'}</strong>
+                  <strong><AuthorName name={c.author || '익명'} email={c.author_email} userId={c.user_id} /></strong>
                   <span className="text-muted">{c.created_at ? new Date(c.created_at).toLocaleString('ko-KR') : ''}</span>
                 </div>
                 <p className="mb-0">{c.content}</p>
                 {c.replies && c.replies.map(r => (
                   <div key={r.id} className="mt-2 ps-3 border-start border-3">
                     <div className="d-flex justify-content-between small">
-                      <strong>{r.author || '익명'}</strong>
+                      <strong><AuthorName name={r.author || '익명'} email={r.author_email} userId={r.user_id} /></strong>
                       <span className="text-muted">{r.created_at ? new Date(r.created_at).toLocaleString('ko-KR') : ''}</span>
                     </div>
                     <p className="mb-0">{r.content}</p>

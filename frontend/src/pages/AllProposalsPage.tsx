@@ -5,6 +5,7 @@ import type { Post } from '../lib/types'
 import { useAuth } from '../contexts/AuthContext'
 import Loading from '../components/common/Loading'
 import ErrorMessage from '../components/common/ErrorMessage'
+import AuthorName from '../components/AuthorName'
 
 function getStatusBadge(p: Post) {
   if (p.total_score !== undefined && p.total_score <= -50) {
@@ -124,7 +125,7 @@ export default function AllProposalsPage() {
                 <div className="d-flex w-100 justify-content-between align-items-center mb-2">
                   <h5 className="fw-bold text-dark m-0">{p.title}</h5>
                   <small className="text-muted">
-                    작성자: <Link to={`/user/${p.user_id}`} className="text-decoration-none text-muted">{p.author_name}</Link>
+                    작성자: <AuthorName name={p.author_name || ''} email={p.author_email} userId={p.user_id} />
                   </small>
                 </div>
                 <p className="text-secondary mb-3">{(p.content || '').substring(0, 150)}...</p>

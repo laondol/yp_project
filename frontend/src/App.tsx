@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { AuthProvider } from './contexts/AuthContext'
 import NavBar from './components/NavBar'
 import ProtectedRoute from './components/ProtectedRoute'
+import RoleRoute from './components/RoleRoute'
 import ShareList from './pages/ShareList'
 import ShareDetail from './pages/ShareDetail'
 import ShareReport from './pages/ShareReport'
@@ -54,7 +55,6 @@ import AllProposalsPage from './pages/AllProposalsPage'
 import TermsPage from './pages/TermsPage'
 import CharterPage from './pages/CharterPage'
 import MainPage from './pages/MainPage'
-import GoPage from './pages/GoPage'
 import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
 import ResetPasswordPage from './pages/ResetPasswordPage'
@@ -153,18 +153,19 @@ export default function App() {
             <Route path="/leader/share-reports" element={<LeaderShareReportsPage />} />
             <Route path="/compass" element={<CompassNavPage />} />
 
-            {/* Protected: all other routes require login */}
-            <Route path="/presentation" element={<ProtectedRoute><PresentationPage /></ProtectedRoute>} />
-            <Route path="/proposal" element={<ProtectedRoute><ProposalPage /></ProtectedRoute>} />
-            <Route path="/all-proposals" element={<ProtectedRoute><AllProposalsPage /></ProtectedRoute>} />
-            <Route path="/main" element={<ProtectedRoute><MainPage /></ProtectedRoute>} />
-            <Route path="/go" element={<ProtectedRoute><GoPage /></ProtectedRoute>} />
-            <Route path="/service/legal" element={<ProtectedRoute><ServiceLegalPage /></ProtectedRoute>} />
+            {/* Open to all (read-only): 소개 / 하는일 / 제안 */}
+            <Route path="/presentation" element={<PresentationPage />} />
+            <Route path="/proposal" element={<ProposalPage />} />
+            <Route path="/all-proposals" element={<AllProposalsPage />} />
+            <Route path="/main" element={<MainPage />} />
+            <Route path="/service/legal" element={<ServiceLegalPage />} />
             <Route path="/service/legal/edit" element={<ProtectedRoute><ServiceLegalEditPage /></ProtectedRoute>} />
-            <Route path="/service/psycho" element={<ProtectedRoute><ServicePsychoPage /></ProtectedRoute>} />
+            <Route path="/service/psycho" element={<ServicePsychoPage />} />
             <Route path="/service/psycho/edit" element={<ProtectedRoute><ServicePsychoEditPage /></ProtectedRoute>} />
-            <Route path="/service/ramp" element={<ProtectedRoute><ServiceRampPage /></ProtectedRoute>} />
-            <Route path="/ai/chat" element={<ProtectedRoute><AiChatPage /></ProtectedRoute>} />
+            <Route path="/service/ramp" element={<ServiceRampPage />} />
+
+            {/* Protected: 관리자/마을지기 전용 */}
+            <Route path="/ai/chat" element={<RoleRoute roles={['admin', 'leader']}><AiChatPage /></RoleRoute>} />
             <Route path="/chat" element={<ProtectedRoute><ChatPage /></ProtectedRoute>} />
             <Route path="/bot/chat" element={<ProtectedRoute><TongBotChatPage /></ProtectedRoute>} />
             <Route path="/post/:postId" element={<ProtectedRoute><ViewPage /></ProtectedRoute>} />
@@ -178,11 +179,11 @@ export default function App() {
             <Route path="/user/:userId" element={<ProtectedRoute><UserProfilePage /></ProtectedRoute>} />
             <Route path="/user/edit-profile" element={<ProtectedRoute><EditProfilePage /></ProtectedRoute>} />
             <Route path="/user/:userId" element={<ProtectedRoute><UserProfilePage /></ProtectedRoute>} />            
-            <Route path="/news" element={<ProtectedRoute><NewsList /></ProtectedRoute>} />
-            <Route path="/news/:id" element={<ProtectedRoute><NewsDetail /></ProtectedRoute>} />
-            <Route path="/world-news" element={<ProtectedRoute><NewsTabsPage /></ProtectedRoute>} />
-            <Route path="/yp-news" element={<ProtectedRoute><NewsTabsPage /></ProtectedRoute>} />
-            <Route path="/kr-yp-news" element={<ProtectedRoute><NewsTabsPage /></ProtectedRoute>} />
+            <Route path="/news" element={<NewsList />} />
+            <Route path="/news/:id" element={<NewsDetail />} />
+            <Route path="/world-news" element={<NewsTabsPage />} />
+            <Route path="/yp-news" element={<NewsTabsPage />} />
+            <Route path="/kr-yp-news" element={<NewsTabsPage />} />
             <Route path="/legal/issues/admin" element={<ProtectedRoute><LegalIssuesAdminPage /></ProtectedRoute>} />
             <Route path="/legal/issues/write" element={<ProtectedRoute><LegalIssueWritePage /></ProtectedRoute>} />
             <Route path="/legal/issues/:postId" element={<ProtectedRoute><LegalIssueDetailPage /></ProtectedRoute>} />
@@ -222,8 +223,8 @@ export default function App() {
             <Route path="/message/send/admin" element={<ProtectedRoute><MessageSend /></ProtectedRoute>} />
             <Route path="/message/send/village_leader" element={<ProtectedRoute><MessageSend /></ProtectedRoute>} />
             <Route path="/message/admin/pending" element={<ProtectedRoute><AdminPendingLetters /></ProtectedRoute>} />
-            <Route path="/construction" element={<ProtectedRoute><ConstructionPage /></ProtectedRoute>} />
-            <Route path="/construction/store/:storeName" element={<ProtectedRoute><StoreDetailPage /></ProtectedRoute>} />
+            <Route path="/construction" element={<ConstructionPage />} />
+            <Route path="/construction/store/:storeName" element={<StoreDetailPage />} />
             <Route path="/schedule" element={<ProtectedRoute><SchedulePage /></ProtectedRoute>} />
             <Route path="/memo" element={<ProtectedRoute><MemoPage /></ProtectedRoute>} />
             <Route path="/schedule2" element={<ProtectedRoute><SchedulePage /></ProtectedRoute>} />

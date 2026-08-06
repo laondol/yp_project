@@ -8,8 +8,9 @@ from werkzeug.utils import secure_filename
 from models import db, User, ShareReport, ShareComment, Message, Post, Comment, NewsArticle, VillagePage, RampApplication, PointHistory, Friend, VillageWish, LegalPost, ChatMessage, FriendGroup, LegalAppointment, TongBot, TongBotDraft, ConstructionNotice, GpsCalibration, StoreSuggestion, StoreMenu
 from services.security import save_village_file
 from services.ai_service import background_process_share, moderate_image
-from services.geocode import haversine, gps_to_town_village, get_nearby_reports, is_in_yangpyeong, YANGPYEONG_BOUNDS, YANGPYEONG_VILLAGES
+from services.geocode import haversine, gps_to_town_village, gps_to_address, get_nearby_reports, is_in_yangpyeong, YANGPYEONG_BOUNDS, YANGPYEONG_VILLAGES
 from route_modules.construction_bp import _resolve_canonical_store_name
+from route_modules.common import author_email_for as _author_email
 import requests as _requests
 
 share_bp = Blueprint('share', __name__)
@@ -94,11 +95,12 @@ def share_report():
                 file.save(os.path.join(img_dir, fname))
                 video_path = f"/static/uploads/share_reports/{fname}"
 
-    from services.geocode import gps_to_town_village
+    from services.geocode import gps_to_town_village, gps_to_address
     resolved_town, resolved_village = gps_to_town_village(latitude, longitude)
     share_town = resolved_town or (user.town if user else '')
     share_village = resolved_village or (user.village if user else '')
-    share_address = f"경기도 양평군 {share_town} {share_village}".strip()
+    share_address = gps_to_address(latitude, longitude) or \
+        f"경기도 양평군 {share_town} {share_village}".strip()
 
     report = ShareReport(
         user_id=user.id if user else 0,
@@ -302,7 +304,8 @@ def share_report_edit(report_id):
                 report.town = resolved_town
             if resolved_village:
                 report.village = resolved_village
-            report.address = f"경기도 양평군 {report.town} {report.village}".strip()
+            report.address = gps_to_address(latitude, longitude) or \
+                f"경기도 양평군 {report.town} {report.village}".strip()
             # 사용자가 마커를 드래그해서 위치 보정한 경우 → GPS 보정값 누적
             if original_lat and original_lon and (abs(original_lat - latitude) > 1e-8 or abs(original_lon - longitude) > 1e-8):
                 try:
@@ -561,6 +564,7 @@ def api_share_reports():
         "video_path": r.video_path, "latitude": r.latitude,
         "longitude": r.longitude, "town": r.town, "village": r.village,
         "address": r.address, "author_name": r.author_name,
+        "author_email": _author_email(r.user_id),
         "ai_category": r.ai_category, "ai_summary": r.ai_summary,
         "like_count": r.like_count, "dislike_count": r.dislike_count,
         "status": r.status, "user_id": r.user_id,
@@ -798,8 +802,9 @@ def api_share_detail(report_id):
     comments = ShareComment.query.filter_by(share_id=report_id, parent_id=None).order_by(ShareComment.created_at.asc()).all()
     for c in comments:
         c_item = {"id": c.id, "author": c.author, "content": c.content, "user_id": c.user_id, "created_at": c.created_at.strftime('%m/%d %H:%M') if c.created_at else None, "replies": []}
+        c_item["author_email"] = _author_email(c.user_id)
         for rc in c.replies:
-            c_item["replies"].append({"id": rc.id, "author": rc.author, "content": rc.content, "user_id": rc.user_id, "created_at": rc.created_at.strftime('%m/%d %H:%M') if rc.created_at else None})
+            c_item["replies"].append({"id": rc.id, "author": rc.author, "content": rc.content, "user_id": rc.user_id, "created_at": rc.created_at.strftime('%m/%d %H:%M') if rc.created_at else None, "author_email": _author_email(rc.user_id)})
         comments_data.append(c_item)
     
     store_menus_data = []
@@ -814,6 +819,7 @@ def api_share_detail(report_id):
         "latitude": r.latitude, "longitude": r.longitude,
         "town": r.town, "village": r.village, "address": r.address,
         "author_name": r.author_name, "user_id": r.user_id,
+        "author_email": _author_email(r.user_id),
         "ai_category": r.ai_category, "ai_summary": r.ai_summary,
         "ai_confidence": r.ai_confidence, "ai_region_news": r.ai_region_news,
         "ai_news_links": r.ai_news_links, "ai_danger_alert": r.ai_danger_alert,

@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
+import AuthorName from '../components/AuthorName'
 
 interface NearbyShare { id: number; title: string; town: string; village: string; image_path: string | null; ai_category: string; distance: number }
 interface LocalNews { source: string; title: string; url: string }
 interface LocalLink { name: string; url: string }
 interface ConstructionItem { title: string; location: string | null; notice_type: string; start_date: string | null; end_date: string | null }
-interface ReplyData { id: number; author: string; content: string; user_id: number; created_at: string }
-interface CommentData { id: number; author: string; content: string; user_id: number; created_at: string; replies: ReplyData[] }
+interface ReplyData { id: number; author: string; content: string; user_id: number; created_at: string; author_email?: string }
+interface CommentData { id: number; author: string; content: string; user_id: number; created_at: string; author_email?: string; replies: ReplyData[] }
 
 interface ShareDetailData {
   id: number; title: string; description: string
@@ -14,6 +15,7 @@ interface ShareDetailData {
   latitude: number; longitude: number
   town: string; village: string; address: string
   author_name: string; user_id: number
+  author_email?: string
   ai_category: string; ai_summary: string
   ai_confidence: number; ai_region_news: string
   ai_danger_alert: boolean
@@ -157,7 +159,7 @@ export default function ShareDetail() {
         <div className="card-body p-4">
           <div className="d-flex gap-2 flex-wrap mb-3">
             <span className="badge bg-info">{r.ai_category}</span>
-            <span className="badge bg-light text-dark">{r.town} {r.village}</span>
+            <span className="badge bg-light text-dark">{r.address || `${r.town} ${r.village}`}</span>
           </div>
           <h3 className="fw-bold mb-3">{r.title}</h3>
 
@@ -207,11 +209,11 @@ export default function ShareDetail() {
           <hr />
 
           <div className="d-flex justify-content-between small text-muted">
-            <span>공유자: <strong>{r.author_name}</strong></span>
+            <span>공유자: <AuthorName name={r.author_name} email={r.author_email} userId={r.user_id} /></span>
             <span>{r.created_at}</span>
           </div>
           <div className="d-flex justify-content-between small text-muted">
-            <span>위치: 양평군 {r.town} {r.village}</span>
+            <span>위치: {r.address || `양평군 ${r.town} ${r.village}`}</span>
             {r.ai_confidence ? <span>AI 신뢰도: {Math.round(r.ai_confidence * 100)}%</span> : null}
           </div>
 
@@ -375,7 +377,7 @@ export default function ShareDetail() {
           {r.comments.map(c => (
             <div key={c.id} className="mb-3 p-3 bg-light rounded">
               <div className="d-flex justify-content-between">
-                <strong className="small">{c.author}</strong>
+                <strong className="small"><AuthorName name={c.author} email={c.author_email} userId={c.user_id} /></strong>
                 <div>
                   <small className="text-muted">{c.created_at}</small>
                   {myId === c.user_id && (
@@ -392,7 +394,7 @@ export default function ShareDetail() {
                   {c.replies.map(rp => (
                     <div key={rp.id} className="mb-2">
                       <div className="d-flex justify-content-between">
-                        <strong className="small">↳ {rp.author}</strong>
+                        <strong className="small">↳ <AuthorName name={rp.author} email={rp.author_email} userId={rp.user_id} /></strong>
                         <div>
                           <small className="text-muted">{rp.created_at}</small>
                           {myId === rp.user_id && (
