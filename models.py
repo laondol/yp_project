@@ -72,7 +72,8 @@ class User(db.Model):
     block_order_profile = db.Column(db.Text, nullable=True)   # JSON: 블록 순서 (회원정보페이지)
     block_order_intro = db.Column(db.Text, nullable=True)     # JSON: 블록 순서 (인트로페이지)
     intro_page_enabled = db.Column(db.Boolean, default=False)  # 인트로페이지 활성화 여부
-    password_v2 = db.Column(db.Boolean, default=False)          # True=클라이언트 해시(PBKDF2), False=레거시 평문
+    password_v2 = db.Column(db.Boolean, default=False)          # True=클라이언트 해시(PBKDF2), False=기존 방식
+    share_mod_approved = db.Column(db.Boolean, default=False)   # 공유마당 심사 권한 (관리자/책임자 부여)
 
 class Post(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -275,6 +276,8 @@ class ShareReport(db.Model):
     store_suggestion_id = db.Column(db.Integer, db.ForeignKey('store_suggestion.id'), nullable=True)
     sub_category = db.Column(db.String(50), default='')
     promotion_allowed = db.Column(db.Boolean, default=False)
+    auto_sent = db.Column(db.Boolean, default=False)        # True=자동 발송(접수 버튼 미사용), False=수동 접수
+    rejected_at = db.Column(db.DateTime)                    # 반려 시각 (30일 후 로컬 보관 이동 기준)
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now)
 

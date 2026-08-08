@@ -21,6 +21,7 @@ interface ShareDetailData {
   ai_danger_alert: boolean
   like_count: number; dislike_count: number
   status: string; created_at: string; moderation_at?: string | null
+  auto_sent?: boolean
   store_suggestion_id?: number | null; store_menus?: any[]; sub_category?: string; my_role?: string
   nearby_shares: NearbyShare[]
   local_news: LocalNews[]
@@ -120,6 +121,14 @@ export default function ShareDetail() {
 
   if (!r) return <div className="text-center py-5"><div className="spinner-border" /></div>
 
+  const confirmAuto = () => {
+    if (!confirm('이 공유를 정식 심사받기 하시겠습니까? 확인 후 AI 검증이 시작됩니다.')) return
+    fetch(`/share-report/confirm-auto/${r!.id}`, { method: 'POST' })
+      .then(res => res.json())
+      .then(d => { alert(d.msg || '완료'); if (d.status === 'success') window.location.reload() })
+      .catch(() => alert('서버 오류'))
+  }
+
   const extraImages = r.extra_images ? r.extra_images.split(',').filter(Boolean) : []
   const catColor: Record<string, string> = { '사건': 'danger', '풍경': 'success', '맛집': 'warning' }
   const isAuthor = myId === r.user_id
@@ -148,9 +157,20 @@ export default function ShareDetail() {
 
       {isBlocked && isAuthor && (
         <div className="alert alert-warning small mb-3">
-          ⏳ <strong>검토 중</strong>인 콘텐츠입니다. 작성자 본인에게만 표시되며, 검열 완료 후 모든 회원에게 공개됩니다.
-          {r.moderation_at && (
-            <> 30일 동안 수정·보완되지 않으면 자동 삭제됩니다. (보류일: {new Date(r.moderation_at).toLocaleDateString()})</>
+          {r.auto_sent ? (
+            <>
+              📬 <strong>10초 자동 발송</strong>되어 비공개 보관 중인 콘텐츠입니다. 내용을 확인하신 후 아래 버튼을 눌러야 정식 심사가 진행됩니다. 확인 전에는 절대 공개되지 않습니다.
+              <div className="mt-2">
+                <button type="button" className="btn btn-sm btn-success fw-bold" onClick={confirmAuto}>내용 확인 후 심사받기</button>
+              </div>
+            </>
+          ) : (
+            <>
+              ⏳ <strong>검토 중</strong>인 콘텐츠입니다. 작성자 본인에게만 표시되며, 검열 완료 후 모든 회원에게 공개됩니다.
+              {r.moderation_at && (
+                <> 30일 동안 수정·보완되지 않으면 관리자에게 보류 상태로 유지됩니다. (보류일: {new Date(r.moderation_at).toLocaleDateString()})</>
+              )}
+            </>
           )}
         </div>
       )}

@@ -134,6 +134,21 @@ def create_app():
                     with db.engine.connect() as _conn:
                         _conn.execute(_sa_text("ALTER TABLE \"user\" ADD COLUMN password_v2 BOOLEAN DEFAULT FALSE"))
                         _conn.commit()
+# 공유마당·자동 발송·반려 보관 컬럼
+            if 'share_report' in _tbls:
+                _scols = [c['name'] for c in _inspector.get_columns('share_report')]
+                if 'auto_sent' not in _scols:
+                    with db.engine.connect() as _conn:
+                        _conn.execute(_sa_text('ALTER TABLE share_report ADD COLUMN auto_sent BOOLEAN DEFAULT FALSE'))
+                        _conn.commit()
+                if 'rejected_at' not in _scols:
+                    with db.engine.connect() as _conn:
+                        _conn.execute(_sa_text('ALTER TABLE share_report ADD COLUMN rejected_at TIMESTAMP'))
+                        _conn.commit()
+            if 'user' in _tbls and 'share_mod_approved' not in [c['name'] for c in _inspector.get_columns('user')]:
+                with db.engine.connect() as _conn:
+                    _conn.execute(_sa_text('ALTER TABLE "user" ADD COLUMN share_mod_approved BOOLEAN DEFAULT FALSE'))
+                    _conn.commit()
             # 마을지기 홍보 지도 테이블 (신규: village_place_category / village_place / village_place_report)
             _place_ddl = [
                 ("CREATE TABLE IF NOT EXISTS village_place_category ("

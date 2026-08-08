@@ -222,6 +222,7 @@ export interface MeResponse {
   managed_pages?: string[];
   town?: string; village?: string; email?: string;
   is_verified_resident?: boolean;
+  share_mod_approved?: boolean;
   intro_page_enabled?: boolean;
   password_v2?: boolean;
 }

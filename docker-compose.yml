@@ -30,6 +30,22 @@ services:
       - rag
     restart: always
 
+  moderation_worker:
+    build: .
+    container_name: yp_moderation_worker
+    volumes:
+      - .:/yp_project
+    working_dir: /yp_project
+    env_file: .env
+    environment:
+      - RAG_URL=http://yp_rag:8001
+    command: ["python", "services/ai_moderation_worker.py"]
+    depends_on:
+      - postgres
+      - rag
+      - flask_app
+    restart: always
+
   react_frontend:
     image: node:20-alpine
     container_name: yp_react

@@ -40,11 +40,22 @@ def api_admin_users():
     if session.get('role') != 'leader': return jsonify({'error': '권한 없음'}), 403
     users = User.query.order_by(User.id.desc()).all()
     from models import DIDDocument, VerifiableCredential
+
+    def _vm(u):
+        if getattr(u, 'jin_verified_at', None):
+            return 'jin'
+        if u.is_verified_resident:
+            return 'neighbor'
+        return None
+
     return jsonify([{
         'id': u.id, 'email': u.email, 'username': u.username,
         'real_name': u.real_name, 'role': u.role, 'town': u.town,
         'village': u.village, 'points': u.points,
         'is_verified_resident': u.is_verified_resident,
+        'jin_verified_at': u.jin_verified_at.strftime('%Y-%m-%d') if getattr(u, 'jin_verified_at', None) else None,
+        'verified_method': _vm(u),
+        'share_mod_approved': bool(getattr(u, 'share_mod_approved', False)),
         'managed_pages': u.managed_pages,
         'has_did': DIDDocument.query.filter_by(user_id=u.id).first() is not None,
         'has_vc': VerifiableCredential.query.filter_by(subject_user_id=u.id, revoked=False).first() is not None,
@@ -64,6 +75,8 @@ def api_admin_users_search():
         'id': u.id, 'username': u.username, 'real_name': u.real_name,
         'town': u.town, 'village': u.village,
         'is_verified_resident': u.is_verified_resident,
+        'jin_verified_at': u.jin_verified_at.strftime('%Y-%m-%d') if getattr(u, 'jin_verified_at', None) else None,
+        'verified_method': 'jin' if getattr(u, 'jin_verified_at', None) else ('neighbor' if u.is_verified_resident else None),
         'did': DIDDocument.query.filter_by(user_id=u.id).first().did if DIDDocument.query.filter_by(user_id=u.id).first() else None,
     } for u in users])
 
@@ -93,17 +106,34 @@ def api_admin_alerts():
 
 @admin_bp.route('/api/admin/share-reports')
 def api_admin_share_reports():
-    if session.get('role') not in ('admin', 'leader'): return jsonify({'error': '권한 없음'}), 403
+    me = User.query.get(session.get('user_id')) if session.get('user_id') else None
+    role = session.get('role') or (me.role if me else '')
+    is_mgr = role in ('admin', 'leader') or bool(me and me.share_mod_approved)
+    if not is_mgr: return jsonify({'error': '권한 없음'}), 403
     from models import ShareReport
-    reports = ShareReport.query.order_by(ShareReport.created_at.desc()).all()
+    from sqlalchemy import case as sa_case
+    order_prio = sa_case(
+        (ShareReport.status == 'draft', 0),
+        (ShareReport.status == 'pending', 1),
+        (ShareReport.status == 'pending_review', 2),
+        (ShareReport.status == 'pending_person', 3),
+        (ShareReport.status == 'flagged', 4),
+        (ShareReport.status == 'rejected', 5),
+        else_=10
+    )
+    reports = ShareReport.query.order_by(order_prio, ShareReport.updated_at.desc(), ShareReport.created_at.desc()).all()
     return jsonify([{
         'id': r.id, 'title': r.title, 'description': r.description,
-        'image_path': r.image_path, 'drawing_path': r.drawing_path,
+        'image_path': r.image_path, 'extra_images': r.extra_images or '',
+        'drawing_path': r.drawing_path,
         'video_path': r.video_path, 'author_name': r.author_name,
+        'user_id': r.user_id, 'address': r.address,
         'town': r.town, 'village': r.village, 'latitude': r.latitude, 'longitude': r.longitude,
         'ai_category': r.ai_category, 'ai_summary': r.ai_summary,
         'is_moderated': r.is_moderated, 'moderation_result': r.moderation_result,
         'status': r.status, 'ai_danger_alert': r.ai_danger_alert,
+        'auto_sent': bool(getattr(r, 'auto_sent', False)),
+        'moderation_reason': r.moderation_reason or '',
         'created_at': r.created_at.isoformat() if r.created_at else None,
     } for r in reports])
 
@@ -353,6 +383,10 @@ def admin_page_managers():
         action = request.form.get('action','toggle')
         user = User.query.get(uid)
         if user:
+            if page == '__share_mod__':
+                user.share_mod_approved = not user.share_mod_approved
+                db.session.commit()
+                return jsonify({'status': 'success', 'share_mod_approved': user.share_mod_approved})
             pages = (user.managed_pages or '').split(',')
             had_village = 'village' in pages
             if page == 'village' and page not in pages and not user.is_verified_resident:
@@ -413,6 +447,9 @@ def api_admin_page_managers():
             'real_name': u.real_name, 'role': u.role,
             'town': u.town, 'village': u.village,
             'is_verified_resident': u.is_verified_resident,
+            'jin_verified_at': u.jin_verified_at.strftime('%Y-%m-%d') if getattr(u, 'jin_verified_at', None) else None,
+            'verified_method': 'jin' if getattr(u, 'jin_verified_at', None) else ('neighbor' if u.is_verified_resident else None),
+            'share_mod_approved': bool(getattr(u, 'share_mod_approved', False)),
             'managed_pages': u.managed_pages or '',
         } for u in admins],
         'all_pages': all_pages,

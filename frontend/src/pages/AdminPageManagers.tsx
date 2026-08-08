@@ -12,6 +12,9 @@ interface AdminUser {
   id: number; username: string; email: string; real_name: string
   role: string; town: string; village: string
   is_verified_resident: boolean; managed_pages: string
+  jin_verified_at?: string | null
+  verified_method?: string | null
+  share_mod_approved?: boolean
 }
 
 interface PageManagersData {
@@ -76,9 +79,11 @@ export default function AdminPageManagers() {
                   <span className="text-muted small">ID:{u.id}</span>
                   <span className="text-muted small">{u.email}</span>
                   <span className="text-muted small">📍{u.town || '-'} {u.village || ''}</span>
-                  {u.is_verified_resident
-                    ? <span className="badge bg-success small">이웃인증</span>
-                    : <span className="badge bg-secondary small">미인증</span>}
+                  {u.verified_method === 'jin'
+                    ? <span className="badge bg-warning text-dark small" title={`QR 대면 인증 (${u.jin_verified_at || ''})`}>🏅 진인증</span>
+                    : u.verified_method === 'neighbor'
+                      ? <span className="badge bg-success small">✅ 이웃인증</span>
+                      : <span className="badge bg-secondary small">미인증</span>}
                 </div>
               </div>
             </div>
@@ -136,6 +141,22 @@ export default function AdminPageManagers() {
                 </div>
               </div>
             ))}
+
+            <div className="card border-0 shadow-sm mb-3" style={{ borderRadius: 16 }}>
+              <div className="card-header bg-white border-bottom-0 pt-3 pb-1">
+                <h6 className="fw-bold mb-0 text-success">공유마당 권한</h6>
+              </div>
+              <div className="card-body pt-2 pb-2">
+                <div className="form-check">
+                  <input type="checkbox" className="form-check-input" id={`sharemod_${u.id}`}
+                    checked={Boolean(u.share_mod_approved)}
+                    onChange={() => togglePage(u.id, '__share_mod__')} />
+                  <label className="form-check-label small" htmlFor={`sharemod_${u.id}`}>
+                    {u.share_mod_approved && '✅ '}공유마당 심사 참여 허용 (마을지기에게만 부여)
+                  </label>
+                </div>
+              </div>
+            </div>
           </div>
         )
       })}

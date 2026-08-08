@@ -13,6 +13,7 @@ interface ShareItem {
   author_name: string; user_id: number
   author_email?: string
   status: string; created_at: string
+  auto_sent?: boolean
 }
 
 function haversine(lat1: number, lon1: number, lat2: number, lon2: number) {
@@ -233,7 +234,10 @@ export default function ShareList() {
                     <span className="badge bg-info">{r.ai_category}</span>
                     <span className="badge bg-light text-dark">{r.address || `${r.town} ${r.village}`}</span>
                     {r.status !== 'approved' && myId === r.user_id && (
-                      <span className="badge bg-danger">{r.status === 'pending_person' ? '보류(인물)' : r.status === 'flagged' ? '차단됨' : '승인대기'}</span>
+                      <span className="badge bg-danger">{r.status === 'pending_person' ? '보류(인물)' : r.status === 'flagged' ? '차단됨' : r.status === 'draft' ? '자동보관' : '승인대기'}</span>
+                    )}
+                    {(r.auto_sent && myId === r.user_id) && (
+                      <span className="badge bg-warning text-dark">자동발송·확인필요</span>
                     )}
                   </div>
                   <h6 className="fw-bold mb-2">{r.title}</h6>

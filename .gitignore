@@ -51,7 +51,7 @@ cookies.txt
 backup_local.sh
 fk_check.sql
 truncate.sql
-*.bak
+*.bak*
 
 # frontend build output
 frontend/dist/
@@ -70,3 +70,6 @@ static/naver*.html
 
 # Docker Desktop WSL
 DockerDesktopWSL/
+
+# server local archive (30일 보관 대행지)
+server_local/

@@ -1,4 +1,5 @@
 import os
+import shutil
 import threading
 import base64
 from flask import Blueprint, render_template, request, redirect, url_for, jsonify, session, current_app, send_file, send_from_directory
@@ -14,6 +15,135 @@ from route_modules.common import author_email_for as _author_email
 import requests as _requests
 
 share_bp = Blueprint('share', __name__)
+
+
+def _share_upload_base():
+    return os.path.join(current_app.root_path, 'static', 'uploads', 'share_reports')
+
+
+def _move_report_files(report, target_sub):
+    base = _share_upload_base()
+    tdir = os.path.join(base, target_sub)
+    os.makedirs(tdir, exist_ok=True)
+    prefix = '/static/uploads/share_reports/'
+
+    def _move(val):
+        if not val:
+            return None
+        fname = os.path.basename(val)
+        part = val[len(prefix):] if val.startswith(prefix) else fname
+        src = os.path.join(base, part)
+        same = os.path.normpath(src) == os.path.normpath(os.path.join(tdir, fname))
+        if os.path.exists(src) and not same:
+            dst = os.path.join(tdir, fname)
+            i = 0
+            while os.path.exists(dst) and os.path.normpath(dst) != os.path.normpath(src):
+                i += 1
+                dst = os.path.join(tdir, 'dup' + str(i) + '_' + fname)
+            try:
+                shutil.move(src, dst)
+                return prefix + target_sub + '/' + os.path.basename(dst)
+            except Exception:
+                pass
+        return val
+
+    report.image_path = _move(report.image_path)
+    report.drawing_path = _move(report.drawing_path)
+    report.video_path = _move(report.video_path)
+    extras = []
+    if report.extra_images:
+        for p in report.extra_images.split(','):
+            if p.strip():
+                moved = _move(p.strip())
+                if moved:
+                    extras.append(moved)
+    report.extra_images = ','.join(extras)
+
+
+def _send_auto_confirm_notice(report):
+    if not report.user_id or report.user_id == 0:
+        return
+    from models import Message as _Msg
+    admin_user = User.query.filter(User.role == 'admin').first()
+    try:
+        db.session.add(_Msg(
+            sender_id=admin_user.id if admin_user else 0,
+            sender_name=admin_user.username if admin_user else '관리자',
+            sender_role='admin',
+            receiver_id=report.user_id,
+            subject='공유 자동 접수 확인 요청',
+            content='회원님의 공유글(#{0})이 10초 자동 접수되어 보관 중입니다.\n'
+                    '내용 확인 후 "심사받기" 버튼으로 확인해 주세요. 확인 전에는 공개되지 않습니다.\n'
+                    '링크: https://yp.ddabong.com/share/detail/' + str(report.id)
+        ))
+        db.session.commit()
+    except Exception:
+        pass
+
+
+def _draft_files_exist(report):
+    """draft에 저장된 실제 파일들이 디스크에 존재하는지 확인 (없으면 False)"""
+    if not report.auto_sent or report.status != 'draft':
+        return False
+    base = _share_upload_base()
+    prefix = '/static/uploads/share_reports/'
+    paths = []
+    for v in (report.image_path, report.drawing_path, report.video_path):
+        if v:
+            paths.append(v)
+    if report.extra_images:
+        paths += [e.strip() for e in report.extra_images.split(',') if e.strip()]
+    if not paths:
+        return False
+    for p in paths:
+        part = p[len(prefix):] if p.startswith(prefix) else os.path.basename(p)
+        safe = os.path.normpath(os.path.join(base, part))
+        if not safe.startswith(os.path.normpath(base)) or not os.path.isfile(safe):
+            return False
+    return True
+
+
+def _send_auto_saved_notice(report, created_new=False):
+    """자동보관 완료 안내 쪽지. 파일 존재 확인 후 회원에게만, 신규 생성 시 1회만 발송."""
+    if not report.user_id or report.user_id == 0:
+        return False
+    if not _draft_files_exist(report):
+        return False
+    if not created_new:
+        existing = Message.query.filter(
+            Message.sender_role == 'admin',
+            Message.receiver_id == report.user_id,
+            Message.subject.like('공유 자동보관%'),
+            Message.subject.contains('#' + str(report.id))
+        ).count()
+        if existing:
+            return False  # 이미 알린 경우 중복 발송하지 않음
+    admin_user = User.query.filter(User.role == 'admin').first()
+    site = current_app.config.get('SITE_URL', 'https://yp.ddabong.com')
+    try:
+        db.session.add(Message(
+            sender_id=admin_user.id if admin_user else 0,
+            sender_name=admin_user.username if admin_user else '관리자',
+            sender_role='admin',
+            receiver_id=report.user_id,
+            subject=f'공유 자동보관 완료 #{report.id}',
+            content='회원님이 촬영/작성하신 공유 자료가 안전하게 자동보관 되었습니다.\n'
+                    '공유 자료는 아직 공개되지 않으며, "공유 접수하기" 버튼을 누르면 관리자 심사를 받을 수 있습니다.\n'
+                    '링크: ' + site + '/share/detail/' + str(report.id)
+        ))
+        db.session.commit()
+        return True
+    except Exception:
+        return False
+
+
+def _share_mgr():
+    """공유마당 운영자 판정: 관리자/책임자 전체, 또는 공유 심사 승인 받은 마을지기"""
+    u = User.query.get(session.get('user_id')) if session.get('user_id') else None
+    role = session.get('role') or (u.role if u else '')
+    if role in ('admin', 'leader'):
+        return True
+    return bool(u and u.share_mod_approved)
 
 
 def _serve_react_share():
@@ -53,6 +183,8 @@ def share_report():
 
     if not latitude or not longitude:
         return jsonify({"status": "error", "msg": "위치 수집이 필요합니다. 새로고침 후 위치 허용해주세요."}), 400
+
+    auto_sent = request.form.get('auto_sent') == '1'
 
     from services.geocode import calibrate_gps
     latitude, longitude = calibrate_gps(latitude, longitude)
@@ -121,20 +253,33 @@ def share_report():
         ai_confidence=0.5,
         ai_region_news='',
         ai_news_links='[]',
-        ai_danger_alert=False
+        ai_danger_alert=False,
+        auto_sent=auto_sent
     )
     if video_path:
         report.status = 'pending_review'
         report.moderation_result = 'video'
         report.moderation_reason = '동영상은 승인 후 공개됩니다'
     else:
-        # 모든 공유는 기본 보류. AI가 백그라운드에서 검증 후 독단 승인/보류 결정
-        report.status = 'pending'
-        report.moderation_result = 'pending'
-        report.moderation_reason = 'AI 검증 대기중'
-    report.is_moderated = False
+        if auto_sent:
+            # 자동 발송: 작성자 확인 전까지 항상 보류(비공개) 상태로 대기
+            report.status = 'draft'
+            report.moderation_result = 'auto_sent'
+            report.moderation_reason = '10초 자동 발송 - 작성자 확인 후 심사받기'
+            report.is_moderated = True
+        else:
+            # 수동 접수: AI가 백그라운드에서 검증 후 독단 승인/보류 결정
+            report.status = 'pending'
+            report.moderation_result = 'pending'
+            report.moderation_reason = 'AI 검증 대기중'
+            report.is_moderated = False
+    _move_report_files(report, 'draft' if auto_sent else 'review')
     db.session.add(report)
     db.session.commit()
+
+    if auto_sent:
+        _send_auto_confirm_notice(report)
+        return jsonify({"status": "success", "msg": "10초 후 자동 발송되었습니다. 확인 후 심사가 진행됩니다.", "report_id": report.id})
 
     app_obj = current_app._get_current_object()
     uid = user.id if user else 0
@@ -143,9 +288,246 @@ def share_report():
 
     return jsonify({"status": "success", "msg": "공유가 접수되었습니다.", "report_id": report.id})
 
+@share_bp.route('/share-report/auto-save', methods=['POST'])
+def share_report_auto_save():
+    """촬영/그리기 즉시 자동보관. 기존 draft(report_id)에 누적하거나 새로 생성.
+    파일은 share_reports/draft/ 로 이동되며, 위치·제목 없이도 저장된다."""
+    user = User.query.get(session.get('user_id')) if session.get('username') else None
+    uid = user.id if user else 0
+    report_id = request.form.get('report_id', type=int)
+    report = None
+    was_new = False
+    if report_id:
+        report = ShareReport.query.get(report_id)
+        if report and (report.user_id != uid or report.status != 'draft' or not report.auto_sent):
+            report = None  # 본인 draft가 아니면 새로 생성
+
+    from services.security import validate_upload, secure_save
+    img_dir = os.path.join(current_app.root_path, 'static', 'uploads', 'share_reports')
+    if not os.path.exists(img_dir): os.makedirs(img_dir)
+
+    if not report:
+        report = ShareReport(
+            user_id=uid,
+            author_name=user.username if user else '익명',
+            title='공유',
+            ai_category='분석중',
+            ai_summary='',
+            ai_confidence=0.5,
+            ai_region_news='',
+            ai_news_links='[]',
+            ai_danger_alert=False,
+            status='draft',
+            moderation_result='auto_sent',
+            moderation_reason='자동보관 - 공유접수하기 버튼으로 심사받기',
+            is_moderated=True,
+            auto_sent=True
+        )
+        db.session.add(report)
+        db.session.flush()
+        was_new = True
+
+    new_image_paths = []
+    for file in request.files.getlist('image'):
+        ok, msg = validate_upload(file)
+        if ok:
+            try:
+                new_image_paths.append(secure_save(file, img_dir))
+            except Exception:
+                pass
+
+    drawing_path = None
+    drawing = request.form.get('drawing_data')
+    if drawing and len(drawing) > 2000:
+        try:
+            data = base64.b64decode(drawing.split(",")[1])
+            fname = f"draw_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}_{report.id}.png"
+            with open(os.path.join(img_dir, fname), "wb") as f:
+                f.write(data)
+            drawing_path = f"/static/uploads/share_reports/{fname}"
+        except Exception:
+            pass
+
+    video_path = None
+    if 'video' in request.files:
+        file = request.files['video']
+        if file and file.filename and '.' in file.filename:
+            ext = file.filename.rsplit('.', 1)[1].lower()
+            if ext in ('mp4', 'avi', 'mov', 'mkv', 'webm'):
+                fname = f"video_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}_{report.id}_{secure_filename(file.filename)}"
+                file.save(os.path.join(img_dir, fname))
+                video_path = f"/static/uploads/share_reports/{fname}"
+
+    saved_any = False
+    if new_image_paths:
+        saved_any = True
+        existing = []
+        if report.image_path: existing.append(report.image_path)
+        if report.extra_images:
+            existing += [e.strip() for e in report.extra_images.split(',') if e.strip()]
+        all_paths = existing + new_image_paths
+        report.image_path = all_paths[0]
+        report.extra_images = ','.join(all_paths[1:]) if len(all_paths) > 1 else ''
+    if video_path:
+        saved_any = True
+        report.video_path = video_path
+        report.status = 'draft'
+        report.moderation_result = 'auto_sent'
+        report.moderation_reason = '동영상 자동보관 - 승인 후 공개됩니다'
+        report.is_moderated = True
+    if drawing_path:
+        saved_any = True
+        report.drawing_path = drawing_path
+
+    if not saved_any:
+        db.session.rollback()
+        return jsonify({"status": "error", "msg": "저장할 파일이 없습니다."}), 400
+
+    _move_report_files(report, 'draft')
+    db.session.commit()
+    _send_auto_saved_notice(report, created_new=was_new)
+    return jsonify({
+        "status": "success",
+        "msg": "자동보관 되었습니다.",
+        "report_id": report.id,
+        "added_paths": new_image_paths + ([video_path] if video_path else []) + ([drawing_path] if drawing_path else []),
+        "image_path": report.image_path,
+        "extra_images": report.extra_images,
+        "video_path": report.video_path,
+        "drawing_path": report.drawing_path
+    })
+
+@share_bp.route('/share-report/auto-save/remove/<int:report_id>', methods=['POST'])
+def share_report_auto_save_remove(report_id):
+    """자동보관 draft에서 지정 파일(image_path/extra_images/video_path/drawing_path) 제거."""
+    report = ShareReport.query.get_or_404(report_id)
+    uid = session.get('user_id')
+    if report.user_id != uid:
+        return jsonify({"status": "error", "msg": "본인 draft만 수정할 수 있습니다."}), 403
+    if report.status != 'draft' or not report.auto_sent:
+        return jsonify({"status": "error", "msg": "심사 진행 중에는 삭제할 수 없습니다."}), 400
+    data = request.get_json() or {}
+    target_path = data.get('path', '').strip()
+    if not target_path:
+        return jsonify({"status": "error", "msg": "경로 없음"}), 400
+
+    def _match(p):
+        return p and p.strip() == target_path
+
+    removed = False
+    if report.image_path and _match(report.image_path):
+        report.image_path = None; removed = True
+    elif report.video_path and _match(report.video_path):
+        report.video_path = None; removed = True
+    elif report.drawing_path and _match(report.drawing_path):
+        report.drawing_path = None; removed = True
+    else:
+        extras = [e.strip() for e in (report.extra_images or '').split(',') if e.strip()]
+        if target_path in extras:
+            extras.remove(target_path)
+            report.extra_images = ','.join(extras)
+            removed = True
+
+    if not removed:
+        # 이미지가 image_path + extra_images 중 어디에도 없으면 실패
+        all_img = [report.image_path] + [e.strip() for e in (report.extra_images or '').split(',') if e.strip()]
+        if target_path not in all_img:
+            return jsonify({"status": "error", "msg": "해당 파일을 찾을 수 없습니다."}), 400
+
+    # 남은 이미지가 없고 image_path가 비면 첫 extra를 image_path로 승격
+    if not report.image_path:
+        extras = [e.strip() for e in (report.extra_images or '').split(',') if e.strip()]
+        if extras:
+            report.image_path = extras[0]
+            report.extra_images = ','.join(extras[1:]) if len(extras) > 1 else ''
+
+    if removed:
+        _move_report_files(report, 'draft')
+        db.session.commit()
+        abs_path = os.path.join(current_app.root_path, target_path.lstrip('/'))
+        if os.path.exists(abs_path):
+            try:
+                os.remove(abs_path)
+            except Exception:
+                pass
+        return jsonify({"status": "success", "msg": "삭제되었습니다."})
+    return jsonify({"status": "error", "msg": "삭제 실패"}), 400
+
+@share_bp.route('/share-report/notify/<int:report_id>', methods=['POST'])
+def share_report_notify(report_id):
+    """관리자/책임자가 자동보관(draft) 작성자에게 안내 쪽지를 수동 발송.
+    파일이 실제 존재하고 회원일 때만 발송된다."""
+    if not _share_mgr():
+        return jsonify({"status": "error", "msg": "권한이 없습니다."}), 403
+    report = ShareReport.query.get_or_404(report_id)
+    if not report.user_id or report.user_id == 0:
+        return jsonify({"status": "error", "msg": "비회원 작성 글에는 쪽지를 보낼 수 없습니다."}), 400
+    if not _draft_files_exist(report):
+        return jsonify({"status": "error", "msg": "저장된 파일이 없어 쪽지를 보낼 수 없습니다."}), 400
+    if _send_auto_saved_notice(report, created_new=True):
+        return jsonify({"status": "success", "msg": f"#{report.id} 작성자에게 안내 쪽지를 보냈습니다."})
+    return jsonify({"status": "error", "msg": "쪽지 발송에 실패했습니다. 관리자에게 문의하세요."}), 500
+
+@share_bp.route('/share-report/confirm-auto/<int:report_id>', methods=['POST'])
+def share_report_confirm_auto(report_id):
+    report = ShareReport.query.get_or_404(report_id)
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({"status": "error", "msg": "로그인이 필요합니다."}), 401
+    is_admin = session.get('role') in ('admin', 'leader')
+    if report.user_id != uid and not is_admin:
+        return jsonify({"status": "error", "msg": "작성자 본인만 확인할 수 있습니다."}), 403
+    if not report.auto_sent:
+        return jsonify({"status": "error", "msg": "이미 심사 대기 상태입니다."})
+
+    title = request.form.get('title', '').strip()
+    description = request.form.get('description', '').strip()
+    latitude = request.form.get('latitude', type=float)
+    longitude = request.form.get('longitude', type=float)
+    if title:
+        report.title = title
+    if description is not None:
+        report.description = description
+
+    drawing = request.form.get('drawing_data')
+    if drawing and len(drawing) > 2000:
+        img_dir = os.path.join(current_app.root_path, 'static', 'uploads', 'share_reports')
+        if not os.path.exists(img_dir): os.makedirs(img_dir)
+        try:
+            data = base64.b64decode(drawing.split(",")[1])
+            fname = f"draw_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}_{report.id}.png"
+            with open(os.path.join(img_dir, fname), "wb") as f:
+                f.write(data)
+            report.drawing_path = f"/static/uploads/share_reports/{fname}"
+        except Exception:
+            pass
+
+    if latitude and longitude:
+        from services.geocode import calibrate_gps, gps_to_town_village, gps_to_address
+        report.latitude, report.longitude = calibrate_gps(latitude, longitude)
+        resolved_town, resolved_village = gps_to_town_village(report.latitude, report.longitude)
+        report.town = resolved_town or (user.town if (user := User.query.get(uid)) else '')
+        report.village = resolved_village or (user.village if (user := User.query.get(uid)) else '')
+        report.address = gps_to_address(report.latitude, report.longitude) or \
+            f"경기도 양평군 {report.town} {report.village}".strip()
+
+    _move_report_files(report, 'review')
+    report.auto_sent = False
+    report.status = 'pending'
+    report.moderation_result = 'pending'
+    report.moderation_reason = '공유접수하기로 심사 대기중'
+    report.is_moderated = False
+    db.session.commit()
+    app_obj = current_app._get_current_object()
+    threading.Thread(target=background_process_share,
+        args=(app_obj, report.id, report.title, report.description,
+              report.latitude, report.longitude, report.image_path, report.drawing_path,
+              report.user_id or 0)).start()
+    return jsonify({"status": "success", "msg": "심사가 시작되었습니다.", "report_id": report.id})
+
 @share_bp.route('/admin/share-reports')
 def admin_share_reports():
-    if session.get('role') not in ['admin', 'leader']:
+    if not _share_mgr():
         return "권한 없음", 403
     return _serve_react_share()
 
@@ -228,7 +610,7 @@ def admin_message_send():
 
 @share_bp.route('/leader/share-reports')
 def leader_share_reports():
-    if session.get('role') not in ['admin', 'leader']:
+    if not _share_mgr():
         return "권한 없음", 403
     return _serve_react_share()
 
@@ -241,7 +623,7 @@ def share_report_edit(report_id):
             _df.flush()
     except Exception:
         pass
-    is_admin = session.get('role') in ['admin', 'leader']
+    is_admin = _share_mgr()
     is_author = report.user_id == session.get('user_id')
     is_anonymous_share = not report.user_id or report.user_id == 0
     if not (is_author or (is_admin and is_anonymous_share)):
@@ -511,7 +893,7 @@ def share_report_edit(report_id):
 @share_bp.route('/share-report/delete-image/<int:report_id>', methods=['POST'])
 def share_report_delete_image(report_id):
     report = ShareReport.query.get_or_404(report_id)
-    is_admin = session.get('role') in ['admin', 'leader']
+    is_admin = _share_mgr()
     is_author = report.user_id == session.get('user_id')
     is_anonymous_share = not report.user_id or report.user_id == 0
     if not (is_author or (is_admin and is_anonymous_share)):
@@ -568,6 +950,7 @@ def api_share_reports():
         "ai_category": r.ai_category, "ai_summary": r.ai_summary,
         "like_count": r.like_count, "dislike_count": r.dislike_count,
         "status": r.status, "user_id": r.user_id,
+        "auto_sent": getattr(r, 'auto_sent', False) or False,
         "created_at": r.created_at.strftime('%Y-%m-%d %H:%M') if r.created_at else None
     } for r in reports])
 
@@ -638,15 +1021,19 @@ def share_nearby():
 
 @share_bp.route('/share-report/toggle/<int:report_id>/<string:action>', methods=['GET', 'POST'])
 def share_report_toggle(report_id, action):
-    if session.get('role') not in ['admin', 'leader']:
+    if not _share_mgr():
         return jsonify({"status":"error","msg":"권한 없음"}), 403
     report = ShareReport.query.get_or_404(report_id)
     if action == 'approve':
+        _move_report_files(report, 'approved')
         report.status = 'approved'
+        report.created_at = datetime.now(timezone.utc)  # 승인 즉시 공유 목록 맨 앞에 표시
         _resolve_canonical_store_name(report)
         report.updated_at = datetime.now(timezone.utc)
     elif action == 'reject':
+        _move_report_files(report, 'rejected')
         report.status = 'rejected'
+        report.rejected_at = datetime.now(timezone.utc)
         report.updated_at = datetime.now(timezone.utc)
         # AI 학습: rejected 이미지는 AI가 다시 참고하도록 기록
         report.moderation_reason = (report.moderation_reason or '') + ' | 관리자 반려'
@@ -697,7 +1084,7 @@ def share_report_delete(report_id):
         return jsonify({"status": "error", "msg": "로그인이 필요합니다."}), 401
     report = ShareReport.query.get_or_404(report_id)
     # 공유자 본인만 삭제 가능
-    if report.user_id != session.get('user_id') and session.get('role') not in ['admin', 'leader']:
+    if report.user_id != session.get('user_id') and not _share_mgr():
         return jsonify({"status": "error", "msg": "자신의 공유만 삭제할 수 있습니다."}), 403
     db.session.delete(report)
     db.session.commit()
@@ -715,6 +1102,7 @@ def share_accept_person(report_id):
         return "<script>alert('현재 상태에서 동의할 수 없습니다.'); location.href='/main';</script>"
     report.moderation_result = 'person_accepted'
     report.status = 'approved'
+    report.created_at = datetime.now(timezone.utc)  # 승인 즉시 공유 목록 맨 앞에 표시
     _resolve_canonical_store_name(report)
     report.moderation_reason = (report.moderation_reason or '') + ' | 회원 책임 동의함'
     db.session.commit()
@@ -726,7 +1114,7 @@ def share_mosaic(report_id):
     if not uid: return jsonify({'status':'error','msg':'로그인 필요'}), 401
     report = ShareReport.query.get_or_404(report_id)
     role = session.get('role', '')
-    if report.user_id != uid and role not in ('admin', 'leader'):
+    if report.user_id != uid and not _share_mgr():
         return jsonify({'status':'error','msg':'권한 없음'}), 403
     from services.ai_service import mosaic_image_faces
     img_path = None
@@ -825,6 +1213,8 @@ def api_share_detail(report_id):
         "ai_news_links": r.ai_news_links, "ai_danger_alert": r.ai_danger_alert,
         "like_count": r.like_count, "dislike_count": r.dislike_count,
         "status": r.status,
+        "auto_sent": getattr(r, 'auto_sent', False) or False,
+        "rejected_at": r.rejected_at.strftime('%Y-%m-%d') if getattr(r, 'rejected_at', None) else None,
         "created_at": r.created_at.strftime('%Y-%m-%d %H:%M') if r.created_at else None,
         "moderation_at": r.moderation_at.strftime('%Y-%m-%d') if r.moderation_at else None,
         "store_suggestion_id": r.store_suggestion_id,
@@ -851,7 +1241,8 @@ def api_me():
                 "town": user.town or '', "village": user.village or '',
                 "curr_town": user.curr_town or '', "curr_village": user.curr_village or '',
                 "login_village": user.login_village or '',
-                "managed_pages": (user.managed_pages or '').split(','),
+"managed_pages": (user.managed_pages or '').split(','),
+                "share_mod_approved": bool(getattr(user, 'share_mod_approved', False)),
                 "office_latitude": user.office_latitude,
                 "office_longitude": user.office_longitude,
                 "office_address": user.office_address or '',

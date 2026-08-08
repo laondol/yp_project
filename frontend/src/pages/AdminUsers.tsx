@@ -13,9 +13,12 @@ interface AdminUser {
   village: string
   points: number
   is_verified_resident: boolean
+  jin_verified_at?: string | null
+  verified_method?: string | null
+  share_mod_approved?: boolean
   has_did: boolean
   has_vc: boolean
-  managed_pages: number
+  managed_pages: string
 }
 
 type SortKey = 'email' | 'village' | 'points' | 'verified' | 'role'
@@ -232,8 +235,10 @@ export default function AdminUsers() {
                       <td>{u.village || u.town || '-'}</td>
                       <td>{u.points.toLocaleString()}</td>
                       <td>
-                        {u.is_verified_resident ? (
-                          <span className="badge bg-success">✅</span>
+                        {u.verified_method === 'jin' ? (
+                          <span className="badge bg-warning text-dark" title={`QR 대면 인증 (${u.jin_verified_at || ''})`}>🏅 진인증</span>
+                        ) : u.verified_method === 'neighbor' ? (
+                          <span className="badge bg-success" title="GPS/공과금 이웃 인증">✅ 이웃인증</span>
                         ) : (
                           <span className="text-muted">-</span>
                         )}

@@ -11,9 +11,11 @@ interface ShareReport {
   town: string
   village: string
   address?: string
-  status: 'pending' | 'approved' | 'rejected'
+  status: 'pending' | 'approved' | 'rejected' | 'draft' | 'flagged' | 'pending_review' | 'pending_person'
   ai_danger_alert: boolean
+  auto_sent?: boolean
   image_path: string | null
+  extra_images?: string
   drawing_path: string | null
   video_path: string | null
   ai_category: string
@@ -24,29 +26,154 @@ interface ShareReport {
   moderation_reason?: string | null
   user_id?: number | null
   like_count?: number
+  latitude?: number | null
+  longitude?: number | null
   created_at: string
   updated_at: string
 }
 
-type StatusFilter = 'all' | 'pending' | 'approved' | 'rejected'
+type StatusFilter = 'all' | 'pending' | 'approved' | 'rejected' | 'draft'
 
 const statusBadge = (s: ShareReport['status']) => {
   if (s === 'pending') return <span className="badge bg-warning text-dark">승인대기</span>
   if (s === 'approved') return <span className="badge bg-success">승인완료</span>
+  if (s === 'draft') return <span className="badge bg-secondary">자동보관</span>
+  if (s === 'pending_review') return <span className="badge bg-info text-dark">영상대기</span>
+  if (s === 'pending_person') return <span className="badge bg-warning text-dark">인물확인</span>
+  if (s === 'flagged') return <span className="badge bg-danger">차단</span>
   return <span className="badge bg-danger">반려</span>
 }
 
-const truncate = (text: string, max: number) =>
-  text.length > max ? text.slice(0, max) + '…' : text
+const truncate = (text: string | null | undefined, max: number) => {
+  if (!text) return ''
+  return text.length > max ? text.slice(0, max) + '…' : text
+}
+
+function DetailModal({ r, onClose }: { r: ShareReport; onClose: () => void }) {
+  const allImages: string[] = []
+  if (r.image_path) allImages.push(r.image_path)
+  if (r.extra_images) {
+    for (const p of r.extra_images.split(',')) {
+      if (p.trim() && !allImages.includes(p.trim())) allImages.push(p.trim())
+    }
+  }
+
+  const fmt = (s: string | null | undefined) => {
+    if (!s) return '-'
+    return new Date(s).toLocaleString('ko-KR', {
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit',
+    })
+  }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 12 }} onClick={onClose}>
+      <div
+        className="bg-white"
+        style={{ borderRadius: 14, width: '100%', maxWidth: 640, maxHeight: '92vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="d-flex justify-content-between align-items-center px-3 py-2 border-bottom">
+          <strong>📍 #{r.id} 상세 검토</strong>
+          <button type="button" className="btn btn-sm btn-light" style={{ borderRadius: '50%', width: 30, height: 30, lineHeight: '20px', padding: 0 }} onClick={onClose}>&times;</button>
+        </div>
+
+        <div style={{ overflowY: 'auto', flex: 1, padding: 12 }}>
+          {/* 상태/메타 */}
+          <div className="d-flex flex-wrap gap-1 mb-3">
+            {statusBadge(r.status)}
+            {r.auto_sent && <span className="badge bg-warning text-dark">자동보관</span>}
+            {r.ai_danger_alert && <span className="badge bg-danger">⚠️ 위험</span>}
+            {r.video_path && <span className="badge bg-info text-dark">🎬 동영상</span>}
+            {r.drawing_path && <span className="badge bg-secondary">✏️ 그리기</span>}
+            <span className="badge bg-light text-dark">🏷️ {r.ai_category || '-'}</span>
+            <span className="badge bg-light text-dark">👤 {r.author_name || '비회원'}</span>
+          </div>
+
+          {/* 내용 */}
+          <h6 className="fw-bold mb-1">{r.title || '(제목 없음)'}</h6>
+          <div className="small text-muted mb-3">
+            #{r.id} · {fmt(r.created_at)}
+            {r.address ? ` · ${r.address}` : (r.town || r.village ? ` · ${r.town} ${r.village}` : '')}
+            {r.latitude && r.longitude ? ` · 📍 ${r.latitude.toFixed(6)}, ${r.longitude.toFixed(6)}` : ''}
+          </div>
+
+          {r.description && (
+            <div className="p-3 bg-light rounded mb-3" style={{ whiteSpace: 'pre-wrap' }}>
+              {r.description}
+            </div>
+          )}
+
+          {r.ai_summary && (
+            <div className="p-3 bg-light rounded mb-3 border-start border-5 border-info">
+              <strong>🤖 AI 요약:</strong><br />{r.ai_summary}
+            </div>
+          )}
+
+          {r.moderation_reason && (
+            <div className="small text-danger mb-3">🚫 반려 사유: {r.moderation_reason}</div>
+          )}
+
+          <div className="small text-muted mb-3">
+            검토: {r.is_moderated ? '✅ 완료' : '⏳ 대기'} · 결과: {r.moderation_result || '-'}
+          </div>
+
+          {/* 사진 전체 */}
+          {allImages.length > 0 && (
+            <div className="mb-3">
+              <div className="fw-bold small mb-2">📷 사진 ({allImages.length})</div>
+              <div className="d-flex flex-column gap-2">
+                {allImages.map((img, i) => (
+                  <a key={i} href={img} target="_blank" rel="noreferrer">
+                    <img src={img} alt="" className="w-100 rounded" style={{ maxHeight: 420, objectFit: 'contain', background: '#f8f9fa', border: '1px solid #eee' }} />
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 동영상 */}
+          {r.video_path && (
+            <div className="mb-3">
+              <div className="fw-bold small mb-2">🎬 동영상</div>
+              <video controls className="w-100 rounded" style={{ maxHeight: 420, background: '#000' }}>
+                <source src={r.video_path} />
+              </video>
+            </div>
+          )}
+
+          {/* 그리기 */}
+          {r.drawing_path && (
+            <div className="mb-3">
+              <div className="fw-bold small mb-2">✏️ 직접 그리기</div>
+              <a href={r.drawing_path} target="_blank" rel="noreferrer">
+                <img src={r.drawing_path} alt="" className="w-100 rounded" style={{ maxHeight: 420, objectFit: 'contain', background: '#fff', border: '1px solid #eee' }} />
+              </a>
+            </div>
+          )}
+
+          {!allImages.length && !r.video_path && !r.drawing_path && (
+            <div className="text-center text-muted py-4 bg-light rounded">첨부 미디어 없음</div>
+          )}
+
+          <div className="small text-muted text-center mt-2">
+            사진/그리기는 클릭하면 새 탭에서 원본 크기로 열립니다.
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 export default function AdminShareReports() {
   const [reports, setReports] = useState<ShareReport[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [filter, setFilter] = useState<StatusFilter>('all')
+  const [filter, setFilter] = useState<StatusFilter>('draft')
   const [search, setSearch] = useState('')
   const [busyId, setBusyId] = useState<number | null>(null)
   const [msg, setMsg] = useState<{ type: 'success' | 'danger'; text: string } | null>(null)
+  const [detail, setDetail] = useState<ShareReport | null>(null)
 
   const load = async () => {
     setLoading(true)
@@ -93,11 +220,30 @@ export default function AdminShareReports() {
     }
   }
 
+  const notify = async (id: number) => {
+    setBusyId(id)
+    setMsg(null)
+    try {
+      const res = await fetch(`/share-report/notify/${id}`, { method: 'POST' })
+      const data = await res.json()
+      if (data.status === 'success') {
+        flash('success', data.msg || `#${id} 작성자에게 안내 쪽지 발송`)
+      } else {
+        flash('danger', data.msg || '쪽지 발송 실패')
+      }
+    } catch {
+      flash('danger', '서버 연결 실패')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
   const counts = useMemo(() => ({
     all: reports.length,
     pending: reports.filter(r => r.status === 'pending').length,
     approved: reports.filter(r => r.status === 'approved').length,
     rejected: reports.filter(r => r.status === 'rejected').length,
+    draft: reports.filter(r => r.status === 'draft').length,
   }), [reports])
 
   const filtered = useMemo(() => {
@@ -116,6 +262,7 @@ export default function AdminShareReports() {
     { key: 'pending', label: '승인대기' },
     { key: 'approved', label: '승인완료' },
     { key: 'rejected', label: '반려' },
+    { key: 'draft', label: '자동보관' },
   ]
 
   if (loading) return (
@@ -171,6 +318,7 @@ export default function AdminShareReports() {
                         </h6>
                         <div className="d-flex gap-1 flex-shrink-0">
                           {statusBadge(r.status)}
+                          {r.auto_sent && <span className="badge bg-warning text-dark" title="10초 자동 발송 - 작성자 확인 대기">📬 자동</span>}
                           {r.ai_danger_alert && <span className="badge bg-danger" title="AI 위험 신호">⚠️</span>}
                         </div>
                       </div>
@@ -236,6 +384,14 @@ export default function AdminShareReports() {
                       </div>
 
                       <div className="d-flex gap-1 mt-2">
+                        <button className="btn btn-sm btn-outline-success flex-fill" onClick={() => setDetail(r)}>
+                          👁 상세보기
+                        </button>
+                        <button className="btn btn-sm btn-outline-primary flex-fill" disabled={busyId === r.id}
+                          onClick={() => notify(r.id)}
+                          title="작성자에게 자동보관 안내 쪽지 보내기">
+                          {busyId === r.id ? '처리 중...' : '📨 쪽지'}
+                        </button>
                         {r.status !== 'approved' && (
                           <button className="btn btn-sm btn-success flex-fill" disabled={busyId === r.id}
                             onClick={() => act(r.id, 'approve')}>
@@ -261,6 +417,8 @@ export default function AdminShareReports() {
           )}
         </div>
       </div>
+
+      {detail && <DetailModal r={detail} onClose={() => setDetail(null)} />}
     </div>
   )
 }
