@@ -10,10 +10,11 @@ export default function ShareReport() {
   const [submitting, setSubmitting] = useState(false)
   const [cameraReady, setCameraReady] = useState(true)
   const [previews, setPreviews] = useState<(string | null)[]>([])
-  const [cameraPreview, setCameraPreview] = useState<string | null>(null)
+  // 카메라로 찍은 사진 여러 장 누적 (연속 촬영 지원)
+  const [cameraFiles, setCameraFiles] = useState<File[]>([])
+  const [cameraPreviews, setCameraPreviews] = useState<string[]>([])
   const [videoPreview, setVideoPreview] = useState<string | null>(null)
   const [canvasVisible, setCanvasVisible] = useState(false)
-  const [cameraFile, setCameraFile] = useState<File | null>(null)
   const [videoFile, setVideoFile] = useState<File | null>(null)
   const [videoFileUpload, setVideoFileUpload] = useState<File | null>(null)
   const [videoUploadPreview, setVideoUploadPreview] = useState<string | null>(null)
@@ -117,11 +118,20 @@ export default function ShareReport() {
   }
 
   function onCameraCapture(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
-    setCameraFile(file)
-    setCameraPreview(URL.createObjectURL(file))
+    const files = e.target.files
+    if (!files?.length) return
+    // 연속 촬영: 파일을 배열에 누적 (input value 리셋으로 같은 파일 다시 촬영 가능)
+    const arr = Array.from(files)
+    setCameraFiles(prev => [...prev, ...arr])
+    setCameraPreviews(prev => [...prev, ...arr.map(f => URL.createObjectURL(f))])
     setHasContent(true)
+    e.target.value = ''
+  }
+
+  function removeCameraPhoto(i: number) {
+    setCameraFiles(prev => prev.filter((_, idx) => idx !== i))
+    setCameraPreviews(prev => prev.filter((_, idx) => idx !== i))
+    setHasContent(cameraFiles.length - 1 > 0 || previews.length > 0 || videoFile !== null || videoFileUpload !== null)
   }
 
   function onVideoCapture(e: React.ChangeEvent<HTMLInputElement>) {
@@ -203,7 +213,7 @@ export default function ShareReport() {
     setSubmitting(true)
 
     const fd = new FormData()
-    if (cameraFile) fd.append('image', cameraFile)
+    for (const f of cameraFiles) fd.append('image', f)
     if (pendingFiles.length > 0) {
       for (const f of pendingFiles) fd.append('image', f)
     } else if (fileInputRef.current?.files) {
