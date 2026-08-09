@@ -99,6 +99,9 @@ class Post(db.Model):
     total_score = db.Column(db.Integer, default=0)
     
     file_path = db.Column(db.String(300))                       # 주민 업로드/그림 저장 경로
+    latitude = db.Column(db.Float)                              # 위치: 위도
+    longitude = db.Column(db.Float)                             # 위치: 경도
+    address = db.Column(db.String(300))                         # 위치: 주소/설명
     is_forced_approved = db.Column(db.Boolean, default=False)   # 지킴이 즉시 승인 여부
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now)   # 수정일 (48시간 대기 리셋용)

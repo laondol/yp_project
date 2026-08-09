@@ -8,6 +8,38 @@ from route_modules.common import author_email_for as _author_email
 
 board_bp = Blueprint('board', __name__)
 
+def _apply_post_location(post):
+    """form의 latitude/longitude/address를 Post에 반영 (기존 값은 유지)"""
+    lat = request.form.get('latitude')
+    lng = request.form.get('longitude')
+    addr = request.form.get('address', '').strip()
+    try:
+        if lat:
+            post.latitude = float(lat)
+        if lng:
+            post.longitude = float(lng)
+    except (TypeError, ValueError):
+        pass
+    if addr:
+        post.address = addr
+
+@board_bp.route('/api/board/upload-image', methods=['POST'])
+def upload_post_image():
+    """꿈꾸기 에디터 이미지 업로드. 업로드된 파일 URL을 반환해 에디터에 <img>로 삽입된다."""
+    if 'user_id' not in session:
+        return jsonify({"status": "error", "msg": "로그인이 필요합니다."}), 401
+    from services.security import secure_save
+    post_img_dir = os.path.join(current_app.config['UPLOAD_FOLDER'], 'post_images')
+    if not os.path.exists(post_img_dir):
+        os.makedirs(post_img_dir)
+    file = request.files.get('file')
+    if not file:
+        return jsonify({"status": "error", "msg": "파일이 없습니다."}), 400
+    path = secure_save(file, post_img_dir)
+    if not path:
+        return jsonify({"status": "error", "msg": "업로드 할 수 없는 파일입니다."}), 400
+    return jsonify({"status": "success", "url": path})
+
 def _serve_spa():
     import os
     from flask import current_app, send_file
@@ -44,6 +76,7 @@ def submit_post():
         return jsonify({"status": "fail", "msg": "제목과 내용을 모두 입력해주세요."})
     user = User.query.get(session['user_id'])
     post = Post(title=title, content=content, user_id=user.id, author_name=user.real_name or user.username)
+    _apply_post_location(post)
     if 'file' in request.files:
         file = request.files['file']
         if file and file.filename != '':
@@ -80,7 +113,8 @@ def edit_post(post_id):
         post.title = request.form['title']
         post.content = request.form['content']
         post.updated_at = datetime.now(timezone.utc)
-        post.is_forced_approved = False 
+        post.is_forced_approved = False
+        _apply_post_location(post) 
         
         # 파일 업로드 처리
         if 'file' in request.files:
@@ -236,6 +270,7 @@ def api_board_post(post_id):
             'author_name': post.author_name, 'user_id': post.user_id,
             'author_email': _author_email(post.user_id),
             'file_path': post.file_path, 'category': post.category, 'status': post.status,
+            'latitude': post.latitude, 'longitude': post.longitude, 'address': post.address,
             'ai_score': post.ai_score, 'ai_summary': post.ai_summary, 'ai_reason': post.ai_reason,
             'admin_score': post.admin_score, 'leader_score': post.leader_score,
             'member_score': post.member_score, 'total_score': post.total_score,
@@ -284,6 +319,7 @@ def api_post_detail(post_id):
         'ai_score': post.ai_score, 'ai_summary': post.ai_summary, 'ai_reason': post.ai_reason,
         'admin_score': post.admin_score, 'leader_score': post.leader_score, 'member_score': post.member_score,
         'total_score': post.total_score, 'file_path': post.file_path,
+        'latitude': post.latitude, 'longitude': post.longitude, 'address': post.address,
         'like_count': post.like_count, 'dislike_count': post.dislike_count,
         'user_vote': user_vote,
         'created_at': post.created_at.isoformat() if post.created_at else None,

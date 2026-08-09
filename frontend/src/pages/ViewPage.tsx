@@ -100,6 +100,25 @@ export default function ViewPage() {
     )
   }
 
+  const renderLocation = () => {
+    const a = post.address || ''
+    const hasCoords = post.latitude != null && post.longitude != null
+    if (!a && !hasCoords) return null
+    const mapUrl = hasCoords
+      ? `https://map.kakao.com/link/to/${encodeURIComponent(a || '위치')},${post.latitude},${post.longitude}`
+      : `https://map.kakao.com/link/search/${encodeURIComponent(a)}`
+    return (
+      <div className="mb-3 p-3 rounded" style={{ background: '#f0f9ff', borderLeft: '4px solid #2980b9' }}>
+        <div className="small text-primary fw-bold mb-1">📍 위치</div>
+        {a ? <div className="small mb-1">{a}</div> : null}
+        {hasCoords ? (
+          <div className="small text-muted mb-1">{post.latitude}, {post.longitude}</div>
+        ) : null}
+        <a href={mapUrl} target="_blank" rel="noopener noreferrer" className="small">지도에서 보기 →</a>
+      </div>
+    )
+  }
+
   return (
     <div className="row g-4" style={{ maxWidth: 1000, margin: '0 auto' }}>
       <div className="col-lg-8">
@@ -135,6 +154,8 @@ export default function ViewPage() {
             ) : null}
 
             {renderFileAttachments()}
+
+            {renderLocation()}
 
             <div className="mb-4" style={{ lineHeight: 1.8 }} dangerouslySetInnerHTML={{ __html: post.content }} />
 

@@ -149,6 +149,20 @@ def create_app():
                 with db.engine.connect() as _conn:
                     _conn.execute(_sa_text('ALTER TABLE "user" ADD COLUMN share_mod_approved BOOLEAN DEFAULT FALSE'))
                     _conn.commit()
+            if 'post' in _tbls:
+                _pcols = [c['name'] for c in _inspector.get_columns('post')]
+                if 'latitude' not in _pcols:
+                    with db.engine.connect() as _conn:
+                        _conn.execute(_sa_text('ALTER TABLE post ADD COLUMN latitude FLOAT'))
+                        _conn.commit()
+                if 'longitude' not in _pcols:
+                    with db.engine.connect() as _conn:
+                        _conn.execute(_sa_text('ALTER TABLE post ADD COLUMN longitude FLOAT'))
+                        _conn.commit()
+                if 'address' not in _pcols:
+                    with db.engine.connect() as _conn:
+                        _conn.execute(_sa_text('ALTER TABLE post ADD COLUMN address VARCHAR(300)'))
+                        _conn.commit()
             # 마을지기 홍보 지도 테이블 (신규: village_place_category / village_place / village_place_report)
             _place_ddl = [
                 ("CREATE TABLE IF NOT EXISTS village_place_category ("

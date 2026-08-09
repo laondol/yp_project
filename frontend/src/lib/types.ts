@@ -21,6 +21,7 @@ export interface Post {
   ai_score?: number; ai_summary?: string; ai_reason?: string;
   admin_score?: number; leader_score?: number; member_score?: number;
   total_score?: number; file_path?: string;
+  latitude?: number; longitude?: number; address?: string;
   like_count?: number; dislike_count?: number;
   is_finalized?: boolean; is_forced_approved?: boolean;
   created_at?: string; updated_at?: string; deadline?: string;

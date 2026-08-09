@@ -12,6 +12,12 @@ export default function MainPage() {
   const [showCanvas, setShowCanvas] = useState(false)
   const drawingRef = useRef(false)
 
+  // 위치 상태
+  const [lat, setLat] = useState<string>('')
+  const [lng, setLng] = useState<string>('')
+  const [addr, setAddr] = useState<string>('')
+  const [geoBusy, setGeoBusy] = useState(false)
+
   useEffect(() => {
     if (editorRef.current && !editorRef.current.innerHTML) {
       editorRef.current.innerHTML = ''
@@ -23,7 +29,73 @@ export default function MainPage() {
     editorRef.current?.focus()
   }, [])
 
+  const insertAtCursor = (html: string) => {
+    const ed = editorRef.current
+    if (!ed) return
+    ed.focus()
+    const sel = window.getSelection()
+    if (sel && sel.rangeCount > 0 && ed.contains(sel.anchorNode)) {
+      const range = sel.getRangeAt(0)
+      range.deleteContents()
+      const node = document.createElement('div')
+      node.innerHTML = html
+      const frag = document.createDocumentFragment()
+      while (node.firstChild) frag.appendChild(node.firstChild)
+      range.insertNode(frag)
+      range.collapse(false)
+      sel.removeAllRanges()
+      sel.addRange(range)
+    } else {
+      ed.innerHTML = ed.innerHTML + html
+    }
+    ed.dispatchEvent(new Event('input', { bubbles: true }))
+  }
+
+  /** 이미지/파일을 서버에 업로드 한 뒤, 에디터에 <img>로 삽입 (즉시 본문 미리보기) */
+  const uploadImage = useCallback(async (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      alert('사진만 붙여넣기/업로드할 수 있습니다.')
+      return
+    }
+    const fd = new FormData()
+    fd.append('file', file)
+    try {
+      const res = await fetch('/api/upload/upload-image', { method: 'POST', body: fd, credentials: 'include' })
+      const data = await res.json()
+      if (data.status !== 'success' || !data.url) {
+        alert(data.msg || '이미지 업로드에 실패했습니다.')
+        return
+      }
+      insertAtCursor(`<img src="${data.url}" style="max-width:100%;border-radius:10px;margin:6px 0" alt="첨부 이미지" />`)
+    } catch {
+      alert('이미지 업로드에 실패했습니다.')
+    }
+  }, [])
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (!files?.length) return
+    for (const f of Array.from(files)) {
+      await uploadImage(f)
+    }
+    e.target.value = ''
+  }
+
   const handleFileClick = () => fileInputRef.current?.click()
+
+  /** Ctrl+V 클립보드 이미지 붙여넣기 */
+  const handlePaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
+    const items = e.clipboardData?.items
+    if (!items) return
+    for (const it of Array.from(items)) {
+      if (it.type.startsWith('image/')) {
+        e.preventDefault()
+        const file = it.getAsFile()
+        if (file) uploadImage(file)
+        return
+      }
+    }
+  }
 
   const toggleCanvas = () => setShowCanvas(prev => !prev)
 
@@ -61,6 +133,47 @@ export default function MainPage() {
     ctx.moveTo(e.clientX - rect.left, e.clientY - rect.top)
   }
 
+  /** 그리기 결과를 서버에 업로드 후 에디터에 이미지로 삽입 */
+  const saveDrawing = async () => {
+    const c = canvasRef.current
+    if (!c) return
+    const dataUrl = c.toDataURL('image/png')
+    if (dataUrl.length < 2000) {
+      alert('그림을 먼저 그려 주세요.')
+      return
+    }
+    const blob = await (await fetch(dataUrl)).blob()
+    const file = new File([blob], 'drawing.png', { type: 'image/png' })
+    await uploadImage(file)
+    setShowCanvas(false)
+  }
+
+  const getMyPlace = () => {
+    if (!navigator.geolocation) {
+      alert('이 브라우저에서는 위치를 알 수 없어요. 주소를 직접 입력해 주세요.')
+      return
+    }
+    setGeoBusy(true)
+    navigator.geolocation.getCurrentPosition(async pos => {
+      const la = pos.coords.latitude.toFixed(6)
+      const lo = pos.coords.longitude.toFixed(6)
+      setLat(la)
+      setLng(lo)
+      try {
+        const res = await fetch('/api/reverse-geocode-detail?lat=' + la + '&lon=' + lo, { credentials: 'include' })
+        const data = await res.json()
+        if (data.address) setAddr(data.address)
+        else setAddr('')
+      } catch {
+        setAddr('')
+      }
+      setGeoBusy(false)
+    }, () => {
+      setGeoBusy(false)
+      alert('위치를 찾지 못했습니다. 주소를 직접 입력해 주세요.')
+    }, { timeout: 8000 })
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     const content = editorRef.current?.innerHTML?.trim() || ''
@@ -70,6 +183,9 @@ export default function MainPage() {
     const fd = new FormData()
     fd.append('title', title.trim())
     fd.append('content', content)
+    if (lat) fd.append('latitude', lat)
+    if (lng) fd.append('longitude', lng)
+    if (addr.trim()) fd.append('address', addr.trim())
     if (fileInputRef.current?.files?.length) {
       for (const f of fileInputRef.current.files) fd.append('file', f)
     }
@@ -78,7 +194,7 @@ export default function MainPage() {
 
     let success = false
     try {
-      const res = await fetch('/submit', { method: 'POST', body: fd })
+      const res = await fetch('/submit', { method: 'POST', body: fd, credentials: 'include' })
       const data = await res.json()
       if (data.status === 'success' || data.id) {
         success = true
@@ -133,7 +249,7 @@ export default function MainPage() {
     <div style={{ maxWidth: 700, margin: '0 auto' }}>
       <h3 className="fw-bold mb-4 text-center">💭 꿈꾸기</h3>
       <p className="text-muted text-center mb-4 small">
-        양평을 위한 여러분의 아이디어를 자유롭게 기록해주세요.
+        양평을 위한 여러분의 아이디어를 자유롭게 기록해주세요. 사진은 편집기에서 바로 보이고, Ctrl+V로 붙여넣기할 수 있어요.
       </p>
 
       <form onSubmit={handleSubmit}>
@@ -173,11 +289,12 @@ export default function MainPage() {
                   minHeight: 250, maxHeight: 500, overflowY: 'auto',
                   borderRadius: 12, padding: 12,
                 }}
-                data-placeholder="우리 공동체를 위한 소중한 제안을 적어주세요."
+                onPaste={handlePaste}
+                data-placeholder="우리 공동체를 위한 소중한 제안을 적어주세요. (사진은 Ctrl+V로 붙여넣기 가능)"
               />
             </div>
 
-            <input type="file" ref={fileInputRef} className="d-none" accept="image/*,application/pdf" />
+            <input type="file" ref={fileInputRef} className="d-none" accept="image/*,application/pdf" multiple onChange={handleFileChange} />
 
             {showCanvas && (
               <div className="mb-3">
@@ -194,11 +311,48 @@ export default function MainPage() {
                   onMouseMove={draw}
                   onMouseLeave={stopDraw}
                 />
-                <div className="mt-1">
+                <div className="d-flex gap-2 mt-1">
                   <button type="button" className="btn btn-sm btn-light" onClick={clearCanvas}>지우기</button>
+                  <button type="button" className="btn btn-sm btn-success" onClick={saveDrawing}>그림 본문에 넣기</button>
                 </div>
               </div>
             )}
+
+            {/* 위치 설정 */}
+            <div className="mb-3 p-3 border rounded" style={{ background: '#f8f9fa' }}>
+              <div className="d-flex justify-content-between align-items-center mb-2">
+                <label className="fw-bold small mb-0">📍 위치 (선택)</label>
+                <button type="button" className="btn btn-sm btn-outline-primary" onClick={getMyPlace} disabled={geoBusy}>
+                  {geoBusy ? '찾는 중...' : '내 위치 가져오기'}
+                </button>
+              </div>
+              <input
+                type="text"
+                className="form-control form-control-sm mb-2"
+                placeholder="주소 또는 위치 설명 (예: 양평읍 양근리, 커뮤니티센터 앞)"
+                value={addr}
+                onChange={e => setAddr(e.target.value)}
+              />
+              <div className="d-flex gap-2">
+                <input
+                  type="number"
+                  step="0.000001"
+                  className="form-control form-control-sm"
+                  placeholder="위도"
+                  value={lat}
+                  onChange={e => setLat(e.target.value)}
+                />
+                <input
+                  type="number"
+                  step="0.000001"
+                  className="form-control form-control-sm"
+                  placeholder="경도"
+                  value={lng}
+                  onChange={e => setLng(e.target.value)}
+                />
+              </div>
+              <small className="text-muted d-block mt-1">주소 검색·수정 가능하며, GPS로 현재 위치를 자동 입력할 수 있습니다.</small>
+            </div>
 
             <button
               type="submit"
