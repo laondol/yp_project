@@ -83,14 +83,16 @@ def sanitize_image(file):
                         img = img.rotate(rotations[orientation], expand=True)
         except Exception:
             pass
-        img = img.convert('RGB')
-        out = io.BytesIO()
         fmt = 'JPEG'
         if file.filename.rsplit('.', 1)[1].lower() == 'png':
             fmt = 'PNG'
-            img = img.convert('RGBA')
+            img = img.convert('RGBA')   # 투명 배경 유지 (다른 포맷과 달리 알파 채널 보존)
         elif file.filename.rsplit('.', 1)[1].lower() == 'gif':
             fmt = 'GIF'
+            img = img.convert('P')
+        else:
+            img = img.convert('RGB')
+        out = io.BytesIO()
         save_kwargs = {'optimize': True}
         if fmt == 'JPEG':
             # 회전을 이미 적용했으므로 EXIF orientation 태그를 제거 (다시 돌아가는 것 방지)

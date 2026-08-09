@@ -11,6 +11,7 @@ export default function MainPage() {
   const [countdown, setCountdown] = useState(0)
   const [showCanvas, setShowCanvas] = useState(false)
   const drawingRef = useRef(false)
+  const [activeImg, setActiveImg] = useState<HTMLImageElement | null>(null)
 
   // 위치 상태
   const [lat, setLat] = useState<string>('')
@@ -28,6 +29,53 @@ export default function MainPage() {
     document.execCommand(cmd, false)
     editorRef.current?.focus()
   }, [])
+
+  /** 에디터 내 이미지 클릭 감지 → 정렬 도구 표시 */
+  const detectImage = useCallback(() => {
+    const sel = window.getSelection()
+    const node = sel && sel.rangeCount > 0 ? sel.anchorNode : null
+    const imgEl = node && node.nodeType === 1
+      ? (node as HTMLElement).closest('img')
+      : node && node.parentElement ? node.parentElement.closest('img') : null
+    if (imgEl && editorRef.current?.contains(imgEl)) setActiveImg(imgEl)
+  }, [])
+
+  /** 선택된 이미지 정렬 적용 (float로 글자 감기게/가운데 블록) */
+  const applyImgAlign = useCallback((how: 'left' | 'center' | 'right') => {
+    const img = activeImg
+    if (!img) return
+    const style = img.style
+    if (how === 'left') {
+      style.float = 'left'
+      style.display = ''
+      style.marginRight = '12px'
+      style.marginLeft = '0px'
+      style.width = ''
+    } else if (how === 'right') {
+      style.float = 'right'
+      style.display = ''
+      style.marginLeft = '12px'
+      style.marginRight = '0px'
+      style.width = ''
+    } else {
+      style.float = 'none'
+      style.display = 'block'
+      style.margin = '10px auto'
+      style.width = ''
+    }
+    setActiveImg(null)
+  }, [activeImg])
+
+  /** 선택된 이미지 크기 키우기/줄이기 */
+  const scaleActiveImg = useCallback((dir: 'up' | 'down') => {
+    const img = activeImg
+    if (!img) return
+    const cur = parseInt(img.style.width, 10) || img.clientWidth || 300
+    const next = Math.max(60, Math.min(600, cur + (dir === 'up' ? 60 : -60)))
+    img.style.width = next + 'px'
+    img.style.float = img.style.float || ''
+    setActiveImg(null)
+  }, [activeImg])
 
   const insertAtCursor = (html: string) => {
     const ed = editorRef.current
@@ -75,7 +123,7 @@ export default function MainPage() {
         alert(data.msg || '이미지 업로드에 실패했습니다.')
         return
       }
-      insertAtCursor(`<img src="${data.url}" style="max-width:100%;border-radius:10px;margin:6px 0" alt="첨부 이미지" />`)
+      insertAtCursor(`<img draggable="false" src="${data.url}" style="max-width:100%;border-radius:10px;margin:6px 0" alt="첨부 이미지" />`)
     } catch {
       alert('이미지 업로드에 실패했습니다.')
     }
@@ -133,13 +181,18 @@ export default function MainPage() {
     const ctx = c.getContext('2d')
     if (!ctx) return
     const rect = c.getBoundingClientRect()
+    // 캔버스는 CSS로 확대(w:100%)되어 있으므로 내부 픽셀 좌표로 환산한다
+    const sx = c.width / rect.width
+    const sy = c.height / rect.height
+    const x = (e.clientX - rect.left) * sx
+    const y = (e.clientY - rect.top) * sy
     ctx.lineWidth = 3
     ctx.lineCap = 'round'
     ctx.strokeStyle = '#333'
-    ctx.lineTo(e.clientX - rect.left, e.clientY - rect.top)
+    ctx.lineTo(x, y)
     ctx.stroke()
     ctx.beginPath()
-    ctx.moveTo(e.clientX - rect.left, e.clientY - rect.top)
+    ctx.moveTo(x, y)
   }
 
   /** 그리기 결과를 서버에 업로드 후 에디터에 이미지로 삽입 */
@@ -287,6 +340,15 @@ export default function MainPage() {
                 <button type="button" className="btn btn-outline-secondary" onClick={handleFileClick} title="사진/파일">📎</button>
                 <button type="button" className="btn btn-outline-secondary" onClick={toggleCanvas} title="그리기">✏️</button>
               </div>
+              {activeImg && (
+                <div className="btn-group btn-group-sm flex-wrap mt-1">
+                  <button type="button" className="btn btn-outline-primary" onClick={() => applyImgAlign('left')} title="왼쪽 정렬(글자가 옆으로)">↔️ 왼쪽</button>
+                  <button type="button" className="btn btn-outline-primary" onClick={() => applyImgAlign('center')} title="가운데 정렬">가운데</button>
+                  <button type="button" className="btn btn-outline-primary" onClick={() => applyImgAlign('right')} title="오른쪽 정렬">오른쪽</button>
+                  <button type="button" className="btn btn-outline-secondary" onClick={() => scaleActiveImg('down')} title="축소">➖</button>
+                  <button type="button" className="btn btn-outline-secondary" onClick={() => scaleActiveImg('up')} title="확대">➕</button>
+                </div>
+              )}
             </div>
 
             <div className="mb-3">
@@ -299,6 +361,7 @@ export default function MainPage() {
                   borderRadius: 12, padding: 12,
                 }}
                 onPaste={handlePaste}
+                onMouseUp={detectImage}
                 data-placeholder="우리 공동체를 위한 소중한 제안을 적어주세요. (사진은 Ctrl+V로 붙여넣기 가능)"
               />
             </div>
