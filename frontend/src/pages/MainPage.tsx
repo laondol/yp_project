@@ -69,7 +69,7 @@ export default function MainPage() {
     const fd = new FormData()
     fd.append('file', file)
     try {
-      const res = await fetch('/api/upload/upload-image', { method: 'POST', body: fd, credentials: 'include' })
+      const res = await fetch('/api/board/upload-image', { method: 'POST', body: fd, credentials: 'include' })
       const data = await res.json()
       if (data.status !== 'success' || !data.url) {
         alert(data.msg || '이미지 업로드에 실패했습니다.')
