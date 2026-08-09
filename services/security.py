@@ -45,6 +45,13 @@ def validate_upload(file, max_mb=20):
     header = file.read(32)
     file.seek(0)
 
+    # HEIC/HEIF: iPhone/카메라에 따라 ftyp 브랜드가 heic/heix/hevc/heif/mif1 등 다양하므로
+    # 'ftyp' 마커만 확인 (PIL/pillow_heif가 실제 디코딩 검증을 담당)
+    if ext in ('heic', 'heif'):
+        if b'ftyp' in header and (b'heic' in header or b'heif' in header or b'mif1' in header or b'avif' in header or b'msf1' in header):
+            return True, 'OK'
+        return False, '이미지 파일이 아닙니다 (HEIC 형식 불일치).'
+
     magic_exts = check_magic_bytes(header)
     if not magic_exts:
         return False, '이미지 파일이 아닙니다 (매직바이트 불일치).'

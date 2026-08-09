@@ -51,9 +51,18 @@ export default function MainPage() {
     ed.dispatchEvent(new Event('input', { bubbles: true }))
   }
 
-  /** 이미지/파일을 서버에 업로드 한 뒤, 에디터에 <img>로 삽입 (즉시 본문 미리보기) */
+  /** HEIC/HEIF 등 이미지 확장자 허용 판정 (일부 브라우저는 MIME이 비어 있음) */
+  const IMG_EXTS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif']
+  const isImageFile = (f: File): boolean => {
+    const ext = (f.name.split('.').pop() || '').toLowerCase()
+    if (f.type.startsWith('image/') || IMG_EXTS.includes(ext)) return true
+    if (f.type === '' && /\.(jpg|jpeg|png|gif|webp|heic|heif)$/i.test(f.name)) return true
+    return false
+  }
+
+  /** 이미지/파일을 서버에 업로드 한 후, 에디터에 <img>로 삽입 (즉시 본문 미리보기) */
   const uploadImage = useCallback(async (file: File) => {
-    if (!file.type.startsWith('image/')) {
+    if (!isImageFile(file)) {
       alert('사진만 붙여넣기/업로드할 수 있습니다.')
       return
     }
@@ -294,7 +303,7 @@ export default function MainPage() {
               />
             </div>
 
-            <input type="file" ref={fileInputRef} className="d-none" accept="image/*,application/pdf" multiple onChange={handleFileChange} />
+            <input type="file" ref={fileInputRef} className="d-none" accept="image/*,.heic,.heif,application/pdf" multiple onChange={handleFileChange} />
 
             {showCanvas && (
               <div className="mb-3">
