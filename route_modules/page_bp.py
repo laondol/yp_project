@@ -126,6 +126,16 @@ def charter():
 def index():
     return _serve_spa()
 
+@page_bp.route('/widget-editor')
+@page_bp.route('/widget-editor/<path:path>')
+def widget_editor(path=''):
+    return _serve_spa()
+
+@page_bp.route('/note')
+@page_bp.route('/note/<path:path>')
+def note_page(path=''):
+    return _serve_spa()
+
 @page_bp.route('/all-proposals')
 def all_proposals():
     now = datetime.now(timezone.utc)

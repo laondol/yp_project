@@ -49,6 +49,10 @@ import AdminPostgresql from './pages/AdminPostgresql'
 import AdminRampApplications from './pages/AdminRampApplications'
 import AdminPostDetail from './pages/AdminPostDetail'
 import IntroPage from './pages/IntroPage'
+import WidgetDemoPage from './pages/WidgetDemoPage'
+import NoteListPage from './pages/NoteListPage'
+import NoteWritePage from './pages/NoteWritePage'
+import NoteDetailPage from './pages/NoteDetailPage'
 import PresentationPage from './pages/PresentationPage'
 import ProposalPage from './pages/ProposalPage'
 import AllProposalsPage from './pages/AllProposalsPage'
@@ -163,6 +167,15 @@ export default function App() {
             <Route path="/service/psycho" element={<ServicePsychoPage />} />
             <Route path="/service/psycho/edit" element={<ProtectedRoute><ServicePsychoEditPage /></ProtectedRoute>} />
             <Route path="/service/ramp" element={<ServiceRampPage />} />
+
+            {/* 위젯 에디터 */}
+            <Route path="/widget-editor" element={<ProtectedRoute><WidgetDemoPage /></ProtectedRoute>} />
+
+            {/* 통벗 노트 */}
+            <Route path="/note" element={<ProtectedRoute><NoteListPage /></ProtectedRoute>} />
+            <Route path="/note/new" element={<ProtectedRoute><NoteWritePage /></ProtectedRoute>} />
+            <Route path="/note/:id" element={<ProtectedRoute><NoteDetailPage /></ProtectedRoute>} />
+            <Route path="/note/:id/edit" element={<ProtectedRoute><NoteWritePage /></ProtectedRoute>} />
 
             {/* Protected: 관리자/마을지기 전용 */}
             <Route path="/ai/chat" element={<RoleRoute roles={['admin', 'leader']}><AiChatPage /></RoleRoute>} />

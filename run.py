@@ -25,6 +25,7 @@ from route_modules.psycho_bp import psycho_bp
 from route_modules.epub_bp import epub_bp
 from route_modules.guide_bp import guide_bp
 from route_modules.did_bp import did_bp
+from route_modules.note_bp import note_bp
 from werkzeug.security import generate_password_hash
 import sys
 import os
@@ -82,6 +83,7 @@ def create_app():
     app.register_blueprint(epub_bp)
     app.register_blueprint(guide_bp)
     app.register_blueprint(did_bp)
+    app.register_blueprint(note_bp)
     
     # gunicorn에서도 실행되도록 초기화 보장
     with app.app_context():

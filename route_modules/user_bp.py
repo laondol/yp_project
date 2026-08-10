@@ -1,7 +1,7 @@
 from flask import Blueprint, render_template, request, redirect, url_for, jsonify, session, current_app, send_file
 import json as _json
 from datetime import datetime, timezone
-from models import db, User, Message, Friend, ShareReport, Post, PointHistory, VillageWish, LegalPost, PsychoPost, ChatMessage, LegalAppointment, TongBot, TongBotDraft, TongBotSchedule
+from models import db, User, Message, Friend, ShareReport, Post, PointHistory, VillageWish, LegalPost, PsychoPost, ChatMessage, LegalAppointment, TongBot, TongBotDraft, TongBotSchedule, Note
 from werkzeug.security import generate_password_hash, check_password_hash
 from route_modules.common import has_page_access
 from services.security import save_village_file
@@ -241,6 +241,9 @@ def api_user_profile(user_id):
         'appointments': appointments,
         'drafts': [{'id': d.id, 'title': d.title, 'category': d.category, 'status': d.status,
             'updated_at': d.updated_at.isoformat() if d.updated_at else None} for d in drafts],
+        'note_categories': [c[0] for c in db.session.query(Note.category).filter(
+            Note.user_id == user.id, Note.category.isnot(None), Note.category != '').distinct()
+            .order_by(Note.category).all()],
         'bot_id': bot_id,
         'bot_name': bot_name,
         'bot_mood': bot_mood,

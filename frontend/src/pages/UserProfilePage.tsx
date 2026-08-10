@@ -72,6 +72,7 @@ export default function UserProfilePage() {
     bot_memory?: string; curr_location?: string; share_images: ShareImage[];
     recent_friends: Friend[]; profile_initial: string;
     intro_page_enabled?: boolean; block_order_profile?: string[];
+    note_categories?: string[];
   } | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -85,6 +86,8 @@ export default function UserProfilePage() {
   const [showWeatherDetail, setShowWeatherDetail] = useState(false)
   const [expandedTown, setExpandedTown] = useState<string | null>(null)
   const { order, saveOrder, introEnabled, toggleIntro } = useBlockOrder('profile')
+  const [noteModalCat, setNoteModalCat] = useState<string | null>(null)
+  const [noteModalList, setNoteModalList] = useState<Draft[]>([])
 
   const load = useCallback(async () => {
     setLoading(true); setError('')
@@ -122,6 +125,15 @@ export default function UserProfilePage() {
     return `${d.getMonth() + 1}/${d.getDate()}`
   }
 
+  const openNoteModal = async (cat: string) => {
+    setNoteModalCat(cat)
+    setNoteModalList([])
+    try {
+      const d = await fetch('/api/note?category=' + encodeURIComponent(cat), { credentials: 'include' }).then(r => r.json())
+      setNoteModalList(d.notes || [])
+    } catch {}
+  }
+
   if (loading) return <Loading />
   if (error) return <ErrorMessage message={error} onRetry={load} />
   if (!data) return null
@@ -145,7 +157,14 @@ export default function UserProfilePage() {
                     {data.profile_initial}
                   </div>
                   <div>
-                    <div className="fw-bold small">{u.real_name || u.username}</div>
+                    <div className="d-flex align-items-center gap-2">
+                      <span className="fw-bold small">{u.real_name || u.username}</span>
+                      {data.is_own && (
+                        <button className="btn btn-sm btn-outline-success py-0 px-1"
+                          style={{ fontSize: '0.7rem', lineHeight: 1.4 }}
+                          onClick={() => navigate('/note')} title="노트 목록">📒 노트</button>
+                      )}
+                    </div>
                     <small className="text-muted">@{u.username} <span className="text-muted">({{
                       google: '구글', naver: '네이버', kakao: '카카오톡',
                     }[u.social_provider || ''] || '함사양'})</span></small>
@@ -184,6 +203,17 @@ export default function UserProfilePage() {
                 </button>
                 {data.is_own && (
                   <div className="mt-1"><small className="text-muted">📍 {data.curr_location || '위치 없음'}</small></div>
+                )}
+                {data.is_own && (data.note_categories?.length || 0) > 0 && (
+                  <div className="mt-2">
+                    <div className="small fw-bold text-success mb-1">📒 노트 분류</div>
+                    <div className="d-flex gap-1 flex-wrap">
+                      {data.note_categories!.map(c => (
+                        <button key={c} className="btn btn-sm btn-outline-success"
+                          onClick={() => openNoteModal(c)}>{c}</button>
+                      ))}
+                    </div>
+                  </div>
                 )}
                 {data.is_own ? (
                   <div className="mt-2 d-flex gap-1 flex-wrap">
@@ -226,7 +256,7 @@ export default function UserProfilePage() {
                     <div className="d-flex flex-wrap gap-1 justify-content-center mb-2">
                       <a href="/epub" className="btn btn-sm btn-outline-success">✍️ 콘텐츠</a>
                       <button className="btn btn-sm btn-outline-success"
-                        onClick={() => openPopup('/bot/chat?popup=1', 'tongbotChat', 'width=450,height=700,left=100,top=50')}>
+                        onClick={() => navigate('/note/new')}>
                         ✍️ 글쓰기
                       </button>
                       <button className="btn btn-sm btn-outline-info"
@@ -572,6 +602,40 @@ export default function UserProfilePage() {
               </div>
               <div className="modal-body overflow-auto" style={{ maxHeight: 'calc(80vh - 80px)' }}>
                 <MemoPanel />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 노트 분류 목록 Modal */}
+      {noteModalCat && (
+        <div className="modal d-block" style={{ background: 'rgba(0,0,0,0.4)', zIndex: 1050 }}
+          onClick={() => setNoteModalCat(null)}>
+          <div className="modal-dialog modal-dialog-centered" style={{ maxWidth: 550 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-content" style={{ borderRadius: 16, maxHeight: '80vh' }}>
+              <div className="modal-header border-0 pb-0">
+                <h5 className="fw-bold">📒 {noteModalCat}</h5>
+                <button className="btn-close" onClick={() => setNoteModalCat(null)} />
+              </div>
+              <div className="modal-body overflow-auto" style={{ maxHeight: 'calc(80vh - 80px)' }}>
+                {noteModalList.length === 0 ? (
+                  <div className="text-center text-muted py-4 small">해당 분류의 노트가 없습니다.</div>
+                ) : (
+                  <div className="list-group">
+                    {noteModalList.map((n, i) => (
+                      <button key={i} className="list-group-item list-group-item-action"
+                        onClick={() => navigate('/note/' + n.id)}>
+                        <div className="d-flex justify-content-between align-items-center">
+                          <strong className="text-truncate">{n.title || '제목없음'}</strong>
+                          <small className="text-muted ms-2 flex-shrink-0">
+                            {n.updated_at ? new Date(n.updated_at).toLocaleDateString('ko-KR') : ''}
+                          </small>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </div>
