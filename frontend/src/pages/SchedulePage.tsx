@@ -111,9 +111,11 @@ export default function SchedulePage() {
     setFormTitle(''); setFormLocation(''); setFormMemo(''); setFormAccommodation(''); setShowAccommodation(false)
     setFormAllDay(false)
     setFormRecurring(false); setFormRepeatType(''); setFormReminder(0)
-    setFormEndDate(''); setFormStartTime(''); setFormEndTime('')
+    setFormStartTime(''); setFormEndTime('')
     const d = day || selectedDay || 1
-    setFormDate(`${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`)
+    const ds = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+    setFormDate(ds)
+    setFormEndDate(ds)
     setShowForm(true)
     setTimeout(() => formRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
   }
@@ -122,19 +124,20 @@ export default function SchedulePage() {
     setEditingId(s.id)
     setFormTitle(s.title)
     const dt = s.event_date || ''
+    const edStr = s.end_date ? s.end_date.slice(0, 10) : dt.slice(0, 10)
     setFormDate(dt.slice(0, 10))
     setFormStartTime(dt.length > 10 ? dt.slice(11, 16) : '')
     if (s.end_date) {
-      setFormEndDate(s.end_date.slice(0, 10))
+      setFormEndDate(edStr)
       setFormEndTime(s.end_date.length > 10 ? s.end_date.slice(11, 16) : '')
     } else {
-      setFormEndDate(''); setFormEndTime('')
+      setFormEndDate(edStr); setFormEndTime('')
     }
     setFormLocation(s.location || '')
     const am = (s.memo || '').match(/\[숙소:([^\]]+)\]/)
     setFormAccommodation(am ? am[1] : '')
     setFormMemo((s.memo || '').replace(/\[숙소:[^\]]+\]/g, '').replace(/^\s*<br>\s*/i, '').trim())
-    setShowAccommodation(!!am || (!!formEndDate && formEndDate !== dt.slice(0, 10)))
+    setShowAccommodation(!!am || (!!edStr && edStr !== dt.slice(0, 10)))
     setFormAllDay(s.is_allday || false)
     setFormRecurring(s.is_recurring || false)
     setFormRepeatType(s.repeat_type || '')
@@ -161,7 +164,7 @@ export default function SchedulePage() {
       }
       const eventDate = formDate + (formStartTime && !formAllDay ? `T${formStartTime}:00` : 'T00:00:00')
       body.event_date = eventDate
-      if (formEndDate) {
+      if (formEndDate && (formEndDate !== formDate || (formEndTime && !formAllDay))) {
         body.end_date = formEndDate + (formEndTime && !formAllDay ? `T${formEndTime}:00` : 'T23:59:00')
       }
       if (editingId) {
