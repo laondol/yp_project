@@ -41,6 +41,8 @@ export default function SchedulePage() {
   const [formEndTime, setFormEndTime] = useState('')
   const [formLocation, setFormLocation] = useState('')
   const [formMemo, setFormMemo] = useState('')
+  const [formAccommodation, setFormAccommodation] = useState('')
+  const [showAccommodation, setShowAccommodation] = useState(false)
   const [formAllDay, setFormAllDay] = useState(false)
   const [formRecurring, setFormRecurring] = useState(false)
   const [formRepeatType, setFormRepeatType] = useState('')
@@ -86,7 +88,14 @@ export default function SchedulePage() {
 
   const eventsForDay = (day: number) => {
     const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
-    return schedules.filter(s => (s.event_date || '').startsWith(dateStr))
+    return schedules.filter(s => {
+      const sd = (s.event_date || '').slice(0, 10)
+      if ((s.event_date || '').startsWith(dateStr)) return true
+      if (s.is_recurring) return false
+      const ed = (s.end_date || '').slice(0, 10)
+      if (ed > sd) return sd <= dateStr && dateStr <= ed
+      return false
+    })
   }
 
   const changeMonth = (delta: number) => {
@@ -99,7 +108,8 @@ export default function SchedulePage() {
 
   const openAdd = (day?: number) => {
     setEditingId(null)
-    setFormTitle(''); setFormLocation(''); setFormMemo(''); setFormAllDay(false)
+    setFormTitle(''); setFormLocation(''); setFormMemo(''); setFormAccommodation(''); setShowAccommodation(false)
+    setFormAllDay(false)
     setFormRecurring(false); setFormRepeatType(''); setFormReminder(0)
     setFormEndDate(''); setFormStartTime(''); setFormEndTime('')
     const d = day || selectedDay || 1
@@ -121,7 +131,10 @@ export default function SchedulePage() {
       setFormEndDate(''); setFormEndTime('')
     }
     setFormLocation(s.location || '')
-    setFormMemo(s.memo || '')
+    const am = (s.memo || '').match(/\[숙소:([^\]]+)\]/)
+    setFormAccommodation(am ? am[1] : '')
+    setFormMemo((s.memo || '').replace(/\[숙소:[^\]]+\]/g, '').replace(/^\s*<br>\s*/i, '').trim())
+    setShowAccommodation(!!am || (!!formEndDate && formEndDate !== dt.slice(0, 10)))
     setFormAllDay(s.is_allday || false)
     setFormRecurring(s.is_recurring || false)
     setFormRepeatType(s.repeat_type || '')
@@ -134,10 +147,13 @@ export default function SchedulePage() {
     if (!formTitle.trim()) return alert('제목을 입력하세요')
     setSaving(true)
     try {
+      let memo = formMemo.trim()
+      const accommodation = formAccommodation.trim()
+      if (accommodation) memo = (memo ? memo + '<br>' : '') + '[숙소:' + accommodation + ']'
       const body: Record<string, unknown> = {
         title: formTitle.trim(),
         location: formLocation,
-        memo: formMemo,
+        memo,
         is_allday: formAllDay,
         is_recurring: formRecurring,
         repeat_type: formRepeatType,
@@ -202,14 +218,13 @@ export default function SchedulePage() {
             <button className="btn btn-sm btn-outline-secondary" onClick={() => changeMonth(1)}>▶</button>
           </div>
 
-          <div className="d-grid mb-2" style={{ gridTemplateColumns: 'repeat(7, 1fr)', gap: 2 }}>
+          <div className="d-grid mb-2" style={{ gridTemplateColumns: 'repeat(7, 1fr)', gap: 2, position: 'relative' }}>
             {DAYS.map(d => <div key={d} className="text-center small fw-bold text-muted py-1">{d}</div>)}
             {Array.from({ length: firstDay }).map((_, i) => <div key={`e${i}`} />)}
             {Array.from({ length: daysInMonth }).map((_, i) => {
               const day = i + 1
               const today = new Date()
               const isToday = year === today.getFullYear() && month === today.getMonth() + 1 && day === today.getDate()
-              const events = eventsForDay(day)
               const isSelected = selectedDay === day
               return (
                 <div key={day}
@@ -221,13 +236,51 @@ export default function SchedulePage() {
                     fontWeight: isToday ? 700 : undefined,
                   }}>
                   {day}
-                  {events.length > 0 && (
-                    <div style={{ display: 'flex', justifyContent: 'center', gap: 2, marginTop: 2 }}>
-                      {[...new Set(events.map(e => e.color || 'gray'))].slice(0, 3).map(c => (
-                        <div key={c} style={{ width: 5, height: 5, borderRadius: '50%', background: COLOR_MAP[c] || '#adb5bd' }} />
-                      ))}
-                    </div>
-                  )}
+                  {(() => {
+                    const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+                    const covering = eventsForDay(day)
+                    if (!covering.length) return null
+                    const specs = covering.slice(0, 4).map((e, ei) => {
+                      const sd = (e.event_date || '').slice(0, 10)
+                      const ed = (e.end_date || sd).slice(0, 10)
+                      const st = parseInt((e.event_date || '').slice(11, 13)) || 0
+                      const et = parseInt((e.end_date || '').slice(11, 13)) || 0
+                      const color = COLOR_MAP[e.color || 'gray'] || '#adb5bd'
+                      const isAllDay = !!e.is_allday
+                      const multiDay = ed > sd
+                      const isStart = sd === dateStr
+                      const isEnd = ed === dateStr
+                      if (!multiDay && !isAllDay && !e.is_recurring) {
+                        return { key: ei, z: 3, kind: 'dot' as const, color }
+                      }
+                      let width = 1, align: 'left' | 'right' | 'center' = 'center', z = 2
+                      if (isAllDay) { width = 1; align = 'center'; z = 1 }
+                      else if (e.is_recurring) { width = 0.5; align = 'center'; z = 2 }
+                      else if (multiDay) {
+                        if (isStart) { width = st > 0 ? (24 - st) / 24 : 1; align = 'right' }
+                        else if (isEnd) { width = et > 0 ? et / 24 : 1; align = 'left' }
+                        else { width = 1; align = 'center' }
+                      }
+                      return { key: ei, z, kind: 'bar' as const, width, align, color }
+                    })
+                    const sorted = [...specs].sort((a, b) => a.z - b.z)
+                    return (
+                      <div style={{ position: 'relative', height: 6, marginTop: 2 }}>
+                        {sorted.map(s =>
+                          s.kind === 'dot' ? (
+                            <div key={s.key} style={{ position: 'absolute', top: 0, left: '50%', transform: 'translateX(-50%)', width: 5, height: 5, borderRadius: 999, background: s.color, zIndex: 3 }} />
+                          ) : (
+                            <div key={s.key} style={{
+                              position: 'absolute', top: 0, height: 4, zIndex: s.z,
+                              width: `${s.width * 100}%`,
+                              left: s.align === 'right' ? `${(1 - s.width) * 100}%` : s.align === 'center' ? `${(1 - s.width) * 50}%` : 0,
+                              background: s.color, borderRadius: 999, opacity: 0.9,
+                            }} />
+                          )
+                        )}
+                      </div>
+                    )
+                  })()}
                 </div>
               )
             })}
@@ -549,7 +602,10 @@ export default function SchedulePage() {
                         {summaryEl}
                         {expandedRoute === s.id && routeDetail}
                         {(s.description || s.memo) && (
-                          <div className="small text-muted mt-1" style={{ whiteSpace: 'pre-wrap' }} dangerouslySetInnerHTML={{ __html: (s.description || s.memo || '').replace(/\n/g, '<br>') }} />
+                          <div className="small text-muted mt-1" style={{ whiteSpace: 'pre-wrap' }} dangerouslySetInnerHTML={{ __html: (s.description || s.memo || '').replace(/\[숙소:[^\]]+\]/g, '').replace(/^\s*<br>\s*/i, '').replace(/\n/g, '<br>') }} />
+                        )}
+                        {s.memo && s.memo.includes('[숙소:') && (
+                          <div className="small mt-1">🏠 숙소: {(s.memo.match(/\[숙소:([^\]]+)\]/) || [])[1]}</div>
                         )}
                         {transitBtns}
                       </div>
@@ -568,7 +624,7 @@ export default function SchedulePage() {
           <div className="row g-2 mb-2">
             <div className="col-5">
               <label className="small d-block">날짜</label>
-              <input type="date" className="form-control form-control-sm" value={formDate} onChange={e => setFormDate(e.target.value)} />
+              <input type="date" className="form-control form-control-sm" value={formDate} onChange={e => { setFormDate(e.target.value); setShowAccommodation(!!e.target.value && !!formEndDate && e.target.value !== formEndDate) }} />
             </div>
             <div className="col-4">
               <label className="small d-block">시간</label>
@@ -581,7 +637,7 @@ export default function SchedulePage() {
           <div className="row g-2 mb-2">
             <div className="col-5">
               <label className="small d-block">종료일</label>
-              <input type="date" className="form-control form-control-sm" value={formEndDate} onChange={e => setFormEndDate(e.target.value)} />
+              <input type="date" className="form-control form-control-sm" value={formEndDate} onChange={e => { setFormEndDate(e.target.value); setShowAccommodation(!!formDate && !!e.target.value && formDate !== e.target.value) }} />
             </div>
             <div className="col-4">
               <label className="small d-block">종료시간</label>
@@ -589,6 +645,9 @@ export default function SchedulePage() {
             </div>
           </div>
           <input className="form-control form-control-sm mb-2" placeholder="장소" value={formLocation} onChange={e => setFormLocation(e.target.value)} />
+          {showAccommodation && (
+            <input className="form-control form-control-sm mb-2" placeholder="숙소" value={formAccommodation} onChange={e => setFormAccommodation(e.target.value)} />
+          )}
           <div className="mb-2">
             <label className="small d-block">메모</label>
             <textarea className="form-control form-control-sm" rows={3} value={formMemo} onChange={e => setFormMemo(e.target.value)} />
