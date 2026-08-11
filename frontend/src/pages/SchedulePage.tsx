@@ -647,7 +647,12 @@ export default function SchedulePage() {
               <input type="time" className="form-control form-control-sm" value={formEndTime} onChange={e => setFormEndTime(e.target.value)} disabled={formAllDay} />
             </div>
           </div>
-          <input className="form-control form-control-sm mb-2" placeholder="장소" value={formLocation} onChange={e => setFormLocation(e.target.value)} />
+          <input className="form-control form-control-sm mb-2" placeholder="장소" list="scheduleLocations" value={formLocation} onChange={e => setFormLocation(e.target.value)} />
+          <datalist id="scheduleLocations">
+            {[...new Set(schedules.map(s => s.location).filter(Boolean))].map(loc => (
+              <option key={loc} value={loc as string} />
+            ))}
+          </datalist>
           {showAccommodation && (
             <input className="form-control form-control-sm mb-2" placeholder="숙소" value={formAccommodation} onChange={e => setFormAccommodation(e.target.value)} />
           )}
