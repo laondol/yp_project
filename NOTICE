@@ -1,0 +1,137 @@
+NOTICE - Third Party Licenses
+================================
+
+This project includes third-party software components governed by the licenses listed below.
+
+---
+
+### Project License
+This project is licensed under the MIT License. See LICENSE file for details.
+
+---
+
+### Major Dependencies and Their Licenses
+
+#### Python Dependencies (Backend)
+
+| Package | Version | License | Source |
+|---------|---------|---------|--------|
+| Flask | 3.x | BSD-3-Clause | https://github.com/pallets/flask |
+| Flask-SQLAlchemy | 3.x | BSD-3-Clause | https://github.com/pallets/flask-sqlalchemy |
+| Flask-CORS | 4.x | MIT | https://github.com/corydolphin/flask-cors |
+| Flask-Migrate | 4.x | MIT | https://github.com/miguelgrinberg/flask-migrate |
+| requests | 2.x | Apache-2.0 | https://github.com/psf/requests |
+| beautifulsoup4 | 4.x | MIT | https://github.com/wention/beautifulsoup4 |
+| Werkzeug | 3.x | BSD-3-Clause | https://github.com/pallets/werkzeug |
+| Markdown | 3.x | BSD-3-Clause | https://github.com/Python-Markdown/markdown |
+| python-dotenv | 1.x | BSD-3-Clause | https://github.com/theskumar/python-dotenv |
+| openai | 1.x | Apache-2.0 | https://github.com/openai/openai-python |
+| Pillow | 10.x | MIT-CMU | https://github.com/python-pillow/Pillow |
+| pillow-heif | 0.x | BSD-3-Clause | https://github.com/buhtz/pillow-heif |
+| opencv-python-headless | 4.x | Apache-2.0 | https://github.com/opencv/opencv-python |
+| authlib | 1.x | BSD-3-Clause | https://github.com/lepture/authlib |
+| **psycopg2-binary** | **2.9.12** | **LGPL-3.0 with exceptions** | https://github.com/psycopg/psycopg2 |
+| pywebpush | 2.x | BSD-3-Clause | https://github.com/web-push-libs/pywebpush |
+
+#### Node.js Dependencies (Frontend)
+
+| Package | Version | License | Source |
+|---------|---------|---------|--------|
+| react | 19.x | MIT | https://github.com/facebook/react |
+| react-dom | 19.x | MIT | https://github.com/facebook/react |
+| react-router-dom | 7.x | MIT | https://github.com/remix-run/react-router |
+| react-konva | 19.x | MIT | https://github.com/konvajs/react-konva |
+| konva | 10.x | MIT | https://github.com/konvajs/konva |
+| axios | 1.x | MIT | https://github.com/axios/axios |
+| leaflet | 1.9.4 | BSD-2-Clause | https://github.com/Leaflet/Leaflet |
+| qrcode | 1.5.4 | MIT | https://github.com/soldair/node-qrcode |
+| html5-qrcode | 2.3.8 | MIT | https://github.com/mebjas/html5-qrcode |
+| idb | 8.0.3 | MIT | https://github.com/jakearchibald/idb |
+| uuid | 14.0.1 | MIT | https://github.com/uuidjs/uuid |
+| use-image | 1.1.4 | MIT | https://github.com/andyw8/use-image |
+| cropperjs | 1.6.2 | MIT | https://github.com/fengyuanchen/cropperjs |
+| vite | 8.x | MIT | https://github.com/vitejs/vite |
+| typescript | 6.x | Apache-2.0 | https://github.com/microsoft/typescript |
+| lightningcss | 1.32.0 | MPL-2.0 | https://github.com/parcel-bundler/lightningcss |
+
+#### Special License Notes
+
+---
+
+### ⚠️ Hippocratic-2.1 Licensed Components
+
+**Packages**: `react-leaflet@5.0.0`, `@react-leaflet/core@3.0.0`
+
+**License**: Hippocratic License 2.1 (https://firstdonoharm.dev)
+
+**Usage in this project**: 
+- Interactive map components for community features:
+  - FacilityMap (공공시설 지도)
+  - VillageMapView (마을 지도)
+  - FriendsMap (벗 위치 공유)
+  - ShareMapPage / ShareDetail / ShareEdit / ShareReport (공유마당 지도)
+
+**Justification for use under Hippocratic-2.1**:
+> This software is used exclusively for **community mapping and information sharing** in a local civic platform ("함께사는양평"). The maps display public facilities, community posts, and voluntary location sharing among neighbors. There is **no military, surveillance, law enforcement, discriminatory, or harmful purpose** whatsoever. The usage aligns with the license's intent of "do no harm" by facilitating neighborly communication and local resource discovery.
+
+**Migration plan**: Gradual replacement with a custom Leaflet wrapper (BSD-2-Clause) under development in `마을지도 케비넷` module. Target: eliminate Hippocratic-2.1 dependencies within 6 months.
+
+---
+
+### ⚠️ MPL-2.0 Licensed Components
+
+**Package**: `lightningcss@1.32.0` (and platform-specific binary)
+
+**License**: Mozilla Public License 2.0 (https://www.mozilla.org/MPL/2.0/)
+
+**Usage**: CSS parser/minifier used internally by Vite build tool. **No source code modifications** made to lightningcss. Used as build-time dependency only.
+
+**Compliance**: Since no modifications to MPL-covered files are made, file-level copyleft obligations do not trigger. Source available at https://github.com/parcel-bundler/lightningcss.
+
+---
+
+### ⚠️ LGPL-3.0 with Exceptions
+
+**Package**: `psycopg2-binary@2.9.12`
+
+**License**: LGPL-3.0 with exceptions (https://www.postgresql.org/about/licence/)
+
+**Exception clause**: "As a special exception, the copyright holders give permission to link this library with independent modules to produce an executable, regardless of the license terms of these independent modules, and to copy and distribute the resulting executable under terms of your choice, provided that you also meet, for each linked independent module, the terms and conditions of the license of that module."
+
+**Compliance**: This project uses psycopg2-binary **only via dynamic import** (`import psycopg2`), makes **no modifications** to the library, and distributes it as a separate dependency. The LGPL exception for dynamic linking is satisfied.
+
+---
+
+### ⚠️ MIT-CMU (Pillow)
+
+**Package**: `Pillow@10.x`
+
+**License**: MIT-CMU (MIT with Carnegie Mellon University attribution)
+
+**Compliance**: Standard MIT terms with CMU copyright notice. No additional obligations beyond MIT.
+
+---
+
+### Build/Dev Dependencies (Not Distributed)
+
+The following are build-time only and not included in runtime distribution:
+- TypeScript (Apache-2.0)
+- Vite (MIT)
+- oxlint (MIT)
+- @types/* packages (MIT/Apache-2.0)
+- @vitejs/plugin-react (MIT)
+
+---
+
+### Attribution Requirement
+
+If you redistribute this software (in source or binary form), you must include:
+1. A copy of this NOTICE file
+2. The LICENSE file (MIT)
+3. For any MPL-2.0 components (lightningcss), offer source code per MPL Section 3.2 if modified
+
+---
+
+Generated: 2024-08-12
+Project: YP Project (함께사는양평)
+Contact: admin@unocum.kr

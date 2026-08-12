@@ -12,5 +12,5 @@ Pillow
 pillow-heif
 opencv-python-headless
 authlib
-psycopg2-binary
+psycopg2-binary  # LGPL-3.0 with exceptions - dynamic linking only, no modifications
 pywebpush
