@@ -99,6 +99,20 @@ def create_app():
                     with db.engine.connect() as _conn:
                         _conn.execute(_sa_text('ALTER TABLE tong_bot_memo ADD COLUMN end_date TIMESTAMP'))
                         _conn.commit()
+                if 'reminder_at' not in _cols:
+                    with db.engine.connect() as _conn:
+                        _conn.execute(_sa_text('ALTER TABLE tong_bot_memo ADD COLUMN reminder_at TIMESTAMP'))
+                        _conn.commit()
+            if 'schedule_reminder_log' in _tbls:
+                _cols = [c['name'] for c in _inspector.get_columns('schedule_reminder_log')]
+                if 'kind' not in _cols:
+                    with db.engine.connect() as _conn:
+                        _conn.execute(_sa_text("ALTER TABLE schedule_reminder_log ADD COLUMN kind VARCHAR(10) DEFAULT 'schedule'"))
+                        _conn.commit()
+                if 'memo_id' not in _cols:
+                    with db.engine.connect() as _conn:
+                        _conn.execute(_sa_text('ALTER TABLE schedule_reminder_log ADD COLUMN memo_id INT'))
+                        _conn.commit()
             if 'tong_bot_schedule' in _tbls:
                 _cols = [c['name'] for c in _inspector.get_columns('tong_bot_schedule')]
                 if 'repeat_lastday' not in _cols:
@@ -187,6 +201,18 @@ def create_app():
                 with db.engine.connect() as _conn:
                     _conn.execute(_sa_text(_ddl))
                     _conn.commit()
+            # bot_knowledge.id 시퀀스 복구 (시퀀스 누락 시 id null → NotNullViolation → 세션 오염 유발)
+            if 'bot_knowledge' in _tbls:
+                _seq_sql = [
+                    "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.sequences WHERE sequence_name='bot_knowledge_id_seq') THEN "
+                    "CREATE SEQUENCE bot_knowledge_id_seq; END IF; END $$;",
+                    "ALTER TABLE bot_knowledge ALTER COLUMN id SET DEFAULT nextval('bot_knowledge_id_seq')",
+                    "SELECT setval('bot_knowledge_id_seq', GREATEST(COALESCE((SELECT MAX(id) FROM bot_knowledge), 1), 1))",
+                ]
+                for _sql in _seq_sql:
+                    with db.engine.connect() as _conn:
+                        _conn.execute(_sa_text(_sql))
+                        _conn.commit()
             print("[OK] 신규 컬럼 마이그레이션 완료")
         except Exception as e:
             print(f"[SKIP] 컬럼 마이그레이션: {e}")

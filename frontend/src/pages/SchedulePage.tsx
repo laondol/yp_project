@@ -306,7 +306,8 @@ export default function SchedulePage() {
                 let transitBtns: React.ReactNode = null
                 let routeDetail: React.ReactNode = null
                 let summaryEl: React.ReactNode = null
-                let route = JSON.parse(s.content || 'null')
+                let route: any = null
+                try { route = JSON.parse(s.content || 'null') } catch {}
                 const isTransit = (s.title && (s.title.includes('이동') || s.title.includes('집으로'))) && route && Array.isArray(route.steps) && route.steps.length > 0
                 if (isTransit) {
                   try {

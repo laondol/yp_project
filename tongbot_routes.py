@@ -227,6 +227,7 @@ def bot_chat():
     if bot and not bot.is_active:
         return jsonify({"error": "통벗이 회수되어 사용할 수 없습니다. 관리자에게 문의하세요."}), 403
     user = User.query.get(uid)
+    # 메모 자연어 처리는 Motif AI(_ai_reply)가 <memo> 태그로 기록하고, 아래에서 자동 저장한다.
     raw_reply = _ai_reply(bot, user, msg)
     # AI가 <memo>태그로 기록한 내용 → 자동 메모 저장
     memo_match = re.search(r'<memo>(.*?)</memo>', raw_reply, re.DOTALL)
@@ -236,6 +237,15 @@ def bot_chat():
         if memo_content:
             from models import TongBotMemo
             m = TongBotMemo(user_id=uid, content=memo_content, author='bot')
+            m.end_date = _memo_deadline(memo_content)
+            m.reminder_at = _parse_memo_reminder(memo_content)
+            try:
+                sched, next_occ = _auto_recurring_schedule(uid, memo_content)
+                if sched and next_occ:
+                    m.end_date = next_occ
+                    m.reminder_at = next_occ
+            except Exception as e:
+                current_app.logger.error(f'메모 명령 일정 자동생성 오류: {e}')
             db.session.add(m)
             db.session.flush()
             memo_saved = m.id
@@ -326,8 +336,7 @@ def bot_chat():
         try:
             groq_key = current_app.config.get('GROQ_API_KEY', os.getenv('GROQ_API_KEY', ''))
             if groq_key:
-                from datetime import datetime, timezone as _dt
-                now = _dt.now()
+                now = datetime.now(KST)
                 reminder_prompt = f"""사용자의 알림 요청을 분석하여 아래 JSON만 출력하세요:
 {{
   "title": "짧은 제목",
@@ -347,7 +356,7 @@ def bot_chat():
                 if r.status_code == 200:
                     import json as _json
                     rd = _json.loads(r.json()['choices'][0]['message']['content'])
-                    evt = _dt.fromisoformat(rd['event_date']) if rd.get('event_date') else None
+                    evt = datetime.fromisoformat(rd['event_date']) if rd.get('event_date') else None
                     if evt:
                         if rd.get('holiday_adjust'):
                             evt = _nearest_weekday(evt)
@@ -399,6 +408,7 @@ def bot_memos():
             return jsonify({"error": "내용을 입력하세요."})
         from models import TongBotMemo
         memo = TongBotMemo(user_id=uid, content=content, author=data.get('author', 'user'), is_shared=data.get('is_shared', False))
+        memo.end_date = _memo_deadline(content)
         # 반복/요금 메모 감지 → 반복 일정 자동 생성 + 메모 종료일 설정
         try:
             sched, next_occ = _auto_recurring_schedule(uid, content)
@@ -421,6 +431,7 @@ def bot_memos():
         "id": m.id, "content": m.content, "author": m.author,
         "is_shared": m.is_shared, "done": m.done,
         "end_date": m.end_date.isoformat() if m.end_date else '',
+        "reminder_at": m.reminder_at.isoformat() if m.reminder_at else '',
         "created_at": m.created_at.isoformat() if m.created_at else '',
         "updated_at": m.updated_at.isoformat() if m.updated_at else '',
     } for m in memos]})
@@ -840,6 +851,26 @@ def _parse_korean_datetime(msg, now):
         return None
     return datetime(target_date.year, target_date.month, target_date.day, hour, minute, tzinfo=KST)
 
+def _memo_deadline(content):
+    """메모 내용에서 1회성 날짜/시간(예: '내일 오후 3시')을 파싱해 마감 시각 반환. 없으면 None"""
+    try:
+        dt = _parse_korean_datetime(content, datetime.now(KST))
+        if dt:
+            return dt.replace(tzinfo=None)
+    except Exception:
+        pass
+    return None
+
+def _parse_memo_reminder(content):
+    """메모 내용에서 '오후 8시' 등 알림 시각을 파싱해 예약 시각(KST naive) 반환. 없으면 None."""
+    try:
+        dt = _parse_korean_datetime(content, datetime.now(KST))
+        if dt:
+            return dt.replace(tzinfo=None)
+    except Exception:
+        pass
+    return None
+
 def _parse_schedule_from_text(msg, uid):
     """자연어에서 일정 정보 추출: title, event_date, location, memo"""
     result = {'title': '', 'event_date': None, 'location': '', 'memo': ''}
@@ -948,6 +979,7 @@ PLATFORM_GUIDE = """[함께사는양평 플랫폼 안내 - 회원 질문에 반�
 - 📜 기록 버튼: 이전 대화 내용을 보여줍니다. 대화창 아래에 나타납니다.
 - 글쓰기 탭: 글 작성 후 '교정부탁'을 누르면 AI가 맞춤법과 게시판을 추천해 줍니다.
 - 일정/채팅: 각각 독립된 팝업창으로 열립니다. 프로필에서 버튼을 누르세요.
+- 메모: 회원이 "메모에 ... 적어줘/기록해줘/남겨줘/알림 오게 해줘" 등으로 요청하면 <memo> 태그로 기록하고 알림 시각(reminder)도 함께 저장하는 기능입니다. 항상 지원되며, 거절하지 말고 "알림 설정해둘게요" 등 긍정적으로 답하세요.
 
 자주 묻는 질문:
 - 벗은 어디서 만드나요? → 다른 회원님 프로필에 방문하여 '벗 신청' 버튼을 누르세요. 프로필은 /user/회원번호 에서 확인할 수 있습니다.
@@ -1014,9 +1046,21 @@ def _ai_reply(bot, user, user_msg):
         except:
             pass
 
+        # 메모/일정 요청 시 게시글 검색 제외 (토큰 절약)
+        memo_keywords = ('메모', '기록해', '적어줘', '남겨줘', '알림 오게', '일정', '예약', '약속')
+        is_memo_request = any(kw in user_msg for kw in memo_keywords)
+        context_section = ''
+        if not is_memo_request:
+            context_section = f"""[플랫폼 게시글 검색 결과]
+아래는 '{user_msg}'와 관련된 게시글입니다. 회원 질문에 도움이 된다면 참고하세요:
+{build_context(user_msg)}"""
+
         prompt = f"""당신은 '{bot.bot_name}'입니다. '{user.username}'님의 개인 AI 도우미입니다.
 말투: {tone_guide} | 성장: {lvl_name} Lv.{bot.level} | 친밀도: {bot.intimacy} | 오늘: {today}
 {weather_text}
+[회원님과의 대화 기억 (회원을 도울 때 자유롭게 활용하세요)]
+{(bot.memory or '').strip() or '(아직 없음)'}
+
 [대원칙]
 1. 절대 거짓말 하지 않습니다. 모르면 모른다고 솔직히 말합니다.
 2. 존재하지 않는 기능이나 URL을 절대 만들어내지 마세요.
@@ -1031,31 +1075,49 @@ def _ai_reply(bot, user, user_msg):
 - 일반 질문에는 직접 답변하세요.
 - 플랫폼 질문은 아래 [안내]의 정보만 사용하세요.
 - 안내에 없는 기능은 "아직 그런 기능은 없습니다"라고 답하세요.
-- 최종 답변만 2~3문장으로 출력하세요. 사고 과정은 출력하지 마세요.
+- 최종 답변은 한국어로 2~3문장으로 작성하세요. 사고 과정·이유·영어 텍스트는 절대 출력하지 마세요.
+- 최종 답변은 반드시 아래 태그로 감싸서 출력하세요:
+<final_answer>최종 답변만 작성</final_answer>
+- <final_answer> 태그 바깥에는 어떤 텍스트도 출력하지 마세요.
 
 [메모 기록]
-대화 중 회원의 중요한 정보(생일·주소·연락처·약속·선호도·정기적인 할일 등)를 알게 되면
-반드시 답변末尾에 아래 형식으로 기록하세요:
-<memo>중요한 내용 요약</memo>
-예: 회원이 "매월 25일 전기요금 내는 걸 알려줘"라고 하면 →
-<memo>매월 25일 오후 6시 전기요금 납부 알림</memo>
+회원이 메모 저장을 요청하면(메모에/기록해줘/적어줘/남겨줘/알림 오게/알림 설정해줘 등), 반드시 <final_answer> 태그 뒤에 아래 형식으로 기록하세요:
+<memo>저장할 내용만 한국어로 간결하게(영어·설명·사고 과정 없이)</memo>
+예: "매월 25일 전기요금 내는 걸 알려줘" →
+<final_answer>매월 25일 전기요금을 납부하는 날을 기억해 둘게요.</final_answer>
+<memo>매월 25일 전기요금 납부</memo>
+- 알림 시각이 포함된 요청(예: "오후 7시에 알림", "30분 뒤에 알려줘")도 동일하게 <memo> 태그로 기록하세요. "알림 설정해둘게요", "기억해두고 알려드릴게요" 등 긍정적으로 답하세요.
+- 절대 "알림을 설정할 수 없다", "직접 알림 기능이 없다", "기능이 없다" 등의 거절 문구를 출력하지 마세요. 메모+알림은 항상 지원됩니다.
 
 [플랫폼 안내 - 플랫폼 기능 질문시에만 참고]
 {PLATFORM_GUIDE}
 
-        [플랫폼 게시글 검색 결과]
-아래는 '{user_msg}'와 관련된 게시글입니다. 회원 질문에 도움이 된다면 참고하세요:
-{build_context(user_msg)}
+        {context_section}
 
 회원: {user_msg}"""
         r = requests.post(f"{base_url}/chat/completions",
             headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-            json={"model": "motif-12.7b-reasoning", "messages": [{"role": "user", "content": prompt}], "max_tokens": 300},
-            timeout=20)
+            json={"model": "motif-12.7b", "messages": [{"role": "user", "content": prompt}], "max_tokens": 800},
+            timeout=60)
         if r.status_code == 200:
             reply = r.json()['choices'][0]['message']['content']
-            _save_knowledge(bot, user_msg, reply)
-            return f"{_m['emoji']} {reply}"
+            # <memo> 태그는 그대로 두어 bot_chat의 자동 메모 저장 파서가 처리하게 한다
+            memo_blk = ''
+            mm = re.search(r'<memo>.*?</memo>', reply, re.DOTALL)
+            if mm:
+                memo_blk = mm.group(0)
+            # non-reasoning 모델은 <final_answer> 태그로 답변을 감싸서 출력함
+            fam = re.search(r'<final_answer>\s*(.*?)\s*</final_answer>', reply, re.DOTALL)
+            if fam:
+                reply_clean = fam.group(1).strip()
+            else:
+                reply_clean = reply.strip()
+            reply_clean = re.sub(r'<memo>.*?</memo>', '', reply_clean, flags=re.DOTALL).strip()
+            _save_knowledge(bot, user_msg, reply_clean)
+            out = reply_clean
+            if memo_blk:
+                out = out + '\n' + memo_blk
+            return f"{_m['emoji']} {out}"
     except:
         pass
     return f"{_m['emoji']} {user.username}님, 항상 응원하고 있어요. 무엇을 도와드릴까요?"
@@ -1084,8 +1146,9 @@ def _save_knowledge(bot, user_msg, reply):
             else:
                 db.session.add(BotKnowledge(topic=topic, content=reply[:200], source_bot=bot.bot_name))
             db.session.commit()
-    except:
-        pass
+    except Exception:
+        # 커밋 실패 시 세션 오염(PendingRollback)을 방지해 이후 요청을 살린다
+        db.session.rollback()
 
 COUNSELOR_KEYWORDS = {
     'legal': ['법','소송','계약','임금','해고','변호사','노무'],
@@ -1881,7 +1944,7 @@ def bot_schedule_reminders():
     logs = ScheduleReminderLog.query.filter_by(user_id=uid, seen=False).order_by(ScheduleReminderLog.event_date.asc()).all()
     out = []
     for l in logs:
-        out.append({"id": l.id, "title": l.title, "event_date": l.event_date.strftime('%Y-%m-%d %H:%M') if l.event_date else '', "occ_date": l.occ_date})
+        out.append({"id": l.id, "title": l.title, "event_date": l.event_date.strftime('%Y-%m-%d %H:%M') if l.event_date else '', "occ_date": l.occ_date, "kind": l.kind or 'schedule'})
     return jsonify({"reminders": out})
 
 @tongbot_bp.route('/api/bot/schedule/reminder/seen', methods=['POST'])
@@ -2094,6 +2157,39 @@ def run_notification_check():
                                     db.session.delete(sub)
                         except Exception:
                             pass
+        # 메모 리마인더: reminder_at 예약 시각이 됐거나 최대 1시간 내 놓친 메모 → 알림 로그 생성
+        from models import TongBotMemo
+        memos = TongBotMemo.query.filter(
+            TongBotMemo.user_id.isnot(None),
+            TongBotMemo.reminder_at.isnot(None),
+            TongBotMemo.done != True,
+        ).all()
+        for mem in memos:
+            ra = mem.reminder_at
+            if ra and ra.tzinfo:
+                ra = ra.replace(tzinfo=None)
+            if not ra:
+                continue
+            # 예약 시각이 지났고, 아직 알림 로그가 없다면 생성 (복구 시 60분 내)
+            if ra <= now < ra + timedelta(minutes=60):
+                exists = ScheduleReminderLog.query.filter_by(memo_id=mem.id, kind='memo').first()
+                if not exists:
+                    title = (mem.content or '메모')[:50]
+                    log = ScheduleReminderLog(user_id=mem.user_id, memo_id=mem.id, kind='memo',
+                                              occ_date=ra.strftime('%Y-%m-%d'), title=title,
+                                              event_date=ra, seen=False)
+                    db.session.add(log)
+                    db.session.flush()
+                    try:
+                        from models import PushSubscription
+                        from services.push import send_push
+                        subs = PushSubscription.query.filter_by(user_id=mem.user_id).all()
+                        for sub in subs:
+                            ok = send_push(sub, title + ' 메모 알림', (ra.strftime('%Y-%m-%d %H:%M') if ra else '') + ' 메모 알림')
+                            if not ok:
+                                db.session.delete(sub)
+                    except Exception:
+                        pass
         db.session.commit()
 
 @tongbot_bp.route('/api/bot/schedule/attachment', methods=['POST'])

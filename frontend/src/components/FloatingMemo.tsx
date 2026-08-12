@@ -5,6 +5,7 @@ interface Reminder {
   title: string
   event_date: string
   occ_date?: string
+  kind?: string
 }
 
 const POLL_INTERVAL = 30000
@@ -68,7 +69,7 @@ export default function FloatingMemo() {
   }, [visible, popping, remaining, reminder])
 
   const handleClick = () => {
-    window.location.href = '/schedule'
+    window.location.href = reminder && reminder.kind === 'memo' ? '/memo' : '/schedule'
   }
 
   const handleClose = () => {

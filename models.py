@@ -480,6 +480,7 @@ class TongBotMemo(db.Model):
     done = db.Column(db.Boolean, default=False)
     seen = db.Column(db.Boolean, default=False)
     end_date = db.Column(db.DateTime, nullable=True)  # 종료일(마감일) - 반복/요금 메모 자동 설정
+    reminder_at = db.Column(db.DateTime, nullable=True)  # 메모 알림 예약 시각 ("오후 8시에 알려줘" 등)
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now)
 
@@ -918,6 +919,8 @@ class ScheduleReminderLog(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
     schedule_id = db.Column(db.Integer, db.ForeignKey('tong_bot_schedule.id'))
+    memo_id = db.Column(db.Integer, nullable=True)
+    kind = db.Column(db.String(10), default='schedule')  # schedule | memo
     occ_date = db.Column(db.String(20))
     title = db.Column(db.String(200))
     event_date = db.Column(db.DateTime)

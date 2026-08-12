@@ -865,6 +865,8 @@ function MemoPanel() {
       })
   }
 
+  const active = memos.filter(m => !m.done)
+
   return (
     <div>
       {/* New memo input */}
@@ -876,8 +878,8 @@ function MemoPanel() {
       </div>
 
       {/* Memo list */}
-      {memos.length === 0 && <div className="text-muted text-center py-4">메모가 없습니다.</div>}
-      {memos.map(m => (
+      {active.length === 0 && <div className="text-muted text-center py-4">메모가 없습니다.</div>}
+      {active.map(m => (
         <div key={m.id} className="p-2 mb-2 rounded" style={{ background: m.done ? '#f0fdf4' : '#fff', border: '1px solid #e5e7eb' }}>
           <div className="d-flex align-items-start gap-2">
             {/* Done checkbox */}
