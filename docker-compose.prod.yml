@@ -14,9 +14,17 @@ services:
     environment:
       - RAG_URL=http://yp_rag:8001
     depends_on:
-      - postgres
-      - rag
+      postgres:
+        condition: service_healthy
+      rag:
+        condition: service_started
     restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/')\""]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
 
   scheduler:
     build:
@@ -32,8 +40,10 @@ services:
       - RAG_URL=http://yp_rag:8001
     command: ["python", "scheduler.py"]
     depends_on:
-      - postgres
-      - rag
+      postgres:
+        condition: service_healthy
+      rag:
+        condition: service_started
     restart: always
 
   rag:
@@ -52,8 +62,15 @@ services:
       - .:/yp_project
       - rag_data:/yp_project/yp_rag/chroma_data
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import socket; s=socket.socket(); s.settimeout(3); s.connect(('127.0.0.1', 8001)); s.close()\""]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
 
   postgres:
     image: postgis/postgis:16-3.5-alpine
@@ -67,6 +84,12 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U yp_dev -d yp_local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
 
 volumes:
   pgdata:
