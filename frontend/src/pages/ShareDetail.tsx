@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import AuthorName from '../components/AuthorName'
+import LeafletMap from '../components/LeafletMap'
 
 interface NearbyShare { id: number; title: string; town: string; village: string; image_path: string | null; ai_category: string; distance: number }
 interface LocalNews { source: string; title: string; url: string }
@@ -46,31 +47,6 @@ export default function ShareDetail() {
     fetch(`/api/share/report/${id}`).then(r => r.json()).then(setR)
     fetch('/api/me').then(r => r.json()).then(d => { if (d.id) setMyId(d.id) }).catch(() => {})
   }, [id])
-
-  useEffect(() => {
-    if (r?.latitude && r?.longitude) {
-      if (!document.getElementById('leaflet-css')) {
-        const link = document.createElement('link')
-        link.id = 'leaflet-css'; link.rel = 'stylesheet'
-        link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'
-        document.head.appendChild(link)
-      }
-      if (!(window as any).L) {
-        const script = document.createElement('script')
-        script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
-        script.onload = initMap
-        document.head.appendChild(script)
-      } else initMap()
-    }
-    function initMap() {
-      setTimeout(() => {
-        const L = (window as any).L
-        const map = L.map('detailMap').setView([r!.latitude, r!.longitude], 15)
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map)
-        L.marker([r!.latitude, r!.longitude]).addTo(map).bindPopup(r!.title || '공유 위치')
-      }, 100)
-    }
-  }, [r])
 
   const vote = (type: 'like' | 'dislike') => {
     if (!confirm(type === 'like' ? '좋아요 하시겠습니까?' : '나빠요 하시겠습니까?')) return
@@ -309,7 +285,7 @@ export default function ShareDetail() {
       {r.latitude && r.longitude && (
         <>
           <div className="card border-0 shadow-sm mb-4" style={{borderRadius: 18, overflow: 'hidden'}}>
-            <div id="detailMap" style={{height: 300}}></div>
+            <LeafletMap center={[r.latitude, r.longitude]} zoom={15} markers={[{ position: [r.latitude, r.longitude], popup: r.title || '공유 위치' }]} style={{ height: 300 }} />
           </div>
           <div className="text-center mb-4">
             <a href={`https://www.google.com/maps/dir/?api=1&destination=${r.latitude},${r.longitude}`} target="_blank" className="btn btn-outline-primary">🗺️ 길찾기</a>

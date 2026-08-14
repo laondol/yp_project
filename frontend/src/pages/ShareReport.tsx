@@ -1,4 +1,5 @@
 import { useRef, useState, useEffect } from 'react'
+import LeafletMap from '../components/LeafletMap'
 
 export default function ShareReport() {
   const [title, setTitle] = useState('')
@@ -21,21 +22,17 @@ export default function ShareReport() {
   const [videoFileUpload, setVideoFileUpload] = useState<File | null>(null)
   const [videoUploadPreview, setVideoUploadPreview] = useState<string | null>(null)
   const [hasContent, setHasContent] = useState(false)
-  const [leafletReady, setLeafletReady] = useState(false)
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const cameraInputRef = useRef<HTMLInputElement>(null)
   const videoInputRef = useRef<HTMLInputElement>(null)
   const videoFileInputRef = useRef<HTMLInputElement>(null)
-  const mapRef = useRef<HTMLDivElement>(null)
-  const mapInstanceRef = useRef<any>(null)
   const drawingRef = useRef(false)
   const reportIdRef = useRef<number | null>(null)
   const saveQueueRef = useRef<Promise<unknown>>(Promise.resolve())
 
   useEffect(() => {
-    loadLeaflet()
     getLocation()
     checkCamera()
   }, [])
@@ -43,39 +40,6 @@ export default function ShareReport() {
   useEffect(() => {
     if (canvasVisible) setTimeout(initCanvas, 100)
   }, [canvasVisible])
-
-  useEffect(() => {
-    if (!lat || !lon || !leafletReady) return
-    const L = (window as any).L
-    if (!L || !mapRef.current) return
-    const lt = parseFloat(lat); const ln = parseFloat(lon)
-    if (isNaN(lt) || isNaN(ln)) return
-    if (mapInstanceRef.current) {
-      mapInstanceRef.current.setView([lt, ln], 15)
-      return
-    }
-    mapInstanceRef.current = L.map(mapRef.current).setView([lt, ln], 15)
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(mapInstanceRef.current)
-    const marker = L.marker([lt, ln], { draggable: true }).addTo(mapInstanceRef.current)
-    marker.on('dragend', (e: any) => {
-      const pos = e.target.getLatLng()
-      setLat(pos.lat.toFixed(7))
-      setLon(pos.lng.toFixed(7))
-    })
-    setTimeout(() => mapInstanceRef.current?.invalidateSize(), 300)
-  }, [lat, lon, leafletReady])
-
-  function loadLeaflet() {
-    if (document.getElementById('leaflet-css')) return
-    const link = document.createElement('link')
-    link.id = 'leaflet-css'; link.rel = 'stylesheet'
-    link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'
-    document.head.appendChild(link)
-    const script = document.createElement('script')
-    script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
-    script.onload = () => { setLeafletReady(true) }
-    document.head.appendChild(script)
-  }
 
   function getLocation() {
     if (!navigator.geolocation) {
@@ -421,7 +385,16 @@ const res = await fetch('/share-report/auto-save', { method: 'POST', body: fd, c
             <div className="mb-3">
               <label className="form-label fw-bold small">현재 위치 <span className="text-muted fw-normal">(핀을 드래그하여 보정)</span></label>
               <div className={`mb-2 text-center small ${lat && lon ? 'text-success' : 'text-muted'}`}>{addressDetail || locationStatus}</div>
-              <div ref={mapRef} style={{ height: 200, borderRadius: 12, display: lat && lon ? 'block' : 'none' }} className="mb-2" />
+              {lat && lon && (
+                <LeafletMap
+                  center={[parseFloat(lat), parseFloat(lon)]}
+                  zoom={15}
+                  markers={[{ position: [parseFloat(lat), parseFloat(lon)], draggable: true, id: 'main' }]}
+                  onMarkerDragEnd={(info) => { setLat(info.lat.toFixed(7)); setLon(info.lng.toFixed(7)) }}
+                  style={{ height: 200, borderRadius: 12 }}
+                  className="mb-2"
+                />
+              )}
               <div className="small text-muted text-center">
                 {lat && lon ? `${lat}, ${lon}` : ''}
               </div>

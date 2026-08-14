@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
+import LeafletMap, { type LeafletMarkerSpec } from '../components/LeafletMap'
 
 interface Media { id: number; file_path: string; latitude: number | null; longitude: number | null; caption: string; order_index: number }
 interface Page { id: number; title: string; content: string; order_index: number; latitude: number | null; longitude: number | null; media: Media[] }
@@ -11,7 +12,6 @@ export default function EpubEditor() {
   const [template, setTemplate] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [leafletReady, setLeafletReady] = useState(false)
   const [guideTemplates, setGuideTemplates] = useState<any[]>([])
   const [showTemplateModal, setShowTemplateModal] = useState(false)
   const [imgFloat, setImgFloat] = useState<'left' | 'right'>('left')
@@ -27,15 +27,23 @@ export default function EpubEditor() {
   const [rotateDeg, setRotateDeg] = useState(0)
   const [watermarkText, setWatermarkText] = useState('함께사는양평')
   const [watermarkPos, setWatermarkPos] = useState('bottom-right')
-  const mapRef = useRef<HTMLDivElement>(null)
-  const mapInstanceRef = useRef<any>(null)
-  const markersRef = useRef<any[]>([])
   const editorRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const photoEditInputRef = useRef<HTMLInputElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
   const currentPage = pages[selectedPage]
+
+  const mapCenter: [number, number] = [currentPage?.latitude || 37.5665, currentPage?.longitude || 126.978]
+  const mapMarkers: LeafletMarkerSpec[] = []
+  if (currentPage?.latitude != null && currentPage?.longitude != null) {
+    mapMarkers.push({ position: [currentPage.latitude, currentPage.longitude] })
+  }
+  ;(currentPage?.media || []).forEach(m => {
+    if (m.latitude != null && m.longitude != null) {
+      mapMarkers.push({ position: [m.latitude, m.longitude], imageUrl: m.file_path })
+    }
+  })
 
   useEffect(() => {
     fetch(`/api/epub/book/${id}`).then(r => r.json()).then(d => {
@@ -46,39 +54,6 @@ export default function EpubEditor() {
     })
     fetch('/api/guide/templates').then(r => r.json()).then(setGuideTemplates).catch(() => {})
   }, [id])
-
-  useEffect(() => {
-    if (!leafletReady || !mapRef.current || !currentPage) return
-    const L = (window as any).L
-    if (!L) return
-
-    if (mapInstanceRef.current) { mapInstanceRef.current.remove(); mapInstanceRef.current = null }
-    const lat = currentPage.latitude || 37.5665
-    const lon = currentPage.longitude || 126.978
-    mapInstanceRef.current = L.map(mapRef.current).setView([lat, lon], 14)
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(mapInstanceRef.current)
-
-    markersRef.current.forEach(m => m.remove())
-    markersRef.current = []
-
-    if (currentPage.latitude && currentPage.longitude) {
-      const m = L.marker([currentPage.latitude, currentPage.longitude]).addTo(mapInstanceRef.current)
-      markersRef.current.push(m)
-    }
-    currentPage.media.forEach(med => {
-      if (med.latitude && med.longitude) {
-        const mk = L.marker([med.latitude, med.longitude], { icon: L.divIcon({ className: '', html: `<img src="${med.file_path}" style="width:32px;height:32px;border-radius:6px;border:2px solid white;object-fit:cover;" />` }) }).addTo(mapInstanceRef.current)
-        markersRef.current.push(mk)
-      }
-    })
-    setTimeout(() => mapInstanceRef.current?.invalidateSize(), 200)
-  }, [leafletReady, selectedPage, pages])
-
-  useEffect(() => {
-    if (document.getElementById('leaflet-css')) { setLeafletReady(true); return }
-    const link = document.createElement('link'); link.id = 'leaflet-css'; link.rel = 'stylesheet'; link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'; document.head.appendChild(link)
-    const script = document.createElement('script'); script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'; script.onload = () => setLeafletReady(true); document.head.appendChild(script)
-  }, [])
 
   function updatePage(idx: number, field: string, value: any) {
     setPages(prev => {
@@ -474,7 +449,7 @@ export default function EpubEditor() {
         </div>
 
         <div className="col-4">
-          <div ref={mapRef} style={{ height: '100%', minHeight: 300, borderRadius: 12 }} />
+          <LeafletMap center={mapCenter} zoom={14} markers={mapMarkers} style={{ height: '100%', minHeight: 300, borderRadius: 12 }} />
         </div>
       </div>
 

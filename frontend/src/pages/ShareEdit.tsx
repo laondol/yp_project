@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
+import LeafletMap from '../components/LeafletMap'
 
 interface Photo { path: string }
 
@@ -15,7 +16,6 @@ export default function ShareEdit() {
   const [newFiles, setNewFiles] = useState<File[]>([])
   const [submitting, setSubmitting] = useState(false)
   const [loading, setLoading] = useState(true)
-  const [leafletReady, setLeafletReady] = useState(false)
 
   const [storeQuery, setStoreQuery] = useState('')
   const [storeResults, setStoreResults] = useState<any[]>([])
@@ -52,8 +52,6 @@ export default function ShareEdit() {
   const [editedBlobs, setEditedBlobs] = useState<Record<string, Blob>>({})
 
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const mapRef = useRef<HTMLDivElement>(null)
-  const mapInstanceRef = useRef<any>(null)
   const originalLatRef = useRef('')
   const originalLonRef = useRef('')
 
@@ -80,28 +78,7 @@ export default function ShareEdit() {
       originalLonRef.current = d.longitude || ''
       setLoading(false)
     })
-    loadLeaflet()
   }, [id])
-
-  useEffect(() => {
-    if (!lat || !lon || !leafletReady) return
-    const L = (window as any).L
-    if (!L || !mapRef.current) return
-    const lt = parseFloat(lat); const ln = parseFloat(lon)
-    if (isNaN(lt) || isNaN(ln)) return
-    if (mapInstanceRef.current) { mapInstanceRef.current.setView([lt, ln], 15); return }
-    mapInstanceRef.current = L.map(mapRef.current).setView([lt, ln], 15)
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(mapInstanceRef.current)
-    const marker = L.marker([lt, ln], { draggable: true }).addTo(mapInstanceRef.current)
-    marker.on('dragend', (e: any) => { const pos = e.target.getLatLng(); setLat(pos.lat.toFixed(7)); setLon(pos.lng.toFixed(7)) })
-    setTimeout(() => mapInstanceRef.current?.invalidateSize(), 300)
-  }, [lat, lon, leafletReady])
-
-  function loadLeaflet() {
-    if (document.getElementById('leaflet-css')) return
-    const link = document.createElement('link'); link.id = 'leaflet-css'; link.rel = 'stylesheet'; link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'; document.head.appendChild(link)
-    const script = document.createElement('script'); script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'; script.onload = () => setLeafletReady(true); document.head.appendChild(script)
-  }
 
   function loadCropperLib(cb: () => void) {
     if ((window as any).Cropper) { cb(); return }
@@ -404,7 +381,16 @@ export default function ShareEdit() {
 
             <div className="mb-3">
               <label className="form-label fw-bold small">위치 (마커를 드래그하여 보정)</label>
-              <div ref={mapRef} style={{ height: 200, borderRadius: 12 }} className="mb-2" />
+              {lat && lon && (
+                <LeafletMap
+                  center={[parseFloat(lat), parseFloat(lon)]}
+                  zoom={15}
+                  markers={[{ position: [parseFloat(lat), parseFloat(lon)], draggable: true, id: 'main' }]}
+                  onMarkerDragEnd={(info) => { setLat(info.lat.toFixed(7)); setLon(info.lng.toFixed(7)) }}
+                  style={{ height: 200, borderRadius: 12 }}
+                  className="mb-2"
+                />
+              )}
               <div className="small text-muted text-center">{lat && lon ? `${lat}, ${lon}` : ''}</div>
             </div>
 
