@@ -16,6 +16,12 @@ services:
       rag:
         condition: service_started
     restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/')\""]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
 
   scheduler:
     build: .
@@ -28,8 +34,10 @@ services:
       - RAG_URL=http://yp_rag:8001
     command: ["python", "scheduler.py"]
     depends_on:
-      - postgres
-      - rag
+      postgres:
+        condition: service_healthy
+      rag:
+        condition: service_started
     restart: always
 
   moderation_worker:
@@ -43,9 +51,12 @@ services:
       - RAG_URL=http://yp_rag:8001
     command: ["python", "services/ai_moderation_worker.py"]
     depends_on:
-      - postgres
-      - rag
-      - flask_app
+      postgres:
+        condition: service_healthy
+      rag:
+        condition: service_started
+      flask_app:
+        condition: service_started
     restart: always
 
   react_frontend:
@@ -63,8 +74,15 @@ services:
     ports:
       - "5173:5173"
     depends_on:
-      - flask_app
+      flask_app:
+        condition: service_started
     restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:5173/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   postgres:
     image: postgis/postgis:16-3.5-alpine
@@ -98,8 +116,15 @@ services:
       - .:/yp_project
       - rag_data:/yp_project/yp_rag/chroma_data
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import socket; s=socket.socket(); s.settimeout(3); s.connect(('127.0.0.1', 8001)); s.close()\""]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
 
   pgadmin:
     image: dpage/pgadmin4
@@ -110,7 +135,8 @@ services:
     ports:
       - "5050:80"
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:
