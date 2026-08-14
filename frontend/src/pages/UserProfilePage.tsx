@@ -337,20 +337,26 @@ export default function UserProfilePage() {
                       <a href="/construction?tab=home" className="btn btn-sm btn-outline-secondary py-0 px-1">🏠</a>
                       <a href="/construction?tab=scenery&sub=facility" className="btn btn-sm btn-outline-secondary py-0 px-1">🚻</a>
                       <div className="ms-auto d-flex gap-1">
-                        <div className="form-check form-switch mb-0 small">
-                          <input className="form-check-input" type="checkbox" checked={u.location_share}
-                            onChange={e => fetch('/user/location/share/toggle', {
-                              method: 'POST', headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({ value: e.target.checked ? 'friends' : 'off' })
-                            })} />
+                        <div className="form-check form-switch mb-0 small" title="벗과공유">
+                          <input className="form-check-input" type="checkbox" checked={!!u.location_share}
+                            onChange={e => {
+                              const next = e.target.checked
+                              fetch('/user/location/share/toggle', {
+                                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ value: next ? 'friends' : 'off' })
+                              }).then(() => setData(d => d ? ({ ...d, profile_user: { ...d.profile_user, location_share: next } }) : d))
+                            }} />
                           <label className="form-check-label">위치</label>
                         </div>
-                        <div className="form-check form-switch mb-0 small">
-                          <input className="form-check-input" type="checkbox" checked={u.village_notify}
-                            onChange={e => fetch('/user/village/notify/toggle', {
-                              method: 'POST', headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({ value: e.target.checked })
-                            })} />
+                        <div className="form-check form-switch mb-0 small" title="벗과공유">
+                          <input className="form-check-input" type="checkbox" checked={!!u.village_notify}
+                            onChange={e => {
+                              const next = e.target.checked
+                              fetch('/user/village/notify/toggle', {
+                                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ value: next })
+                              }).then(() => setData(d => d ? ({ ...d, profile_user: { ...d.profile_user, village_notify: next } }) : d))
+                            }} />
                           <label className="form-check-label">소식</label>
                         </div>
                       </div>

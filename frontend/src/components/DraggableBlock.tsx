@@ -77,20 +77,6 @@ export default function DraggableBlock({
       }}
     >
       {children}
-      <button
-        className="drag-handle d-none d-md-flex"
-        title="순서 변경"
-        style={{
-          position: 'absolute', top: 8, right: 8, zIndex: 10,
-          width: 28, height: 28, borderRadius: 6,
-          border: '1px solid #dee2e6', background: '#fff',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          cursor: 'grab', fontSize: '0.9rem', color: '#6c757d',
-        }}
-        onMouseDown={ev => ev.stopPropagation()}
-      >
-        ⠿
-      </button>
     </div>
   )
 }
