@@ -561,7 +561,7 @@ class VillageCache(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.now)
 
 class BotKnowledge(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
+    id = db.Column(db.Integer, db.Sequence('bot_knowledge_id_seq'), primary_key=True)
     topic = db.Column(db.String(100))
     content = db.Column(db.Text)
     source_bot = db.Column(db.String(30))

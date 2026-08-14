@@ -6,13 +6,15 @@ services:
       - .:/yp_project
     working_dir: /yp_project
     ports:
-      - "5000:5000"
+      - "127.0.0.1:8080:5000"
     env_file: .env
     environment:
       - RAG_URL=http://yp_rag:8001
     depends_on:
-      - postgres
-      - rag
+      postgres:
+        condition: service_healthy
+      rag:
+        condition: service_started
     restart: always
 
   scheduler:
@@ -76,6 +78,12 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U yp_dev -d yp_local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
 
   rag:
     build:

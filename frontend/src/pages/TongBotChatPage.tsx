@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 
 const MOODS: Record<string, { emoji: string; label: string }> = {
   warm: { emoji: '💕', label: '따스한' }, proud: { emoji: '🥲', label: '대견한' },
@@ -20,9 +21,11 @@ interface BotInfo {
 
 interface ChatMessage {
   role: 'user' | 'bot'; text: string; name: string
+  pages?: { label: string; path: string }[]
 }
 
 export default function TongBotChatPage() {
+  const navigate = useNavigate()
   const [bot, setBot] = useState<BotInfo | null>(null)
   const [userId, setUserId] = useState<number | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -31,6 +34,7 @@ export default function TongBotChatPage() {
   const [showHistory, setShowHistory] = useState(false)
   const [historyData, setHistoryData] = useState<{role:string;text:string}[]>([])
   const bottomRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     fetch('/api/me', { credentials: 'include' }).then(r => r.json()).then(d => {
@@ -48,6 +52,10 @@ export default function TongBotChatPage() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, sending])
 
+  useEffect(() => {
+    if (!sending) inputRef.current?.focus()
+  }, [sending])
+
   const sendChat = () => {
     const msg = input.trim()
     if (!msg || sending) return
@@ -64,9 +72,15 @@ export default function TongBotChatPage() {
       ]
       if (d.schedule) { msgs.push({ role: 'bot', text: `📅 ${d.schedule.title}`, name: 'AI' }) }
       if (d.suggestion) d.suggestion.forEach((s: {text:string}) => msgs.push({ role: 'bot', text: `💡 ${s.text}`, name: '제안' }))
+      if (d.pages && d.pages.length) {
+        msgs.push({ role: 'bot', text: '🔗 아래 페이지를 바로 열어드릴게요.', name: '통벗', pages: d.pages })
+      }
       setMessages(prev => [...prev, ...msgs])
     }).catch(() => setMessages(prev => [...prev, { role: 'bot', text: '응답 실패', name: 'AI' }]))
-      .finally(() => setSending(false))
+      .finally(() => {
+        setSending(false)
+        inputRef.current?.focus()
+      })
   }
 
   const loadHistory = () => {
@@ -108,6 +122,16 @@ export default function TongBotChatPage() {
                 wordBreak: 'break-word', whiteSpace: 'pre-wrap',
               }}>
                 {c.text}
+                {c.pages && c.pages.length > 0 && (
+                  <div className="d-flex flex-wrap gap-2 mt-2">
+                    {c.pages.map((p, pi) => (
+                      <button key={pi} className="btn btn-sm btn-success"
+                        onClick={() => navigate(p.path)}>
+                        ▶ {p.label} 열기
+                      </button>
+                    ))}
+                  </div>
+                )}
                 {c.role === 'bot' && (
                   <div className="position-absolute d-flex gap-1" style={{ top: 2, right: 4 }}>
                     <button className="btn btn-sm p-0" title="도움됨" style={{ fontSize: '0.65rem' }}
@@ -146,7 +170,7 @@ export default function TongBotChatPage() {
 
       {/* Input */}
       <div className="p-3 border-top d-flex gap-2 bg-white" style={{ flexShrink: 0 }}>
-        <input className="form-control" placeholder="메시지를 입력하세요..."
+        <input ref={inputRef} className="form-control" placeholder="메시지를 입력하세요..."
           value={input} onChange={e => setInput(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat() }}}
           disabled={sending} />

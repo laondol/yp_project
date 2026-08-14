@@ -256,9 +256,9 @@ def bot_chat():
     counselor = _detect_counselor_need(msg)
     counselor_msg = None
     if counselor == 'legal':
-        counselor_msg = {'type':'legal','msg':'법률 고민이 있으신가요? 전문 노무사와 상담을 연결해 드릴까요? (50닢 소요)','url':'/legal/list'}
+        counselor_msg = {'type':'legal','msg':'법률 고민이 있으신가요? 전문 노무사와 상담을 연결해 드릴까요? (50닢 소요)','url':'/legal'}
     elif counselor == 'psycho':
-        counselor_msg = {'type':'psycho','msg':'마음이 힘드신가요? 심리상담사와 대화를 연결해 드릴까요? (30닢 소요)','url':'/psycho/list'}
+        counselor_msg = {'type':'psycho','msg':'마음이 힘드신가요? 심리상담사와 대화를 연결해 드릴까요? (30닢 소요)','url':'/psycho'}
 
     # 일정 의도 감지 → 일정 특화 AI로 처리
     schedule_info = None
@@ -370,12 +370,19 @@ def bot_chat():
         except Exception as e:
             current_app.logger.error(f'알림 생성 오류: {e}')
 
-    # 통벗 추천: 문맥에 맞는 기능 제안
-    suggestions = None
-    if not schedule_info and not shopping_info and not counselor:
-        suggestions = _get_proactive_suggestions(user, msg)
+    # 회원 도움 페이지 연결 의도 감지 → 페이지 열기 링크
+    page_links = _detect_page_links(msg)
+    if counselor_msg and counselor_msg.get('url'):
+        _c_label = '법률상담' if counselor_msg['type'] == 'legal' else '심리상담'
+        if not any(p['path'] == counselor_msg['url'] for p in page_links):
+            page_links.append({"label": _c_label, "path": counselor_msg['url']})
 
-    return jsonify({"reply": reply, "bot_name": bot.bot_name, "talent": talent, "mood": bot.mood, "level": bot.level, "counselor": counselor_msg, "schedule": schedule_info, "shopping": shopping_info, "suggestion": suggestions})
+    # 페이지 링크가 있으면 LLM이 "열 수 없다"고 한 답변을 일관되게 치환
+    if page_links:
+        if any(k in reply for k in ['열어드릴 수 없', '열 수 없', '기능이 없', '지원하지 않', '제공할 수 없', '없습니다', '할 수 없']):
+            reply = "원하시는 페이지를 아래 '페이지 열기' 버튼으로 바로 열어드릴게요! 👇"
+
+    return jsonify({"reply": reply, "bot_name": bot.bot_name, "talent": talent, "mood": bot.mood, "level": bot.level, "counselor": counselor_msg, "schedule": schedule_info, "shopping": shopping_info, "pages": page_links})
 
 @tongbot_bp.route('/api/bot/history')
 def bot_history():
@@ -1086,8 +1093,13 @@ def _ai_reply(bot, user, user_msg):
 - 알림 시각이 포함된 요청(예: "오후 7시에 알림", "30분 뒤에 알려줘")도 동일하게 <memo> 태그로 기록하세요. "알림 설정해둘게요", "기억해두고 알려드릴게요" 등 긍정적으로 답하세요.
 - 절대 "알림을 설정할 수 없다", "직접 알림 기능이 없다", "기능이 없다" 등의 거절 문구를 출력하지 마세요. 메모+알림은 항상 지원됩니다.
 
-[플랫폼 안내 - 플랫폼 기능 질문시에만 참고]
-{PLATFORM_GUIDE}
+        [페이지 열기 기능 (지원됨)]
+        회원이 특정 페이지 열기/이동/보기를 요청하면, 당신은 채팅창 아래에 '페이지 열기' 버튼을 제공합니다.
+        이 버튼을 누르면 해당 페이지가 바로 열립니다. 따라서 "직접 열어드릴 수 없습니다/그런 기능이 없습니다"라고 절대 말하지 마세요.
+        대신 "아래 '페이지 열기' 버튼으로 바로 열어드릴게요"라고 안내하세요. 지원 페이지: 일정, 메모, 편의시설, 뉴스, 공유마당, 우리마을, 채팅.
+
+        [플랫폼 안내 - 플랫폼 기능 질문시에만 참고]
+        {PLATFORM_GUIDE}
 
         {context_section}
 
@@ -1380,6 +1392,29 @@ def _search_shopping(query):
     return None
 
 SHOPPING_TRIGGERS = ['가격','얼마','사고','구매','쇼핑','파는','싼','비싼','최저가','최고가','가성비','추천','어디서','파나요','사나요']
+
+# 통벗이 회원을 위해 바로 열어줄 수 있는 페이지 연결 규칙
+PAGE_LINK_RULES = [
+    ('일정', '/schedule', ['일정', '스케줄', '약속', '타임라인', '캘린더', '계획', '스케쥴']),
+    ('메모', '/memo', ['메모', '기록', '적어', '메모장', '할일', '할 일', 'todo', '적기']),
+    ('편의시설', '/construction?tab=scenery&sub=facility', ['편의시설', '화장실', '주차장', '정류장', '버스정류장', '병원', '약국', '편의점', '시설', '나침반', '지도', '위치']),
+    ('뉴스·소식', '/news', ['뉴스', '소식', '뉴스레터', '공지', '알림', '보도', '기사']),
+    ('공유마당', '/share', ['공유', '나눔', '나눔마당', '공유마당', '물물교환', '기부', '나눠']),
+    ('우리마을', '/village', ['마을', '동네', '우리마을', '마을회관', '마을소식', '이장']),
+    ('채팅·친구', '/chat', ['채팅', '대화', '친구', '메시지', '톡', '톡방']),
+]
+
+def _detect_page_links(msg):
+    """메시지 의도에 따라 회원 도움 페이지 링크({label, path}) 목록 반환"""
+    msg_l = msg.lower()
+    links = []
+    seen = set()
+    for label, path, kws in PAGE_LINK_RULES:
+        if any(kw in msg_l for kw in kws):
+            if path not in seen:
+                links.append({"label": label, "path": path})
+                seen.add(path)
+    return links
 
 def _get_proactive_suggestions(user, msg):
     """문맥 기반 추천 제안"""
@@ -2912,7 +2947,7 @@ def _moderate_chat(room_id):
         prompt = f"""당신은 채팅 중재자입니다. 다음 대화를 보고 분위기를 판단하세요.
 긍정적이면 칭찬, 부정적이면 부드럽게 조율하는 한 문장을 쓰세요.
 대화: {recent}"""
-        r = requests.post(f"{base_url}/chat/completions",
+        r = requests.post("https://api.groq.com/openai/v1/chat/completions",
             headers={"Authorization": f"Bearer {key}"}, json={"model":"llama-3.1-8b-instant","messages":[{"role":"user","content":prompt}],"max_tokens":100}, timeout=15)
         if r.status_code == 200:
             reply = r.json()["choices"][0]["message"]["content"]
@@ -2977,8 +3012,7 @@ def bot_route_detail(schedule_id):
             from services.directions import next_trains_for_station, bus_stop_timetable
             odsay_key = os.getenv('ODSAY_API_KEY', current_app.config.get('ODSAY_API_KEY', ''))
             steps = route_data["steps"]
-            import datetime as _dt
-            now = _dt.datetime.now()
+            now = datetime.now(timezone.utc)
             prev_walk_end = now.hour * 60 + now.minute
             for i, step in enumerate(steps):
                 mode = step.get("mode", "")

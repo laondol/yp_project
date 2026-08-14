@@ -41,11 +41,11 @@ git commit -m "변경 설명"
 git push origin dev
 
 # 3. 서버 배포 (로컬 노트북에서)
-ssh -i "C:\Users\i0wil\.ssh\LightsailDefaultKey-ap-northeast-2_U .pem" ubuntu@3.38.80.64 \
+ssh -i "C:\Users\i0wil\.ssh\LightsailDefaultKey-ap-northeast-2.pem" ubuntu@3.38.80.64 \
   "cd /home/ubuntu/yp_project && git pull origin dev"
 
 # 4. 프론트엔드 반영 (빌드한 경우에만)
-ssh -i "C:\Users\i0wil\.ssh\LightsailDefaultKey-ap-northeast-2_U .pem" ubuntu@3.38.80.64 \
+ssh -i "C:\Users\i0wil\.ssh\LightsailDefaultKey-ap-northeast-2.pem" ubuntu@3.38.80.64 \
   "docker cp /home/ubuntu/yp_project/frontend/dist/. yp_flask:/yp_project/frontend/dist/"
 ```
 
@@ -72,15 +72,15 @@ git commit -m "변경 설명 + 마이그레이션"
 git push origin dev
 
 # 5. 서버 배포
-ssh -i "C:\Users\i0wil\.ssh\LightsailDefaultKey-ap-northeast-2_U .pem" ubuntu@3.38.80.64 \
+ssh -i "C:\Users\i0wil\.ssh\LightsailDefaultKey-ap-northeast-2.pem" ubuntu@3.38.80.64 \
   "cd /home/ubuntu/yp_project && git pull origin dev"
 
 # 6. 서버에서 마이그레이션 실행 (DDL만 변경, 데이터 변경 없음)
-ssh -i "C:\Users\i0wil\.ssh\LightsailDefaultKey-ap-northeast-2_U .pem" ubuntu@3.38.80.64 \
+ssh -i "C:\Users\i0wil\.ssh\LightsailDefaultKey-ap-northeast-2.pem" ubuntu@3.38.80.64 \
   "docker exec -e FLASK_APP=run.py yp_flask flask db upgrade"
 
 # 7. 서버 로그 확인
-ssh -i "C:\Users\i0wil\.ssh\LightsailDefaultKey-ap-northeast-2_U .pem" ubuntu@3.38.80.64 \
+ssh -i "C:\Users\i0wil\.ssh\LightsailDefaultKey-ap-northeast-2.pem" ubuntu@3.38.80.64 \
   "docker logs yp_flask --tail 20"
 ```
 
@@ -92,7 +92,7 @@ cd frontend && npm run build
 git add . && git commit -m "설명" && git push origin dev
 
 # 서버에서 git pull + 프론트 반영
-ssh -i "C:\Users\i0wil\.ssh\LightsailDefaultKey-ap-northeast-2_U .pem" ubuntu@3.38.80.64 \
+ssh -i "C:\Users\i0wil\.ssh\LightsailDefaultKey-ap-northeast-2.pem" ubuntu@3.38.80.64 \
   "cd /home/ubuntu/yp_project && git pull origin dev && \
    docker cp frontend/dist/. yp_flask:/yp_project/frontend/dist/"
 ```
@@ -164,15 +164,15 @@ curl -s -o /dev/null -w "%{http_code}" https://www.unocum.kr
 # → 200 이면 정상
 
 # 로그 확인
-ssh -i "C:\Users\i0wil\.ssh\LightsailDefaultKey-ap-northeast-2_U .pem" ubuntu@3.38.80.64 \
+ssh -i "C:\Users\i0wil\.ssh\LightsailDefaultKey-ap-northeast-2.pem" ubuntu@3.38.80.64 \
   "docker logs yp_flask --tail 20"
 
 # 에러 확인
-ssh -i "C:\Users\i0wil\.ssh\LightsailDefaultKey-ap-northeast-2_U .pem" ubuntu@3.38.80.64 \
+ssh -i "C:\Users\i0wil\.ssh\LightsailDefaultKey-ap-northeast-2.pem" ubuntu@3.38.80.64 \
   "docker logs yp_flask --tail 100 | grep -i error"
 
 # DB 마이그레이션 상태 확인
-ssh -i "C:\Users\i0wil\.ssh\LightsailDefaultKey-ap-northeast-2_U .pem" ubuntu@3.38.80.64 \
+ssh -i "C:\Users\i0wil\.ssh\LightsailDefaultKey-ap-northeast-2.pem" ubuntu@3.38.80.64 \
   "docker exec -e FLASK_APP=run.py yp_flask flask db current"
 ```
 
@@ -250,5 +250,5 @@ docker compose up -d
 ## SSH 키 위치
 
 ```
-C:\Users\i0wil\.ssh\LightsailDefaultKey-ap-northeast-2_U .pem
+C:\Users\i0wil\.ssh\LightsailDefaultKey-ap-northeast-2.pem
 ```
