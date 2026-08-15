@@ -102,6 +102,11 @@ export default function NewsList() {
                     </button>
                   </div>
                   <div className="d-flex gap-2 mt-2">
+                    <a className="btn btn-sm btn-outline-secondary py-0 flex-grow-1 text-decoration-none"
+                      href={(a.source_url && a.source_url.trim()) || ('https://search.naver.com/search.naver?query=' + encodeURIComponent(a.title || ''))}
+                      target="_blank" rel="noopener noreferrer">
+                      🔗 원문보기
+                    </a>
                     <button className="btn btn-sm btn-outline-info py-0 flex-grow-1"
                       onClick={() => navigate(`/news/${a.id}`)}>
                       💬 자세히보기

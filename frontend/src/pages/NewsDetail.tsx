@@ -86,7 +86,11 @@ export default function NewsDetail() {
         <div className="card-body p-4">
           <div className="d-flex flex-wrap gap-2 mb-3">
             <span className="badge bg-success-subtle text-success">{article.category}</span>
-            {article.source_name && <span className="badge bg-light text-dark">{article.source_name}</span>}
+            {(article.source_name || article.source_url) && (
+              <a className="badge bg-light text-dark text-decoration-none" href={(article.source_url && article.source_url.trim()) || ('https://search.naver.com/search.naver?query=' + encodeURIComponent(article.title || ''))} target="_blank" rel="noopener noreferrer">
+                {article.source_name || '원문'} 🔗
+              </a>
+            )}
           </div>
           <h2 className="fw-bold mb-3">{article.title}</h2>
           <div className="" style={{ fontSize: '1.05rem', lineHeight: 1.8 }}>

@@ -539,13 +539,13 @@ def api_news():
     q = NewsArticle.query.filter(NewsArticle.is_selected == True)
     if category:
         if category == 'kr_yp':
-            q = q.filter(NewsArticle.kr_yp_admin_approved == True, NewsArticle.category.in_(['대한민국뉴스', '양평소식', '정책정보', '지역소식']))
+            q = q.filter(NewsArticle.category.in_(['대한민국뉴스', '양평소식', '정책정보', '지역소식']))
         elif category == 'world':
-            q = q.filter(NewsArticle.world_admin_approved == True, NewsArticle.category.in_(['세계뉴스', '환경뉴스', '건강정보', '복지정보', '농업정보', '관광소식']))
+            q = q.filter(NewsArticle.category.in_(['세계뉴스', '환경뉴스', '건강정보', '복지정보', '농업정보', '관광소식']))
         else:
             q = q.filter(NewsArticle.category == category)
     else:
-        q = q.filter(db.or_(NewsArticle.world_admin_approved == True, NewsArticle.kr_yp_admin_approved == True))
+        q = q.filter(NewsArticle.category.in_(['대한민국뉴스', '양평소식', '정책정보', '지역소식', '세계뉴스', '환경뉴스', '건강정보', '복지정보', '농업정보', '관광소식']))
     articles = q.order_by(NewsArticle.created_at.desc()).paginate(page=page, per_page=20, error_out=False)
     return jsonify([{
         'id': a.id, 'title': a.title, 'summary': a.summary,

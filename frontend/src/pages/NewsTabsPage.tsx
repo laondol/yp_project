@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import Loading from '../components/common/Loading'
 import ErrorMessage from '../components/common/ErrorMessage'
 
@@ -24,7 +24,10 @@ const TABS = [
 
 export default function NewsTabsPage() {
   const navigate = useNavigate()
-  const [tab, setTab] = useState('world')
+  const location = useLocation()
+  const tabFromPath = location.pathname.includes('world') ? 'world' : 'kr_yp'
+  const [tab, setTab] = useState(tabFromPath)
+  useEffect(() => { setTab(tabFromPath) }, [location.pathname])
   const [articles, setArticles] = useState<NewsItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')

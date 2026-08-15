@@ -21,9 +21,9 @@ def spa_fallback(path=''):
 @page_bp.route('/intro')
 def intro():
     # 최신 국내 소식 5개
-    yp_news = NewsArticle.query.filter(NewsArticle.is_selected == True, NewsArticle.world_admin_approved == True, NewsArticle.category.notin_(['세계뉴스', '해외뉴스'])).order_by(NewsArticle.updated_at.desc()).limit(5).all()
+    yp_news = NewsArticle.query.filter(NewsArticle.is_selected == True, NewsArticle.category.notin_(['세계뉴스', '해외뉴스'])).order_by(NewsArticle.updated_at.desc()).limit(5).all()
     # 최신 세계 소식 5개
-    world_news = NewsArticle.query.filter(NewsArticle.is_selected == True, NewsArticle.world_admin_approved == True, NewsArticle.category.in_(['세계뉴스', '해외뉴스'])).order_by(NewsArticle.updated_at.desc()).limit(5).all()
+    world_news = NewsArticle.query.filter(NewsArticle.is_selected == True, NewsArticle.category.in_(['세계뉴스', '해외뉴스'])).order_by(NewsArticle.updated_at.desc()).limit(5).all()
     # 배경 이미지: 공유마당 승인된 모든 사진
     bg_images = db.session.query(ShareReport.image_path).filter(
         ShareReport.status == 'approved',
@@ -249,8 +249,8 @@ def reverse_geocode():
 
 @page_bp.route('/api/page/intro')
 def api_intro():
-    yp_news = NewsArticle.query.filter(NewsArticle.is_selected == True, NewsArticle.world_admin_approved == True, ~NewsArticle.category.in_(['세계뉴스', '해외뉴스'])).order_by(NewsArticle.updated_at.desc()).limit(5).all()
-    world_news = NewsArticle.query.filter(NewsArticle.is_selected == True, NewsArticle.world_admin_approved == True, NewsArticle.category.in_(['세계뉴스', '해외뉴스'])).order_by(NewsArticle.updated_at.desc()).limit(5).all()
+    yp_news = NewsArticle.query.filter(NewsArticle.is_selected == True, ~NewsArticle.category.in_(['세계뉴스', '해외뉴스'])).order_by(NewsArticle.updated_at.desc()).limit(5).all()
+    world_news = NewsArticle.query.filter(NewsArticle.is_selected == True, NewsArticle.category.in_(['세계뉴스', '해외뉴스'])).order_by(NewsArticle.updated_at.desc()).limit(5).all()
     bg_images = db.session.query(ShareReport.image_path).filter(ShareReport.status == 'approved', ShareReport.image_path.isnot(None), ShareReport.image_path != '').order_by(db.func.random()).limit(30).all()
     return jsonify({
         'yp_news': [{'id': n.id, 'title': n.title, 'category': n.category, 'created_at': n.created_at.isoformat() if n.created_at else None} for n in yp_news],
