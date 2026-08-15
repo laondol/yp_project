@@ -31,7 +31,7 @@ def verify_key(authorization: Optional[str] = Header(None)):
         raise HTTPException(status_code=403, detail="Invalid API key")
 
 class IndexRequest(BaseModel):
-    item_id: int
+    item_id: str
     title: str
     content: str
     source_type: str
@@ -54,7 +54,7 @@ def api_index(req: IndexRequest, _=Depends(verify_key)):
     return {"ok": ok}
 
 @app.delete("/item/{source_type}/{item_id}")
-def api_remove(source_type: str, item_id: int, _=Depends(verify_key)):
+def api_remove(source_type: str, item_id: str, _=Depends(verify_key)):
     ok = remove_item(source_type, item_id)
     return {"ok": ok}
 
