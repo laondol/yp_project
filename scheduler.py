@@ -84,6 +84,8 @@ def run_monthly_payout(app):
                 granted = 0
                 for u in User.query.all():
                     base = u.last_payout or u.created_at
+                    if base is not None and base.tzinfo is None:
+                        base = base.replace(tzinfo=timezone.utc)
                     if base and (now - base).days >= 30:
                         add_points(u.id, 1000, 'monthly', '30일 주기 물맑은머니 지급')
                         if 'village' in (u.managed_pages or ''):
@@ -188,6 +190,7 @@ def main():
     threading.Thread(target=run_notification_scheduler, args=(app,), daemon=True).start()
     threading.Thread(target=run_route_recalc_scheduler, args=(app,), daemon=True).start()
     threading.Thread(target=run_rag_rebuild, args=(app,), daemon=True).start()
+    threading.Thread(target=run_monthly_payout, args=(app,), daemon=True).start()
 
     print("[SCHEDULER] All schedulers started. Keeping alive...")
     while True:
