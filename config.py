@@ -18,7 +18,7 @@ class Config:
     SESSION_COOKIE_SAMESITE = 'Lax'
     SESSION_COOKIE_SECURE = os.getenv('SESSION_COOKIE_SECURE', 'false').lower() == 'true'
     UPLOAD_FOLDER = os.path.join(BASE_DIR, 'static', 'uploads')
-    MAX_CONTENT_LENGTH = 50 * 1024 * 1024
+    MAX_CONTENT_LENGTH = None  # 일반 파일 첨부 요청: 당분간 용량 제한 없음 (None=무제한, 0은 오히려 0바이트로 실패)
     JUSO_API_KEY = os.getenv('JUSO_API_KEY', '')
     DATA_GO_KR_API_KEY = os.getenv('DATA_GO_KR_API_KEY', '')
     GG_TRAFFIC_API_KEY = os.getenv('GG_TRAFFIC_API_KEY', '')
@@ -31,6 +31,15 @@ class Config:
     MOTIF_API_KEY = os.getenv('MOTIF_API_KEY', '')             # ← 추가
     MOTIF_BASE_URL = os.getenv('MOTIF_BASE_URL', 'https://chat.motiftech.io/openapi/v1')  # ← 추가
     OPENWEATHER_API_KEY = os.getenv('OPENWEATHER_API_KEY', '')
+
+    # 외부 FTP 저장소 (일반 파일 첨부: /api/upload/file → FTP, 다운로드는 Flask가 중계)
+    FTP_ENABLED = os.getenv('FTP_ENABLED', 'false').lower() == 'true'
+    FTP_HOST = os.getenv('FTP_HOST', '')
+    FTP_PORT = int(os.getenv('FTP_PORT', '21'))
+    FTP_USER = os.getenv('FTP_USER', '')
+    FTP_PASS = os.getenv('FTP_PASS', '')
+    FTP_REMOTE_DIR = os.getenv('FTP_REMOTE_DIR', '/')
+    FTP_USE_TLS = os.getenv('FTP_USE_TLS', 'false').lower() == 'true'
 
     # RAG 독립 서비스
     RAG_URL = os.getenv('RAG_URL', 'http://localhost:8001')

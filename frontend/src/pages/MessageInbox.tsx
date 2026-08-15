@@ -78,7 +78,7 @@ export default function MessageInbox() {
               <div className="small text-muted mb-1">
                 {tab === 'received' ? m.sender_name : `→ ${m.receiver_name}`}
               </div>
-              <div className="mt-2 p-2 bg-light rounded">{m.content}</div>
+              <div className="mt-2 p-2 bg-light rounded" style={{ overflowWrap: 'anywhere' }} dangerouslySetInnerHTML={{ __html: m.content || '' }} />
               {!m.is_read && tab === 'received' && (
                 <div className="text-end mt-1">
                   <button className="btn btn-sm btn-outline-success" onClick={() => markRead(m.id)}>읽음</button>

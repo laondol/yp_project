@@ -18,6 +18,7 @@ interface ContentEditorProps {
   initialContent?: string
   showLocation?: boolean
   uploadUrl?: string
+  fileUploadUrl?: string
   placeholder?: string
   onLocationChange?: (loc: LocationValue) => void
 }
@@ -29,21 +30,25 @@ const ContentEditor = forwardRef<ContentEditorHandle, ContentEditorProps>(functi
   initialContent,
   showLocation = true,
   uploadUrl = '/api/board/upload-image',
+  fileUploadUrl = '/api/upload/file',
   placeholder = '내용을 입력해 주세요. (사진은 Ctrl+V로 붙여넣기 가능)',
   onLocationChange,
 }, ref) {
   const editorRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const fileAttachRef = useRef<HTMLInputElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const drawingRef = useRef(false)
+  const dragRef = useRef<{ kind: 'rotate' | 'resize'; corner?: 'br' | 'bl' | 'tr' | 'tl'; startX: number; startY: number; baseW: number; baseH: number; natRatio: number; orgAngle: number; cx: number; cy: number; startML: number; startMT: number } | null>(null)
+  const matchSelRef = useRef<{ range: Range } | null>(null)
   const [showCanvas, setShowCanvas] = useState(false)
   const [activeImg, setActiveImg] = useState<HTMLImageElement | null>(null)
   const [overlayRect, setOverlayRect] = useState<OverlayBox | null>(null)
-  const dragRef = useRef<{ kind: 'rotate' | 'resize'; startX: number; startY: number; baseW: number; baseH: number; natRatio: number; orgAngle: number; cx: number; cy: number } | null>(null)
   const [lat, setLat] = useState('')
   const [lng, setLng] = useState('')
   const [addr, setAddr] = useState('')
   const [geoBusy, setGeoBusy] = useState(false)
+  const [fileUploading, setFileUploading] = useState(false)
 
   useEffect(() => {
     if (editorRef.current && initialContent && !editorRef.current.innerHTML) {
@@ -68,8 +73,8 @@ const ContentEditor = forwardRef<ContentEditorHandle, ContentEditorProps>(functi
 
   // ---------- 드래그 크기 조절 / 회전 핸들 ----------
   const imgBaseSize = useCallback((img: HTMLImageElement) => {
-    const w = img.style.width ? parseFloat(img.style.width) : (img.naturalWidth || img.offsetWidth || 300)
-    const h = img.style.height ? parseFloat(img.style.height) : (img.naturalHeight || img.offsetHeight || 200)
+    const w = img.offsetWidth || img.clientWidth || img.naturalWidth || 300
+    const h = img.offsetHeight || img.clientHeight || img.naturalHeight || 200
     return { w: w || 300, h: h || 200 }
   }, [])
 
@@ -160,10 +165,13 @@ const ContentEditor = forwardRef<ContentEditorHandle, ContentEditorProps>(functi
     const img = activeImg
     if (!img) return
     const styleImg = img.style
-    const cur = parseInt(styleImg.width, 10) || img.naturalWidth || img.clientWidth || 300
-    const next = Math.max(60, Math.min(600, cur + (dir === 'up' ? 60 : -60)))
-    styleImg.width = next + 'px'
+    // 현재 화면에 보이는 너비를 기준으로 조절 (naturalWidth 기준이면 max-width:100%에 의해 줄어들지 않음)
+    const cur = img.clientWidth || parseInt(styleImg.width, 10) || img.naturalWidth || 300
+    const finalW = Math.max(60, Math.min(cur + (dir === 'up' ? 60 : -60), 2000))
+    styleImg.width = finalW + 'px'
     styleImg.height = 'auto'
+    // 명시적 너비가 컨테이너보다 작을 때 max-width:100%가 표시 크기를 가둬두지 않도록 해제
+    styleImg.maxWidth = 'none'
     setOverlayRect(computeBox(img))
     setActiveImg(null)
   }, [activeImg, computeBox])
@@ -177,23 +185,29 @@ const ContentEditor = forwardRef<ContentEditorHandle, ContentEditorProps>(functi
     setOverlayRect(computeBox(img))
   }, [activeImg, computeBox, getRotationDegrees, setImgRot])
 
-  const onHandleDown = useCallback((e: React.PointerEvent<HTMLDivElement>, kind: 'rotate' | 'resize') => {
+  const onHandleDown = useCallback((e: React.PointerEvent<HTMLDivElement>, kind: 'rotate' | 'resize', corner?: 'br' | 'bl' | 'tr' | 'tl') => {
     const img = activeImg
     if (!img) return
     e.preventDefault()
     e.stopPropagation()
     const base = imgBaseSize(img)
     const r = img.getBoundingClientRect()
+    const natRatio = (img.naturalWidth && img.naturalHeight)
+      ? img.naturalWidth / img.naturalHeight
+      : (base.w / base.h)
     dragRef.current = {
       kind,
+      corner,
       startX: e.clientX,
       startY: e.clientY,
       baseW: base.w,
       baseH: base.h,
-      natRatio: base.w / base.h,
+      natRatio,
       orgAngle: getRotationDegrees(img),
       cx: r.left + r.width / 2,
       cy: r.top + r.height / 2,
+      startML: parseFloat(img.style.marginLeft) || 0,
+      startMT: parseFloat(img.style.marginTop) || 0,
     }
     const onMove = (ev: PointerEvent) => {
       const d = dragRef.current
@@ -203,11 +217,23 @@ const ContentEditor = forwardRef<ContentEditorHandle, ContentEditorProps>(functi
         const dx = ev.clientX - d.startX
         const dy = ev.clientY - d.startY
         const rad = (d.orgAngle * Math.PI) / 180
-        const inflated = (dx * Math.cos(-rad) - dy * Math.sin(-rad)) * 2
-        const newW = Math.max(60, Math.min(700, d.baseW + inflated))
-        const newH = Math.max(45, Math.min(600, newW / d.natRatio))
+        const w1 = dx * Math.cos(rad) + dy * Math.sin(rad)
+        const c = d.corner || 'br'
+        const dW = (c === 'br' || c === 'tr') ? w1 : -w1
+        const newW = Math.max(60, Math.min(700, d.baseW + dW))
+        const newH = newW / d.natRatio
         im.style.width = newW + 'px'
-        im.style.height = newH + 'px'
+        im.style.height = 'auto'
+        const dWpx = newW - d.baseW
+        const dHpx = newH - d.baseH
+        if (!im.style.cssFloat) {
+          let ml = d.startML
+          let mt = d.startMT
+          if (c === 'bl' || c === 'tl') ml = d.startML - dWpx
+          if (c === 'tl' || c === 'tr') mt = d.startMT - dHpx
+          im.style.marginLeft = ml + 'px'
+          im.style.marginTop = mt + 'px'
+        }
       } else {
         const ra = Math.atan2(ev.clientY - d.cy, ev.clientX - d.cx) * 180 / Math.PI
         const rb = Math.atan2(d.startY - d.cy, d.startX - d.cx) * 180 / Math.PI
@@ -255,7 +281,7 @@ const ContentEditor = forwardRef<ContentEditorHandle, ContentEditorProps>(functi
     return false
   }
 
-  const uploadImage = useCallback(async (file: File) => {
+  const uploadImage = useCallback(async (file: File, matchRange?: Range | null) => {
     if (!isImageFile(file)) {
       alert('사진만 붙여넣기/업로드할 수 있습니다.')
       return
@@ -269,19 +295,94 @@ const ContentEditor = forwardRef<ContentEditorHandle, ContentEditorProps>(functi
         alert(data.msg || '이미지 업로드에 실패했습니다.')
         return
       }
-      insertAtCursor(`<img draggable="false" src="${data.url}" style="max-width:100%;border-radius:10px;margin:6px 0" alt="첨부 이미지" />`)
+      if (matchRange) {
+        const img = document.createElement('img')
+        img.src = data.url
+        img.draggable = false
+        img.alt = '매치 이미지'
+        img.style.cssText = 'float:left;margin:2px;border-radius:8px;height:5em;width:auto;max-width:none;vertical-align:top;'
+        const r = matchRange.cloneRange()
+        r.collapse(false)
+        r.insertNode(img)
+        editorRef.current?.dispatchEvent(new Event('input', { bubbles: true }))
+      } else {
+        insertAtCursor(`<img draggable="false" src="${data.url}" style="max-width:100%;border-radius:10px;margin:6px 0" alt="첨부 이미지" />`)
+      }
     } catch {
       alert('이미지 업로드에 실패했습니다.')
     }
-  }, [uploadUrl])
+  }, [uploadUrl, insertAtCursor])
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
-    if (!files?.length) return
+    if (!files?.length) { matchSelRef.current = null; return }
+    const mr = matchSelRef.current?.range ?? null
     for (const f of Array.from(files)) {
-      await uploadImage(f)
+      await uploadImage(f, mr)
     }
+    matchSelRef.current = null
     e.target.value = ''
+  }
+
+  const startMatch = () => {
+    const sel = window.getSelection()
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) {
+      alert('먼저 본문에서 글자를 드래그해 선택하세요.')
+      return
+    }
+    const range = sel.getRangeAt(0)
+    if (!sel.toString().trim()) {
+      alert('글자를 선택하세요.')
+      return
+    }
+    if (activeImg) {
+      const img = activeImg
+      img.style.cssFloat = 'left'
+      img.style.margin = '2px'
+      img.style.maxWidth = 'none'
+      img.style.height = img.style.height || '5em'
+      img.style.width = 'auto'
+      img.style.verticalAlign = 'top'
+      const r = range.cloneRange()
+      r.collapse(false)
+      img.remove()
+      r.insertNode(img)
+      setActiveImg(null)
+      editorRef.current?.dispatchEvent(new Event('input', { bubbles: true }))
+    } else {
+      matchSelRef.current = { range }
+      fileInputRef.current?.click()
+    }
+  }
+
+  const handleFileAttach = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (!files?.length) return
+    setFileUploading(true)
+    try {
+      for (const f of Array.from(files)) {
+        const fd = new FormData()
+        fd.append('file', f)
+        const r = await fetch(fileUploadUrl, { method: 'POST', body: fd, credentials: 'include' })
+        let res: any = {}
+        try { res = await r.json() } catch { res = { error: await r.text().catch(() => '') } }
+        if (r.ok && res.url) {
+          const name = res.name || f.name
+          insertAtCursor(
+            `<div style="margin:6px 0"><a href="${res.url}" target="_blank" rel="noopener noreferrer" download ` +
+            `style="display:inline-block;padding:6px 10px;border:1px solid #dee2e6;border-radius:8px;background:#f8f9fa;color:#198754;text-decoration:none;font-size:0.9rem;">📎 ${name}</a></div>`
+          )
+        } else {
+          const msg = res.error || `상태 ${r.status}`
+          alert('파일 업로드 실패: ' + msg + (r.status === 401 ? '\n(로그인이 필요합니다. 시크릿 창이라면 해당 창에서 다시 로그인하세요.)' : ''))
+        }
+      }
+    } catch (err) {
+      alert('파일 업로드 실패: ' + (err instanceof Error ? err.message : String(err)))
+    } finally {
+      setFileUploading(false)
+      if (fileAttachRef.current) fileAttachRef.current.value = ''
+    }
   }
 
   const handlePaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
@@ -396,8 +497,12 @@ const ContentEditor = forwardRef<ContentEditorHandle, ContentEditorProps>(functi
           <button type="button" className="btn btn-outline-secondary" onClick={() => execCmd('underline')} title="밑줄"><u>U</u></button>
           <button type="button" className="btn btn-outline-secondary" onClick={() => execCmd('insertUnorderedList')} title="목록">&bull;</button>
           <button type="button" className="btn btn-outline-secondary" onClick={() => execCmd('insertOrderedList')} title="번호">1.</button>
-          <button type="button" className="btn btn-outline-secondary" onClick={() => fileInputRef.current?.click()} title="사진/파일">📎</button>
-          <button type="button" className="btn btn-outline-secondary" onClick={() => setShowCanvas(prev => !prev)} title="그리기">✏️</button>
+            <button type="button" className="btn btn-outline-secondary" onClick={() => fileInputRef.current?.click()} title="사진/파일">📎</button>
+            <button type="button" className="btn btn-outline-secondary" onClick={() => fileAttachRef.current?.click()} title="파일 첨부 (이미지 외 모든 파일)" disabled={fileUploading}>
+              {fileUploading ? '⏳' : '📁'}
+            </button>
+            <button type="button" className="btn btn-outline-secondary" onClick={() => setShowCanvas(prev => !prev)} title="그리기">✏️</button>
+          <button type="button" className="btn btn-outline-secondary" onClick={startMatch} title="선택한 글자와 이미지 매치">💞 매치</button>
         </div>
         {activeImg && (
           <div className="btn-group btn-group-sm flex-wrap mt-1">
@@ -446,20 +551,31 @@ const ContentEditor = forwardRef<ContentEditorHandle, ContentEditorProps>(functi
                 pointerEvents: 'auto',
               }}>↻</div>
             <div style={{ position: 'absolute', left: '50%', top: -15, width: 1, height: 15, background: '#2980b9', pointerEvents: 'none' }} />
-            <div onPointerDown={e => onHandleDown(e, 'resize')}
-              style={{
-                position: 'absolute', right: -6, bottom: -6,
+            {(['tl', 'tr', 'bl', 'br'] as const).map((corner) => {
+              const cStyle: React.CSSProperties = {
+                position: 'absolute',
                 width: 24, height: 24, background: '#27ae60', borderRadius: '50%',
-                cursor: 'nwse-resize', zIndex: 5001, touchAction: 'none',
+                cursor: (corner === 'tl' || corner === 'br') ? 'nwse-resize' : 'nesw-resize',
+                zIndex: 5001, touchAction: 'none',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 color: '#fff', fontSize: 10, boxShadow: '0 2px 6px rgba(0,0,0,0.3)',
                 pointerEvents: 'auto',
-              }}>⤢</div>
+              }
+              if (corner === 'tl') { cStyle.left = -6; cStyle.top = -6 }
+              if (corner === 'tr') { cStyle.right = -6; cStyle.top = -6 }
+              if (corner === 'bl') { cStyle.left = -6; cStyle.bottom = -6 }
+              if (corner === 'br') { cStyle.right = -6; cStyle.bottom = -6 }
+              return (
+                <div key={corner} onPointerDown={e => onHandleDown(e, 'resize', corner)}
+                  style={cStyle}>⤢</div>
+              )
+            })}
           </div>
         )}
       </div>
 
       <input type="file" ref={fileInputRef} className="d-none" accept="image/*,.heic,.heif,application/pdf" multiple onChange={handleFileChange} />
+      <input type="file" ref={fileAttachRef} className="d-none" multiple accept="*/*" onChange={handleFileAttach} />
 
       {showCanvas && (
         <div className="mb-3">

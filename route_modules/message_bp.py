@@ -120,40 +120,159 @@ def api_messages():
 def api_message_send():
     uid = session.get('user_id')
     if not uid: return jsonify({'status': 'error', 'msg': '로그인이 필요합니다.'}), 401
-    receiver_id = request.form.get('receiver_id')
+    ids_raw = request.form.get('receiver_ids') or request.form.get('receiver_id')
     subject = request.form.get('subject', '').strip()
     content = request.form.get('content', '').strip()
-    if not receiver_id or not content:
+    if not ids_raw or not content:
         return jsonify({'status': 'error', 'msg': '받는 사람과 내용을 입력하세요.'}), 400
+    try:
+        ids = [int(x.strip()) for x in ids_raw.split(',') if x.strip()]
+    except ValueError:
+        return jsonify({'status': 'error', 'msg': '받는 사람 형식이 올바르지 않습니다.'}), 400
+    if not ids:
+        return jsonify({'status': 'error', 'msg': '받는 사람을 선택하세요.'}), 400
+    ids = list(dict.fromkeys(ids))          # 중복 제거
+    ids = [i for i in ids if i != uid]        # 자기 자신 제외
+    if not ids:
+        return jsonify({'status': 'error', 'msg': '받는 사람을 선택하세요.'}), 400
+    total = LETTER_COST * len(ids)
     balance = _get_balance(uid)
-    if balance < LETTER_COST:
-        return jsonify({'status': 'error', 'msg': f'닢이 부족합니다. (현재 {balance}닢, 필요 {LETTER_COST}닢)'}), 400
-    if not _deduct_points(uid, LETTER_COST, f'편지 발송 → {receiver_id}'):
-        return jsonify({'status': 'error', 'msg': '닢 차감 실패'}), 400
-    receiver = User.query.get(int(receiver_id))
-    if not receiver:
-        return jsonify({'status': 'error', 'msg': '받는 사람을 찾을 수 없습니다.'}), 404
-    msg = Message(
-        sender_id=uid,
-        sender_name=session.get('real_name', session['username']),
-        sender_role=session.get('role', 'user'),
-        receiver_id=receiver.id,
-        subject=subject,
-        content=content,
-        letter_type='normal'
-    )
-    db.session.add(msg)
+    if balance < total:
+        return jsonify({'status': 'error', 'msg': f'닢이 부족합니다. (현재 {balance}닢, 필요 {total}닢)'}), 400
+    sent = 0
+    for rid in ids:
+        receiver = User.query.get(rid)
+        if not receiver:
+            continue
+        if not _deduct_points(uid, LETTER_COST, f'편지 발송 → {rid}'):
+            continue
+        msg = Message(
+            sender_id=uid,
+            sender_name=session.get('real_name', session['username']),
+            sender_role=session.get('role', 'user'),
+            receiver_id=receiver.id,
+            subject=subject,
+            content=content,
+            letter_type='normal'
+        )
+        db.session.add(msg)
+        sent += 1
     db.session.commit()
-    return jsonify({'status': 'success', 'msg': '편지가 전송되었습니다.'})
+    if sent == 0:
+        return jsonify({'status': 'error', 'msg': '전송할 대상을 찾지 못했습니다.'}), 400
+    return jsonify({'status': 'success', 'msg': f'{sent}명에게 편지가 전송되었습니다.'})
 
 import os as _os
+import uuid
+import io
+import time
+import ftplib
+from werkzeug.utils import secure_filename
 from services.security import validate_upload, secure_save
+
+# FTP 접근 불가 시 매 요청마다 30s 타임아웃을 기다리지 않도록 실패를 잠깐 캐싱
+_ftp_cache = {'ok': None, 'ts': 0.0, 'ttl': 60.0}
+
+
+def _ftp_config():
+    cfg = current_app.config
+    if not cfg.get('FTP_ENABLED'):
+        return None
+    return {
+        'host': cfg.get('FTP_HOST'),
+        'port': int(cfg.get('FTP_PORT', 21)),
+        'user': cfg.get('FTP_USER'),
+        'pass': cfg.get('FTP_PASS'),
+        'remote_dir': (cfg.get('FTP_REMOTE_DIR') or '/').strip(),
+        'use_tls': bool(cfg.get('FTP_USE_TLS', False)),
+    }
+
+
+def _ftp_connect(cfg):
+    now = time.time()
+    if _ftp_cache['ok'] is False and (now - _ftp_cache['ts']) < _ftp_cache['ttl']:
+        return None  # 최근 연결 실패 캐싱: 바로 로컬 폴백
+    try:
+        if cfg['use_tls']:
+            ftp = ftplib.FTP_TLS()
+        else:
+            ftp = ftplib.FTP()
+        ftp.connect(cfg['host'], cfg['port'], timeout=10)
+        ftp.login(cfg['user'], cfg['pass'])
+        if cfg['use_tls']:
+            ftp.prot_p()
+        rdir = cfg['remote_dir']
+        if rdir and rdir not in ('/', ''):
+            parts = [p for p in rdir.split('/') if p]
+            try:
+                ftp.cwd(rdir)
+            except ftplib.error_perm:
+                ftp.cwd('/')
+                for p in parts:
+                    try:
+                        ftp.cwd(p)
+                    except ftplib.error_perm:
+                        ftp.mkd(p)
+                        ftp.cwd(p)
+        _ftp_cache['ok'] = True
+        _ftp_cache['ts'] = now
+        return ftp
+    except Exception as e:
+        current_app.logger.warning('FTP 연결 실패: %s', e)
+        _ftp_cache['ok'] = False
+        _ftp_cache['ts'] = now
+        return None
+
+
+def _ftp_store(filename, data):
+    """FTP에 파일 저장. 성공 True / 실패 False"""
+    cfg = _ftp_config()
+    if not cfg or not cfg['host']:
+        return False
+    ftp = _ftp_connect(cfg)
+    if not ftp:
+        return False
+    try:
+        data.seek(0)
+        ftp.storbinary('STOR ' + filename, data)
+        return True
+    except Exception as e:
+        current_app.logger.warning('FTP 업로드 실패: %s', e)
+        return False
+    finally:
+        try:
+            ftp.quit()
+        except Exception:
+            pass
+
+
+def _ftp_retrieve(filename):
+    """FTP에서 파일 바이트 반환. 실패/없음 시 None"""
+    cfg = _ftp_config()
+    if not cfg or not cfg['host']:
+        return None
+    ftp = _ftp_connect(cfg)
+    if not ftp:
+        return None
+    try:
+        buf = io.BytesIO()
+        ftp.retrbinary('RETR ' + filename, buf.write)
+        buf.seek(0)
+        return buf
+    except Exception as e:
+        current_app.logger.warning('FTP 다운로드 실패: %s', e)
+        return None
+    finally:
+        try:
+            ftp.quit()
+        except Exception:
+            pass
 
 @message_bp.route('/api/message/upload-image', methods=['POST'])
 def api_message_upload_image():
     uid = session.get('user_id')
     if not uid: return jsonify({'error': 'login'}), 401
-    file = request.files.get('image')
+    file = request.files.get('image') or request.files.get('file')
     if not file: return jsonify({'error': '파일 없음'}), 400
     ok, msg = validate_upload(file)
     if not ok: return jsonify({'error': msg}), 400
@@ -162,9 +281,62 @@ def api_message_upload_image():
     try:
         path = secure_save(file, upload_dir)
         url = '/static/uploads/message_images/' + _os.path.basename(path)
-        return jsonify({'url': url})
+        return jsonify({'status': 'success', 'url': url})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@message_bp.route('/api/upload/file', methods=['POST'])
+def api_upload_file():
+    """일반 파일 첨부 업로드 (확장자/용량 제한 없음). 편지·게시글 공용."""
+    uid = session.get('user_id')
+    if not uid: return jsonify({'error': 'login'}), 401
+    file = request.files.get('file')
+    if not file: return jsonify({'error': '파일 없음'}), 400
+    original = file.filename or 'file'
+    clean = secure_filename(original)
+    if not clean:
+        clean = 'file'
+    ext = original.rsplit('.', 1)[1].lower() if '.' in original else ''
+    safe_name = uuid.uuid4().hex + ('.' + ext if ext else '')
+    upload_dir = _os.path.join(current_app.config['UPLOAD_FOLDER'], 'general_files')
+    _os.makedirs(upload_dir, exist_ok=True)
+    save_path = _os.path.join(upload_dir, safe_name)
+    try:
+        file.seek(0)
+        file.save(save_path)
+        size = _os.path.getsize(save_path)
+        # FTP 저장소가 활성화되면 원격에도 업로드 (실패해도 로컬 복사본 유지)
+        if current_app.config.get('FTP_ENABLED'):
+            try:
+                with open(save_path, 'rb') as f:
+                    _ftp_store(safe_name, f)
+            except Exception as e:
+                current_app.logger.warning('FTP 백업 업로드 실패(로컬 유지): %s', e)
+        url = '/files/' + safe_name
+        return jsonify({'url': url, 'name': original, 'size': size})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@message_bp.route('/files/<path:filename>')
+def serve_general_file(filename):
+    """업로드된 일반 파일을 항상 첨부 다운로드로 제공 (인라인 렌더링 차단 → 저장형 XSS 방지).
+       FTP 저장소가 활성화되면 FTP에서 우선 조회하고, 없으면 로컬 폴백."""
+    if '..' in filename or filename.startswith('/') or filename.startswith('\\'):
+        return jsonify({'error': 'invalid'}), 400
+    if current_app.config.get('FTP_ENABLED'):
+        data = _ftp_retrieve(filename)
+        if data is not None:
+            resp = send_file(data, as_attachment=True)
+            resp.headers['Content-Disposition'] = 'attachment; filename="%s"' % filename
+            resp.headers['X-Content-Type-Options'] = 'nosniff'
+            return resp
+    upload_dir = _os.path.join(current_app.config['UPLOAD_FOLDER'], 'general_files')
+    full = _os.path.join(upload_dir, filename)
+    if not _os.path.isfile(full):
+        return jsonify({'error': 'not found'}), 404
+    resp = send_file(full, as_attachment=True)
+    resp.headers['X-Content-Type-Options'] = 'nosniff'
+    return resp
 
 @message_bp.route('/message/send/global', methods=['GET', 'POST'])
 def send_message_global():

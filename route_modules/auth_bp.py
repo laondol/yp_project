@@ -16,6 +16,15 @@ def _kst(utc_dt):
 
 auth_bp = Blueprint('auth', __name__)
 
+
+def _reset_token_expired(expiry):
+    """reset_token 만료 판정 (DB 컬럼이 tz-aware/naive 여부와 무관하게 안전)"""
+    if not expiry:
+        return True
+    if expiry.tzinfo is not None:
+        return expiry < datetime.now(timezone.utc)
+    return expiry < datetime.utcnow()
+
 @auth_bp.route('/register/send-code', methods=['POST'])
 def register_send_code():
     email = request.form.get('email', '').strip()
@@ -164,7 +173,7 @@ def reset_password_send():
 @auth_bp.route('/reset-password/<token>')
 def reset_password_confirm(token):
     user = User.query.filter_by(reset_token=token).first()
-    if not user or not user.reset_token_expiry or user.reset_token_expiry < datetime.utcnow():
+    if not user or _reset_token_expired(user.reset_token_expiry):
         return "<script>alert('만료된 링크입니다.'); location.href='/reset-password';</script>"
     return _serve_spa()
 
@@ -175,7 +184,7 @@ def reset_password_confirm_post():
     password_hash = data.get('password_hash', '')
     password = data.get('password', '')
     user = User.query.filter_by(reset_token=token).first()
-    if not user or not user.reset_token_expiry or user.reset_token_expiry < datetime.utcnow():
+    if not user or _reset_token_expired(user.reset_token_expiry):
         return jsonify({"status":"error","msg":"만료된 링크입니다."})
     # v2: 클라이언트 해시 저장(신규 기본). 레거시 폴백: 평문(기존 동작)
     if password_hash:
