@@ -536,16 +536,28 @@ def news_comments_fragment(news_id):
 def api_news():
     category = request.args.get('category', '')
     page = request.args.get('page', 1, type=int)
-    q = NewsArticle.query.filter(NewsArticle.is_selected == True)
-    if category:
-        if category == 'kr_yp':
-            q = q.filter(NewsArticle.category.in_(['대한민국뉴스', '양평소식', '정책정보', '지역소식']))
-        elif category == 'world':
-            q = q.filter(NewsArticle.category.in_(['세계뉴스', '환경뉴스', '건강정보', '복지정보', '농업정보', '관광소식']))
-        else:
-            q = q.filter(NewsArticle.category == category)
+    kr_yp_cats = ['대한민국뉴스', '양평소식', '정책정보', '지역소식']
+    world_cats = ['세계뉴스', '환경뉴스', '건강정보', '복지정보', '농업정보', '관광소식']
+    if category == 'kr_yp':
+        q = NewsArticle.query.filter(
+            NewsArticle.category.in_(kr_yp_cats),
+            or_(NewsArticle.is_selected == True, NewsArticle.kr_yp_admin_approved == True)
+        )
+    elif category == 'world':
+        q = NewsArticle.query.filter(
+            NewsArticle.category.in_(world_cats),
+            or_(NewsArticle.is_selected == True, NewsArticle.world_admin_approved == True)
+        )
+    elif category:
+        q = NewsArticle.query.filter(
+            NewsArticle.category == category,
+            or_(NewsArticle.is_selected == True, NewsArticle.world_admin_approved == True, NewsArticle.kr_yp_admin_approved == True)
+        )
     else:
-        q = q.filter(NewsArticle.category.in_(['대한민국뉴스', '양평소식', '정책정보', '지역소식', '세계뉴스', '환경뉴스', '건강정보', '복지정보', '농업정보', '관광소식']))
+        q = NewsArticle.query.filter(
+            NewsArticle.category.in_(kr_yp_cats + world_cats),
+            or_(NewsArticle.is_selected == True, NewsArticle.world_admin_approved == True, NewsArticle.kr_yp_admin_approved == True)
+        )
     articles = q.order_by(NewsArticle.created_at.desc()).paginate(page=page, per_page=20, error_out=False)
     return jsonify([{
         'id': a.id, 'title': a.title, 'summary': a.summary,
