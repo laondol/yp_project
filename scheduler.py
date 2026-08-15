@@ -73,6 +73,31 @@ def run_rag_rebuild(app):
         print(f"[RAG] rebuild error: {e}")
 
 
+def run_monthly_payout(app):
+    time.sleep(30)
+    while True:
+        try:
+            with app.app_context():
+                from models import User
+                from services.point_service import add_points
+                now = datetime.now(timezone.utc)
+                granted = 0
+                for u in User.query.all():
+                    base = u.last_payout or u.created_at
+                    if base and (now - base).days >= 30:
+                        add_points(u.id, 1000, 'monthly', '30일 주기 물맑은머니 지급')
+                        if 'village' in (u.managed_pages or ''):
+                            add_points(u.id, 10000, 'village_monthly', '마을지기 활동지원금')
+                        u.last_payout = now
+                        granted += 1
+                if granted:
+                    db.session.commit()
+                    print(f'[PAYOUT] monthly points granted to {granted} user(s)')
+        except Exception as e:
+            print(f'[PAYOUT] error: {e}')
+        time.sleep(86400)
+
+
 def run_startup_tasks(app):
     with app.app_context():
         db.create_all()
