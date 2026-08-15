@@ -549,7 +549,7 @@ def api_news():
     articles = q.order_by(NewsArticle.created_at.desc()).paginate(page=page, per_page=20, error_out=False)
     return jsonify([{
         'id': a.id, 'title': a.title, 'summary': a.summary,
-        'source_name': a.source_name, 'category': a.category,
+        'source_name': a.source_name, 'source_url': a.source_url or '', 'category': a.category,
         'image_path': a.image_path, 'ai_score': a.ai_score,
         'like_count': a.like_count, 'dislike_count': a.dislike_count,
         'created_at': a.created_at.isoformat() if a.created_at else None,
@@ -560,6 +560,8 @@ def api_news_content(news_id):
     a = NewsArticle.query.get_or_404(news_id)
     return jsonify({
         'title': a.title,
+        'source_url': a.source_url or '',
+        'source_name': a.source_name or '',
         'content': a.content or '본문 내용이 없습니다.',
         'category': a.category,
         'summary': a.summary or ''

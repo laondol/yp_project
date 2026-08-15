@@ -8,6 +8,7 @@ interface NewsItem {
   title: string
   summary?: string
   source_name?: string
+  source_url?: string
   category?: string
   image_path?: string
   like_count?: number
@@ -103,6 +104,16 @@ export default function NewsTabsPage() {
                         👎 {a.dislike_count ?? 0}
                       </button>
                     </div>
+                  </div>
+                  <div className="d-flex gap-2 mt-2" onClick={e => e.stopPropagation()}>
+                    <a className="btn btn-sm btn-outline-secondary py-0 flex-grow-1 text-decoration-none"
+                      href={(a.source_url && a.source_url.trim()) || ('https://search.naver.com/search.naver?query=' + encodeURIComponent(a.title || ''))}
+                      target="_blank" rel="noopener noreferrer">
+                      🔗 원문보기
+                    </a>
+                    <button className="btn btn-sm btn-outline-info py-0 flex-grow-1" onClick={() => navigate(`/news/${a.id}`)}>
+                      💬 자세히보기
+                    </button>
                   </div>
                 </div>
               </div>
