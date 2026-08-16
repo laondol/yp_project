@@ -176,6 +176,7 @@ def api_admin_news():
         'category': a.category, 'ai_reason': a.ai_reason,
         'source_url': a.source_url, 'ai_generated': a.is_ai_generated,
         'created_at': a.created_at.isoformat() if a.created_at else None,
+        'published_at': a.published_at.isoformat() if a.published_at else None,
         'ai_approved': _approval(a)[0],
         'admin_approved': _approval(a)[1],
         'is_selected': getattr(a, 'is_selected', False),

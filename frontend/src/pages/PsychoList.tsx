@@ -5,6 +5,7 @@ import type { PsychoPost } from '../lib/types'
 import Loading from '../components/common/Loading'
 import ErrorMessage from '../components/common/ErrorMessage'
 import EmptyState from '../components/common/EmptyState'
+import { formatKST } from '../utils/format';
 
 export default function PsychoList() {
   const navigate = useNavigate()
@@ -59,7 +60,7 @@ export default function PsychoList() {
                       {p.answer ? <span className="badge bg-success">답변완료</span>
                         : <span className="badge bg-secondary">대기중</span>}
                     </td>
-                    <td className="text-muted">{p.created_at ? new Date(p.created_at).toLocaleDateString('ko-KR') : ''}</td>
+                    <td className="text-muted">{p.created_at ? formatKST(p.created_at, { year: 'numeric', month: '2-digit', day: '2-digit' }) : ''}</td>
                   </tr>
                 ))}
               </tbody>

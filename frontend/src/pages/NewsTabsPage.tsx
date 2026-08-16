@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import Loading from '../components/common/Loading'
 import ErrorMessage from '../components/common/ErrorMessage'
+import { formatKST } from '../utils/format'
 
 interface NewsItem {
   id: number
@@ -14,6 +15,7 @@ interface NewsItem {
   like_count?: number
   dislike_count?: number
   created_at?: string
+  published_at?: string
 }
 
 const TABS = [
@@ -97,6 +99,11 @@ export default function NewsTabsPage() {
                   <p className="small text-muted flex-grow-1">
                     {a.summary ? (a.summary.length > 120 ? a.summary.slice(0, 120) + '...' : a.summary) : ''}
                   </p>
+                  <small className="text-muted d-block mb-1">
+                    {a.published_at ? `개재 ${formatKST(a.published_at)}` : ''}
+                    {a.published_at && a.created_at ? ' · ' : ''}
+                    {a.created_at ? `수집 ${formatKST(a.created_at)}` : ''}
+                  </small>
                   <div className="d-flex justify-content-between align-items-center mt-auto pt-2 border-top">
                     <small className="text-muted">{a.source_name || ''}</small>
                     <div className="d-flex gap-1" onClick={e => e.stopPropagation()}>

@@ -4,6 +4,7 @@ import { villageApi } from '../lib/api'
 import type { VillageEvent } from '../lib/types'
 import Loading from '../components/common/Loading'
 import ErrorMessage from '../components/common/ErrorMessage'
+import { formatKST } from '../utils/format';
 
 export default function VillageEventDetail() {
   const { id } = useParams<{ id: string }>()
@@ -43,7 +44,7 @@ export default function VillageEventDetail() {
               <h4 className="fw-bold">{event.title}</h4>
             </div>
             <div className="text-end small text-muted">
-              <div>{event.event_date ? new Date(event.event_date).toLocaleString('ko-KR') : ''}</div>
+              <div>{event.event_date ? formatKST(event.event_date) : ''}</div>
               <div>📍 {event.location || '미정'}</div>
             </div>
           </div>

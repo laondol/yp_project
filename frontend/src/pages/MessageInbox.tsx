@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import Loading from '../components/common/Loading'
 import ErrorMessage from '../components/common/ErrorMessage'
 import EmptyState from '../components/common/EmptyState'
+import { formatKST } from '../utils/format';
 
 interface MessageItem {
   id: number; subject: string; content: string; sender_name?: string; receiver_name?: string
@@ -73,7 +74,7 @@ export default function MessageInbox() {
                   {!m.is_read && tab === 'received' && <span className="badge bg-success ms-1">NEW</span>}
                   {m.is_public && <span className="badge bg-warning text-dark ms-1">공개</span>}
                 </div>
-                <small className="text-muted">{m.created_at ? new Date(m.created_at).toLocaleString('ko-KR') : ''}</small>
+                <small className="text-muted">{m.created_at ? formatKST(m.created_at) : ''}</small>
               </div>
               <div className="small text-muted mb-1">
                 {tab === 'received' ? m.sender_name : `→ ${m.receiver_name}`}

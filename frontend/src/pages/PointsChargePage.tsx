@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import Loading from '../components/common/Loading'
+import { formatKST } from '../utils/format';
 
 const PRESETS = [1000, 3000, 5000, 10000]
 const PAY_METHODS = [
@@ -192,7 +193,7 @@ export default function PointsChargePage() {
                     <tr key={h.id}>
                       <td>{h.nip.toLocaleString()}닢</td>
                       <td><span className={`badge bg-${h.status === 'completed' ? 'success' : 'warning'}`}>{h.status}</span></td>
-                      <td className="small">{new Date(h.created_at).toLocaleString('ko-KR')}</td>
+                      <td className="small">{formatKST(h.created_at)}</td>
                     </tr>
                   ))}
                 </tbody>

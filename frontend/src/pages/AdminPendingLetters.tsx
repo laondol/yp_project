@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import Loading from '../components/common/Loading'
 import ErrorMessage from '../components/common/ErrorMessage'
+import { formatKST } from '../utils/format';
 
 interface PendingLetter {
   id: number
@@ -79,7 +80,7 @@ export default function AdminPendingLetters() {
                         <td>{letter.sender_name}</td>
                         <td>{letter.receiver_id}</td>
                         <td className="small text-muted">
-                          {new Date(letter.created_at).toLocaleDateString()}
+                          {formatKST(letter.created_at, { year: 'numeric', month: '2-digit', day: '2-digit' })}
                         </td>
                       </tr>
                     ))}

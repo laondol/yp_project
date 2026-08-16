@@ -5,6 +5,7 @@ import type { NewsArticle, NewsComment } from '../lib/types'
 import Loading from '../components/common/Loading'
 import ErrorMessage from '../components/common/ErrorMessage'
 import AuthorName from '../components/AuthorName'
+import { formatKST } from '../utils/format';
 
 export default function NewsDetail() {
   const { id } = useParams<{ id: string }>()
@@ -93,6 +94,11 @@ export default function NewsDetail() {
             )}
           </div>
           <h2 className="fw-bold mb-3">{article.title}</h2>
+          <small className="text-muted d-block mb-3">
+            {article.published_at ? `개재 ${formatKST(article.published_at)}` : ''}
+            {article.published_at && article.created_at ? ' · ' : ''}
+            {article.created_at ? `수집 ${formatKST(article.created_at)}` : ''}
+          </small>
           <div className="" style={{ fontSize: '1.05rem', lineHeight: 1.8 }}>
             {article.content || article.summary || ''}
           </div>
@@ -136,7 +142,7 @@ export default function NewsDetail() {
                 <div key={c.id} className="border-bottom pb-3 mb-3">
                   <div className="d-flex justify-content-between">
                     <strong className="small"><AuthorName name={c.author_name || '익명'} email={c.author_email} userId={c.user_id} /></strong>
-                    <small className="text-muted">{c.created_at ? new Date(c.created_at).toLocaleString('ko-KR') : ''}</small>
+                    <small className="text-muted">{c.created_at ? formatKST(c.created_at) : ''}</small>
                   </div>
                   <p className="mb-1 small">{c.content}</p>
                   <button className="btn btn-sm btn-link text-muted p-0" onClick={() => setReplyTo(c.id)}>↳ 답글</button>
@@ -144,7 +150,7 @@ export default function NewsDetail() {
                     <div key={r.id} className="ms-4 mt-2 pt-2 border-start ps-3">
                       <div className="d-flex justify-content-between">
                         <strong className="small"><AuthorName name={r.author_name || '익명'} email={r.author_email} userId={r.user_id} /></strong>
-                        <small className="text-muted">{r.created_at ? new Date(r.created_at).toLocaleString('ko-KR') : ''}</small>
+                        <small className="text-muted">{r.created_at ? formatKST(r.created_at) : ''}</small>
                       </div>
                       <p className="mb-0 small">{r.content}</p>
                     </div>

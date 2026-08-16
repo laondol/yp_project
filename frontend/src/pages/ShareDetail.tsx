@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import AuthorName from '../components/AuthorName'
 import LeafletMap from '../components/LeafletMap'
+import { formatKST } from '../utils/format';
 
 interface NearbyShare { id: number; title: string; town: string; village: string; image_path: string | null; ai_category: string; distance: number }
 interface LocalNews { source: string; title: string; url: string }
@@ -144,7 +145,7 @@ export default function ShareDetail() {
             <>
               ⏳ <strong>검토 중</strong>인 콘텐츠입니다. 작성자 본인에게만 표시되며, 검열 완료 후 모든 회원에게 공개됩니다.
               {r.moderation_at && (
-                <> 30일 동안 수정·보완되지 않으면 관리자에게 보류 상태로 유지됩니다. (보류일: {new Date(r.moderation_at).toLocaleDateString()})</>
+                <> 30일 동안 수정·보완되지 않으면 관리자에게 보류 상태로 유지됩니다. (보류일: {formatKST(r.moderation_at, { year: 'numeric', month: '2-digit', day: '2-digit' })})</>
               )}
             </>
           )}

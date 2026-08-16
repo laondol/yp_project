@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { generateDIDKey, saveDIDKey, listDIDs, deleteDIDKey, getDIDKey } from '../lib/did'
 import Loading from '../components/common/Loading'
+import { formatKST } from '../utils/format';
 
 interface DIDInfo {
   did: string
@@ -122,7 +123,7 @@ export default function MyDID() {
                   <div className="d-flex justify-content-between align-items-start">
                     <div>
                       <strong className="small">{d.did}</strong>
-                      <div className="small text-muted">생성: {new Date(d.createdAt).toLocaleString('ko-KR')}</div>
+                      <div className="small text-muted">생성: {formatKST(d.createdAt)}</div>
                     </div>
                     <div className="d-flex gap-1">
                       <button className="btn btn-sm btn-outline-secondary py-0 px-1" onClick={() => handleExport(d.did)}>📤</button>
@@ -147,7 +148,7 @@ export default function MyDID() {
                   <div className="small">
                     <strong>🏷️ {(vc.type || []).join(', ')}</strong>
                     <div className="text-muted">발급자: {vc.issuer}</div>
-                    <div className="text-muted">발급일: {new Date(vc.issuanceDate).toLocaleString('ko-KR')}</div>
+                    <div className="text-muted">발급일: {formatKST(vc.issuanceDate)}</div>
                     {vc.credentialSubject && (
                       <div className="mt-1">
                         <span className={`badge me-1 ${vc.credentialSubject.resident ? 'bg-success' : 'bg-secondary'}`}>

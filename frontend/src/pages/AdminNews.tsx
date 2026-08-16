@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import Loading from '../components/common/Loading'
 import ErrorMessage from '../components/common/ErrorMessage'
+import { formatKST } from '../utils/format';
 
 interface NewsItem {
   id: number
@@ -14,6 +15,7 @@ interface NewsItem {
   admin_approved: boolean
   is_selected: boolean
   created_at: string
+  published_at?: string
 }
 
 const TABS = [
@@ -319,7 +321,9 @@ export default function AdminNews() {
                       </button>
                     </td>
                     <td className="small text-muted">
-                      {item.created_at ? new Date(item.created_at).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-'}
+                      {item.published_at ? `개재 ${formatKST(item.published_at, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}` : ''}
+                      {item.published_at && item.created_at ? <br /> : ''}
+                      {item.created_at ? `수집 ${formatKST(item.created_at, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}` : '-'}
                     </td>
                     <td>
                       <button className={`btn btn-sm ${item.is_selected ? 'btn-outline-success' : 'btn-outline-secondary'} me-1`} onClick={() => handleToggle(item.id)} title={item.is_selected ? '표시중' : '비활성'}>

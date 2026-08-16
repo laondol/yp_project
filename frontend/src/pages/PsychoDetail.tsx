@@ -4,6 +4,7 @@ import { psychoApi } from '../lib/api'
 import type { PsychoPost } from '../lib/types'
 import Loading from '../components/common/Loading'
 import ErrorMessage from '../components/common/ErrorMessage'
+import { formatKST } from '../utils/format';
 
 export default function PsychoDetail() {
   const { id } = useParams<{ id: string }>()
@@ -48,7 +49,7 @@ export default function PsychoDetail() {
         <div className="card-body p-4">
           <h4 className="fw-bold">{post.title}</h4>
           <div className="small text-muted mb-3">
-            {post.author_name || '익명'} | {post.created_at ? new Date(post.created_at).toLocaleString('ko-KR') : ''}
+            {post.author_name || '익명'} | {post.created_at ? formatKST(post.created_at) : ''}
             {post.status === 'flagged' && <span className="badge bg-warning ms-1">검토필요</span>}
           </div>
           <hr />
@@ -59,7 +60,7 @@ export default function PsychoDetail() {
               <h6 className="fw-bold text-success">심리상담사 답변</h6>
               <div style={{ lineHeight: 1.8 }}>{post.answer}</div>
               {(post as any).fee && <div className="mt-2"><strong>상담비</strong> : {(post as any).fee.toLocaleString()}원</div>}
-              <small className="text-muted">답변일: {post.answered_at ? new Date(post.answered_at).toLocaleString('ko-KR') : ''}</small>
+              <small className="text-muted">답변일: {post.answered_at ? formatKST(post.answered_at) : ''}</small>
             </div>
           ) : (
             <div className="text-center text-muted py-3">아직 답변이 등록되지 않았습니다.</div>

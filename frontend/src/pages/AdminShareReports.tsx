@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import Loading from '../components/common/Loading'
 import ErrorMessage from '../components/common/ErrorMessage'
 import EmptyState from '../components/common/EmptyState'
+import { formatKST } from '../utils/format';
 
 interface ShareReport {
   id: number
@@ -60,7 +61,7 @@ function DetailModal({ r, onClose }: { r: ShareReport; onClose: () => void }) {
 
   const fmt = (s: string | null | undefined) => {
     if (!s) return '-'
-    return new Date(s).toLocaleString('ko-KR', {
+    return formatKST(s, {
       year: 'numeric', month: '2-digit', day: '2-digit',
       hour: '2-digit', minute: '2-digit',
     })
@@ -379,7 +380,7 @@ export default function AdminShareReports() {
                           {r.is_moderated ? '✅ 검토완료' : '⏳ 검토대기'}
                         </span>
                         <span className="small text-muted">
-                          {new Date(r.created_at).toLocaleDateString('ko-KR')}
+                          {formatKST(r.created_at, { year: 'numeric', month: '2-digit', day: '2-digit' })}
                         </span>
                       </div>
 

@@ -5,6 +5,7 @@ import type { LegalPost } from '../lib/types'
 import Loading from '../components/common/Loading'
 import ErrorMessage from '../components/common/ErrorMessage'
 import EmptyState from '../components/common/EmptyState'
+import { formatKST } from '../utils/format';
 
 export default function LegalList() {
   const navigate = useNavigate()
@@ -59,7 +60,7 @@ export default function LegalList() {
                         : p.status === 'flagged' ? <span className="badge bg-danger">보류</span>
                         : <span className="badge bg-secondary">대기</span>}
                     </td>
-                    <td>{p.created_at ? new Date(p.created_at).toLocaleDateString('ko-KR') : ''}</td>
+                    <td>{p.created_at ? formatKST(p.created_at, { year: 'numeric', month: '2-digit', day: '2-digit' }) : ''}</td>
                   </tr>
                 ))}
               </tbody>

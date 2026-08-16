@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import Loading from '../components/common/Loading'
 import ErrorMessage from '../components/common/ErrorMessage'
 import EmptyState from '../components/common/EmptyState'
+import { formatKST } from '../utils/format';
 
 interface ScheduleEvent {
   id: number | string
@@ -305,7 +306,7 @@ export default function SchedulePopupPage() {
                           </div>
                           <div className="small text-muted">
                             {s.event_date && (
-                              <span>{new Date(s.event_date).toLocaleString('ko-KR', { hour: '2-digit', minute: '2-digit' })}</span>
+                              <span>{formatKST(s.event_date, { hour: '2-digit', minute: '2-digit' })}</span>
                             )}
                             {s.location && <span> · 📍 {s.location}</span>}
                           </div>
@@ -337,7 +338,7 @@ export default function SchedulePopupPage() {
                     </div>
                     <div className="small text-muted mt-1">
                       {s.event_date && (
-                        <span>{new Date(s.event_date).toLocaleString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                        <span>{formatKST(s.event_date, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
                       )}
                       {s.location && <span> · 📍 {s.location}</span>}
                     </div>

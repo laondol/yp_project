@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import Loading from '../components/common/Loading'
 import ErrorMessage from '../components/common/ErrorMessage'
 import EmptyState from '../components/common/EmptyState'
+import { formatKST } from '../utils/format';
 
 interface ScheduleItem {
   id: number | string; title: string; description?: string; memo?: string; location?: string
@@ -599,7 +600,7 @@ export default function SchedulePage() {
                         </div>
                         <div className="small text-muted mt-1">
                           {s.event_date && (
-                            <span>{new Date(s.event_date).toLocaleString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                            <span>{formatKST(s.event_date, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
                           )}
                           {s.location && <span> · 📍 {s.location}</span>}
                         </div>

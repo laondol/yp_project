@@ -4,6 +4,7 @@ import { legalApi } from '../lib/api'
 import type { LegalPost } from '../lib/types'
 import Loading from '../components/common/Loading'
 import ErrorMessage from '../components/common/ErrorMessage'
+import { formatKST } from '../utils/format';
 
 export default function LegalDetail() {
   const { id } = useParams<{ id: string }>()
@@ -46,7 +47,7 @@ export default function LegalDetail() {
         <div className="card-body p-4">
           <h4 className="fw-bold">{post.title}</h4>
           <div className="small text-muted mb-3">
-            {post.author_name || '익명'} | {post.created_at ? new Date(post.created_at).toLocaleString('ko-KR') : ''}
+            {post.author_name || '익명'} | {post.created_at ? formatKST(post.created_at) : ''}
             {post.is_public && <span className="badge bg-info ms-2">공개</span>}
             {post.status === 'flagged' && <span className="badge bg-warning ms-1">검토필요</span>}
           </div>
@@ -58,7 +59,7 @@ export default function LegalDetail() {
               <h6 className="fw-bold text-success">노무사 이훈 답변</h6>
               <div style={{ lineHeight: 1.8 }}>{post.answer}</div>
               {(post as any).fee && <div className="mt-2"><strong>상담비</strong> : {(post as any).fee.toLocaleString()}원</div>}
-              <small className="text-muted">답변일: {post.answered_at ? new Date(post.answered_at).toLocaleString('ko-KR') : ''}</small>
+              <small className="text-muted">답변일: {post.answered_at ? formatKST(post.answered_at) : ''}</small>
             </div>
           )}
 

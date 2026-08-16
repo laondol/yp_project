@@ -106,6 +106,17 @@ def admin_news_ai_suggest():
             news_results, news_source = search_news(title, display=1, language=search_lang)
             if news_results:
                 real = news_results[0]
+                _pub = real.get('pubDate', '')
+                published_at = None
+                if _pub:
+                    try:
+                        from email.utils import parsedate_to_datetime
+                        _dt = parsedate_to_datetime(_pub)
+                        if _dt.tzinfo:
+                            _dt = _dt.replace(tzinfo=None)
+                        published_at = _dt
+                    except Exception:
+                        published_at = None
                 category = item.get('category', '세계뉴스')
                 if tab == 'kr_yp' and category not in ['대한민국뉴스', '양평소식', '정책정보', '지역소식']:
                     category = '대한민국뉴스'
@@ -137,7 +148,8 @@ def admin_news_ai_suggest():
                     is_selected=False,
                     ai_reason=ai_reason,
                     created_by=session.get('user_id'),
-                    source_name=news_source
+                    source_name=news_source,
+                    published_at=published_at
                 )
                 try:
                     from services.news_service import clean_cjk_text
@@ -565,6 +577,7 @@ def api_news():
         'image_path': a.image_path, 'ai_score': a.ai_score,
         'like_count': a.like_count, 'dislike_count': a.dislike_count,
         'created_at': a.created_at.isoformat() if a.created_at else None,
+        'published_at': a.published_at.isoformat() if a.published_at else None,
     } for a in articles.items])
 
 @news_bp.route('/api/news/content/<int:news_id>')
@@ -576,7 +589,9 @@ def api_news_content(news_id):
         'source_name': a.source_name or '',
         'content': a.content or '본문 내용이 없습니다.',
         'category': a.category,
-        'summary': a.summary or ''
+        'summary': a.summary or '',
+        'created_at': a.created_at.isoformat() if a.created_at else None,
+        'published_at': a.published_at.isoformat() if a.published_at else None,
     })
 
 def _get_news_with_recs(news_list):

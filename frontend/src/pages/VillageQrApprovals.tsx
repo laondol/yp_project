@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { formatKST } from '../utils/format';
 
 interface PendingSession {
   sessionId: string
@@ -67,7 +68,7 @@ export default function VillageQrApprovals() {
                     <strong>{session.subjectName}</strong>
                     <div className="small text-muted">{session.subjectEmail}</div>
                     <div className="small text-muted">
-                      {session.hasDid ? '🆔 DID 있음' : '⚠️ DID 없음'} · {new Date(session.createdAt).toLocaleString()}
+                      {session.hasDid ? '🆔 DID 있음' : '⚠️ DID 없음'} · {formatKST(session.createdAt)}
                     </div>
                   </div>
                   <div className="d-flex gap-2">

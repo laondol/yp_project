@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
+import { formatKST } from '../utils/format';
 
 interface NoteDetail {
   id: number
@@ -52,7 +53,7 @@ export default function NoteDetailPage() {
           {note.category && <span className="badge bg-light text-dark mb-2">{note.category}</span>}
           <h4 className="fw-bold mb-1">{note.title || '제목없음'}</h4>
           <small className="text-muted">
-            {note.updated_at ? new Date(note.updated_at).toLocaleString('ko-KR') : ''}
+            {note.updated_at ? formatKST(note.updated_at) : ''}
           </small>
           <hr />
           <div dangerouslySetInnerHTML={{ __html: note.content || '' }} />

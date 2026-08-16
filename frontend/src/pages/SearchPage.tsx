@@ -3,6 +3,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom'
 import Loading from '../components/common/Loading'
 import ErrorMessage from '../components/common/ErrorMessage'
 import EmptyState from '../components/common/EmptyState'
+import { formatKST } from '../utils/format';
 
 interface SearchResult {
   id: number
@@ -72,7 +73,7 @@ export default function SearchPage() {
                 {truncate(item.content || item.description || item.summary || '')}
               </p>
               {item.created_at && (
-                <small className="text-muted">{new Date(item.created_at).toLocaleDateString('ko-KR')}</small>
+                <small className="text-muted">{formatKST(item.created_at, { year: 'numeric', month: '2-digit', day: '2-digit' })}</small>
               )}
             </div>
           </div>

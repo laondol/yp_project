@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import Loading from '../components/common/Loading'
 import ErrorMessage from '../components/common/ErrorMessage'
 import type { VillageAlert } from '../lib/types'
+import { formatKST } from '../utils/format';
 
 const ALERT_TYPE_OPTIONS = [
   { value: '', label: '전체 유형' },
@@ -146,7 +147,7 @@ export default function AdminAlerts() {
                         <td>{alert.author_name || '-'}</td>
                         <td className="text-center">{alert.is_active ? '✅' : '❌'}</td>
                         <td className="small text-muted">
-                          {alert.created_at ? new Date(alert.created_at).toLocaleDateString() : '-'}
+                          {alert.created_at ? formatKST(alert.created_at, { year: 'numeric', month: '2-digit', day: '2-digit' }) : '-'}
                         </td>
                       </tr>
                     ))}

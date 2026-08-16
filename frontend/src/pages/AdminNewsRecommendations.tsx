@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import Loading from '../components/common/Loading'
 import ErrorMessage from '../components/common/ErrorMessage'
 import EmptyState from '../components/common/EmptyState'
+import { formatKST } from '../utils/format';
 
 interface Recommendation {
   id: number
@@ -96,7 +97,7 @@ export default function AdminNewsRecommendations() {
                         {r.description ? (r.description.length > 50 ? r.description.slice(0, 50) + '...' : r.description) : '-'}
                       </td>
                       <td className="small text-muted">
-                        {r.created_at ? new Date(r.created_at).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-'}
+                        {r.created_at ? formatKST(r.created_at, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-'}
                       </td>
                       <td>
                         <button className="btn btn-sm btn-success me-1" onClick={() => handleApprove(r.id)}>승인</button>

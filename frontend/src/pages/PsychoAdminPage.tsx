@@ -3,6 +3,7 @@ import { useAuth } from '../contexts/AuthContext'
 import Loading from '../components/common/Loading'
 import ErrorMessage from '../components/common/ErrorMessage'
 import EmptyState from '../components/common/EmptyState'
+import { formatKST } from '../utils/format';
 
 interface PsychoPost {
   id: number
@@ -112,7 +113,7 @@ export default function PsychoAdminPage() {
                         <div>
                           <h6 className="fw-bold mb-1">{p.title}</h6>
                           <div className="small text-muted">
-                            {p.author_name} | {new Date(p.created_at).toLocaleString('ko-KR')}
+                            {p.author_name} | {formatKST(p.created_at)}
                           </div>
                         </div>
                       </div>
@@ -186,7 +187,7 @@ export default function PsychoAdminPage() {
                         {p.travel_allowance && <span className="badge bg-light text-dark border">교통비: {p.travel_allowance.toLocaleString()}원</span>}
                       </div>
                       <div className="small text-muted">
-                        답변일: {p.answered_at ? new Date(p.answered_at).toLocaleString('ko-KR') : '-'}
+                        답변일: {p.answered_at ? formatKST(p.answered_at) : '-'}
                       </div>
                     </div>
                   </div>

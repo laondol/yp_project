@@ -5,6 +5,7 @@ import { api, villageApi } from '../lib/api'
 import type { VillageEvent, VillageAlert, VillageWish } from '../lib/types'
 import Loading from '../components/common/Loading'
 import ErrorMessage from '../components/common/ErrorMessage'
+import { formatKST } from '../utils/format';
 
 interface VillageMember {
   id: number
@@ -149,7 +150,7 @@ export default function VillageAdminPage() {
                 onClick={() => navigate(`/village/events/${e.id}`)}>
                 <div className="card-body p-3 d-flex justify-content-between">
                   <span><span className={`badge ${e.event_type === 'meeting' ? 'bg-info' : 'bg-warning'} me-1`}>{e.event_type === 'meeting' ? '모임' : '활동'}</span>{e.title}</span>
-                  <small className="text-muted">{e.event_date ? new Date(e.event_date).toLocaleString('ko-KR') : ''}</small>
+                  <small className="text-muted">{e.event_date ? formatKST(e.event_date) : ''}</small>
                 </div>
               </div>
             ))}
@@ -158,7 +159,7 @@ export default function VillageAdminPage() {
               <div key={w.id} className="card border-0 shadow-sm mb-2" style={{ borderRadius: 12 }}>
                 <div className="card-body p-3">
                   <p className="mb-1">{w.content}</p>
-                  <small className="text-muted">{w.status} | {w.created_at ? new Date(w.created_at).toLocaleDateString('ko-KR') : ''}</small>
+                  <small className="text-muted">{w.status} | {w.created_at ? formatKST(w.created_at, { year: 'numeric', month: '2-digit', day: '2-digit' }) : ''}</small>
                 </div>
               </div>
             ))}
@@ -203,7 +204,7 @@ export default function VillageAdminPage() {
                       <span className={`badge ${e.event_type === 'meeting' ? 'bg-info' : 'bg-warning'} me-1`}>{e.event_type === 'meeting' ? '모임' : '활동'}</span>
                       <strong>{e.title}</strong>
                     </div>
-                    <small className="text-muted">{e.event_date ? new Date(e.event_date).toLocaleString('ko-KR') : ''}</small>
+                    <small className="text-muted">{e.event_date ? formatKST(e.event_date) : ''}</small>
                   </div>
                   <div className="px-3 pb-2 small text-muted">📍 {e.location || '미정'}</div>
                 </div>

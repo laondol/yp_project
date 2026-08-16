@@ -3,6 +3,7 @@ import { useAuth } from '../contexts/AuthContext'
 import Loading from '../components/common/Loading'
 import ErrorMessage from '../components/common/ErrorMessage'
 import EmptyState from '../components/common/EmptyState'
+import { formatKST } from '../utils/format';
 
 interface ShareReport {
   id: number
@@ -134,7 +135,7 @@ export default function LeaderShareReportsPage() {
                   <td className="small">{r.ai_confidence ? `${(r.ai_confidence * 100).toFixed(0)}%` : '-'}</td>
                   <td>{r.ai_danger_alert ? <span className="badge bg-danger">⚠️ 위험</span> : <span className="text-muted small">-</span>}</td>
                   <td>{statusBadge(r.status)}</td>
-                  <td className="small">{new Date(r.created_at).toLocaleDateString('ko-KR')}</td>
+                  <td className="small">{formatKST(r.created_at, { year: 'numeric', month: '2-digit', day: '2-digit' })}</td>
                   <td>
                     <div className="d-flex gap-1">
                       <button

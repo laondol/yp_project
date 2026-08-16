@@ -116,6 +116,7 @@ export interface NewsArticle {
   category?: string; ai_score?: number;
   like_count?: number; dislike_count?: number;
   created_at?: string;
+  published_at?: string;
 }
 export interface NewsComment {
   id: number; news_id: number; user_id?: number; author_name?: string;

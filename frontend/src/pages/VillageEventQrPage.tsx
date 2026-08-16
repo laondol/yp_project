@@ -4,6 +4,7 @@ import { villageApi } from '../lib/api'
 import type { VillageEvent } from '../lib/types'
 import Loading from '../components/common/Loading'
 import ErrorMessage from '../components/common/ErrorMessage'
+import { formatKST } from '../utils/format';
 
 export default function VillageEventQrPage() {
   const { eventId } = useParams<{ eventId: string }>()
@@ -72,7 +73,7 @@ export default function VillageEventQrPage() {
             </span>
             <h5>{event.title}</h5>
             <p className="small text-muted mb-1">
-              {event.event_date ? new Date(event.event_date).toLocaleString('ko-KR') : ''}
+              {event.event_date ? formatKST(event.event_date) : ''}
             </p>
             <p className="small text-muted">📍 {event.location || '미정'}</p>
           </div>

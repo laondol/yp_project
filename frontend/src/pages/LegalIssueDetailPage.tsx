@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import Loading from '../components/common/Loading'
 import ErrorMessage from '../components/common/ErrorMessage'
+import { formatKST } from '../utils/format';
 
 interface IssueComment {
   id?: number
@@ -84,7 +85,7 @@ export default function LegalIssueDetailPage() {
           <h4 className="fw-bold mb-2">{issue.title}</h4>
           <div className="d-flex gap-3 small text-muted mb-3">
             <span>{issue.author_name || '익명'}</span>
-            <span>{issue.created_at ? new Date(issue.created_at).toLocaleString('ko-KR') : ''}</span>
+            <span>{issue.created_at ? formatKST(issue.created_at) : ''}</span>
           </div>
           <hr />
           <div className="mb-4" style={{ lineHeight: 1.8, whiteSpace: 'pre-wrap' }}>{issue.content}</div>
@@ -99,7 +100,7 @@ export default function LegalIssueDetailPage() {
                   )}
                   <p className="mb-0 small">{c.content}</p>
                   {c.created_at && (
-                    <small className="text-muted">{new Date(c.created_at).toLocaleString('ko-KR')}</small>
+                    <small className="text-muted">{formatKST(c.created_at)}</small>
                   )}
                 </div>
               ))}

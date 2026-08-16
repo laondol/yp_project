@@ -158,6 +158,7 @@ class NewsArticle(db.Model):
     created_by = db.Column(db.Integer, db.ForeignKey('user.id'))
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now)
+    published_at = db.Column(db.DateTime, nullable=True)
 
 class NewsComment(db.Model):
     id = db.Column(db.Integer, primary_key=True)

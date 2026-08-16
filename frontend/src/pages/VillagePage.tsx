@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
 import Loading from '../components/common/Loading'
+import { formatKST } from '../utils/format';
 
 interface Member {
   id: number; real_name: string; email: string; town: string; village: string
@@ -146,7 +147,7 @@ export default function VillagePage() {
                   <span className="badge bg-primary me-1">📢 전체편지</span>
                   <strong>{item.subject}</strong>
                 </div>
-                <small className="text-muted">{item.created_at ? new Date(item.created_at).toLocaleDateString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}</small>
+                <small className="text-muted">{item.created_at ? formatKST(item.created_at, { year: 'numeric', month: '2-digit', day: '2-digit' }) : ''}</small>
               </div>
               <div className="small mt-1" dangerouslySetInnerHTML={{ __html: item.content || '' }} />
               <div className="small text-muted mt-1">발신: {item.sender_name}</div>
@@ -163,7 +164,7 @@ export default function VillagePage() {
                   <strong>{item.title}</strong>
                 </div>
                 <div>
-                  <small className="text-muted">{item.created_at ? new Date(item.created_at).toLocaleDateString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}</small>
+                  <small className="text-muted">{item.created_at ? formatKST(item.created_at, { year: 'numeric', month: '2-digit', day: '2-digit' }) : ''}</small>
                   <button className="btn btn-sm btn-outline-secondary py-0 px-1 ms-1" onClick={() => { setEditPost(item as PostItem); setEditTitle(item.title || ''); setEditContent((item.content || '').replace(/<br>/g, '\n')) }}>✏️</button>
                 </div>
               </div>
@@ -180,7 +181,7 @@ export default function VillagePage() {
                   <span className="badge bg-warning me-1">📸 공유</span>
                   <strong>{item.title}</strong>
                 </div>
-                <small className="text-muted">{item.created_at ? new Date(item.created_at).toLocaleDateString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}</small>
+                <small className="text-muted">{item.created_at ? formatKST(item.created_at, { year: 'numeric', month: '2-digit', day: '2-digit' }) : ''}</small>
               </div>
               <div className="small text-muted mt-1">{item.description}</div>
               {item.image_path && <img src={item.image_path} className="img-fluid rounded mt-1" style={{ maxHeight: 200 }} alt="" />}
@@ -211,7 +212,7 @@ export default function VillagePage() {
                     {item.status === 'pending' ? '대기' : item.status === 'in_progress' ? '진행중' : item.status === 'done' ? '완료' : '기각'}
                   </span>
                 </div>
-                <small className="text-muted">{item.created_at ? new Date(item.created_at).toLocaleDateString('ko-KR', { month: '2-digit', day: '2-digit' }) : ''}</small>
+                <small className="text-muted">{item.created_at ? formatKST(item.created_at, { year: 'numeric', month: '2-digit', day: '2-digit' }) : ''}</small>
               </div>
               <div className="mt-1 small">{item.content}</div>
               {item.reply && <div className="mt-1 small text-success">💬 {item.reply}</div>}
@@ -310,7 +311,7 @@ export default function VillagePage() {
                     <td>{m.is_verified_resident ? m.email : '***'}</td>
                     <td>{m.town} {m.village}</td>
                     <td>
-                      {m.jin_verified_at ? <span className="badge bg-success">진 {new Date(m.jin_verified_at).toLocaleDateString('ko-KR', { month: '2-digit', day: '2-digit' })}</span>
+                      {m.jin_verified_at ? <span className="badge bg-success">진 {formatKST(m.jin_verified_at, { year: 'numeric', month: '2-digit', day: '2-digit' })}</span>
                         : m.is_verified_resident ? <span className="badge bg-success">이웃</span>
                         : <span className="badge bg-secondary">미인증</span>}
                     </td>

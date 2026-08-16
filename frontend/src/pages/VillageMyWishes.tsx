@@ -5,6 +5,7 @@ import type { VillageWish } from '../lib/types'
 import Loading from '../components/common/Loading'
 import ErrorMessage from '../components/common/ErrorMessage'
 import EmptyState from '../components/common/EmptyState'
+import { formatKST } from '../utils/format';
 
 export default function VillageMyWishes() {
   const navigate = useNavigate()
@@ -40,7 +41,7 @@ export default function VillageMyWishes() {
                 <span className={`badge ${w.status === 'done' ? 'bg-success' : w.status === 'in_progress' ? 'bg-info' : w.status === 'rejected' ? 'bg-danger' : 'bg-secondary'}`}>
                   {{ pending: '대기중', in_progress: '진행중', done: '완료', rejected: '기각' }[w.status as string] || w.status}
                 </span>
-                <small className="text-muted">{w.created_at ? new Date(w.created_at).toLocaleString('ko-KR') : ''}</small>
+                <small className="text-muted">{w.created_at ? formatKST(w.created_at) : ''}</small>
               </div>
               <div className="mt-1">{w.content?.slice(0, 200)}</div>
               {w.reply && (

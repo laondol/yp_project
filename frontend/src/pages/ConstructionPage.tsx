@@ -7,6 +7,7 @@ import Loading from '../components/common/Loading'
 import ErrorMessage from '../components/common/ErrorMessage'
 import EmptyState from '../components/common/EmptyState'
 import FacilityMap from '../components/FacilityMap'
+import { formatKST } from '../utils/format';
 
 interface HeritageItem {
   name: string; lat: number; lng: number; description?: string
@@ -397,7 +398,7 @@ export default function ConstructionPage() {
                         <div className="small text-muted d-flex gap-3">
                           <span>📍 {a.town} {a.village}</span>
                           <span>👤 {a.author_name || '-'}</span>
-                          <span>📅 {a.created_at ? new Date(a.created_at).toLocaleDateString('ko-KR') : '-'}</span>
+                          <span>📅 {a.created_at ? formatKST(a.created_at, { year: 'numeric', month: '2-digit', day: '2-digit' }) : '-'}</span>
                         </div>
                       </div>
                     </div>
@@ -524,8 +525,8 @@ export default function ConstructionPage() {
                       {n.description && <p className="small text-muted mb-2">{n.description}</p>}
                       <div className="d-flex gap-3 flex-wrap small text-muted">
                         {n.location && <span>📍 {n.location}</span>}
-                        {n.start_date && <span>📅 시작: {new Date(n.start_date).toLocaleDateString('ko-KR')}</span>}
-                        {n.end_date && <span>➡ 종료: {new Date(n.end_date).toLocaleDateString('ko-KR')}</span>}
+                        {n.start_date && <span>📅 시작: {formatKST(n.start_date, { year: 'numeric', month: '2-digit', day: '2-digit' })}</span>}
+                        {n.end_date && <span>➡ 종료: {formatKST(n.end_date, { year: 'numeric', month: '2-digit', day: '2-digit' })}</span>}
                         {n.source && <span>🔗 {{ gg_traffic: '경기교통정보', cals: '건설CALS', yp_gov: '양평군청' }[n.source] || n.source}</span>}
                       </div>
                       {n.latitude && n.longitude && (

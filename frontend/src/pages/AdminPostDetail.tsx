@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import Loading from '../components/common/Loading'
+import { formatKST } from '../utils/format';
 
 interface DebateLog {
   time: string
@@ -105,7 +106,7 @@ export default function AdminPostDetail() {
             <h3 className="fw-bold">{post.title}</h3>
             <p className="text-muted small mb-0">
               {post.author_name && `작성자: ${post.author_name}`}
-              {post.created_at && ` · ${new Date(post.created_at).toLocaleDateString('ko-KR')}`}
+              {post.created_at && ` · ${formatKST(post.created_at, { year: 'numeric', month: '2-digit', day: '2-digit' })}`}
             </p>
           </div>
 

@@ -5,6 +5,7 @@ import type { VillageEvent } from '../lib/types'
 import Loading from '../components/common/Loading'
 import ErrorMessage from '../components/common/ErrorMessage'
 import EmptyState from '../components/common/EmptyState'
+import { formatKST } from '../utils/format';
 
 export default function VillageEventList() {
   const navigate = useNavigate()
@@ -60,7 +61,7 @@ export default function VillageEventList() {
                   </span>
                   <strong>{e.title}</strong>
                 </div>
-                <small className="text-muted">{e.event_date ? new Date(e.event_date).toLocaleString('ko-KR') : ''}</small>
+                <small className="text-muted">{e.event_date ? formatKST(e.event_date) : ''}</small>
               </div>
               <div className="small text-muted mt-1">
                 📍 {e.location || '미정'} | {{ upcoming: '예정', ongoing: '진행중', completed: '완료', afterparty: '뒤풀이' }[e.status as string] || ''}

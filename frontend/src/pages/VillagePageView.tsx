@@ -6,6 +6,7 @@ import VillageMapPropose from '../components/VillageMapPropose'
 import { api } from '../lib/api'
 import type { VillagePlaceCategoryData } from '../components/VillageMapView'
 import { useAuth } from '../contexts/AuthContext'
+import { formatKST } from '../utils/format';
 
 interface PageData {
   id: number
@@ -60,7 +61,7 @@ export default function VillagePageView() {
           <div className="card-body p-4">
             <h4 className="fw-bold mb-3">{page.title}</h4>
             <div className="mb-3 small text-muted">
-              {page.myeon} {page.ri} | {page.created_at ? new Date(page.created_at).toLocaleDateString('ko-KR') : ''}
+              {page.myeon} {page.ri} | {page.created_at ? formatKST(page.created_at, { year: 'numeric', month: '2-digit', day: '2-digit' }) : ''}
             </div>
             <hr />
             <div className="village-content" dangerouslySetInnerHTML={{ __html: page.content }} />

@@ -6,6 +6,7 @@ import ErrorMessage from '../components/common/ErrorMessage'
 import SortableBlocks from '../components/SortableBlocks'
 import { useBlockOrder } from '../hooks/useBlockOrder'
 import { openPopup } from '../lib/popup'
+import { formatKST } from '../utils/format';
 
 interface ProfileUser {
   id: number; username: string; real_name?: string; town?: string; village?: string;
@@ -635,7 +636,7 @@ export default function UserProfilePage() {
                         <div className="d-flex justify-content-between align-items-center">
                           <strong className="text-truncate">{n.title || '제목없음'}</strong>
                           <small className="text-muted ms-2 flex-shrink-0">
-                            {n.updated_at ? new Date(n.updated_at).toLocaleDateString('ko-KR') : ''}
+                            {n.updated_at ? formatKST(n.updated_at, { year: 'numeric', month: '2-digit', day: '2-digit' }) : ''}
                           </small>
                         </div>
                       </button>
@@ -906,8 +907,8 @@ function MemoPanel() {
                 <>
                   <span style={{ textDecoration: m.done ? 'line-through' : 'none', wordBreak: 'break-word' }}>{m.content}</span>
                   <div className="d-flex gap-2 mt-1">
-                    <small className="text-muted">{m.author === 'bot' ? '🤖' : '👤'} {new Date(m.created_at).toLocaleDateString()}</small>
-                    {m.end_date && <small className="text-muted">⏰ {new Date(m.end_date).toLocaleDateString()}</small>}
+                    <small className="text-muted">{m.author === 'bot' ? '🤖' : '👤'} {formatKST(m.created_at, { year: 'numeric', month: '2-digit', day: '2-digit' })}</small>
+                    {m.end_date && <small className="text-muted">⏰ {formatKST(m.end_date, { year: 'numeric', month: '2-digit', day: '2-digit' })}</small>}
                     <button className="btn btn-sm p-0 text-primary" onClick={() => setEditing({ id: m.id, content: m.content })}>✏️</button>
                     <button className="btn btn-sm p-0 text-danger" onClick={() => remove(m.id)}>🗑️</button>
                     <button className="btn btn-sm p-0" onClick={() => update(m.id, { is_shared: !m.is_shared })}>
