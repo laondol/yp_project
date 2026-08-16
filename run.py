@@ -179,6 +179,13 @@ def create_app():
                     with db.engine.connect() as _conn:
                         _conn.execute(_sa_text('ALTER TABLE post ADD COLUMN address VARCHAR(300)'))
                         _conn.commit()
+            # 뉴스 published_at (122ee23 추가분: 프로덕션에 누락 시 자동 보완)
+            if 'news_article' in _tbls:
+                _ncols = [c['name'] for c in _inspector.get_columns('news_article')]
+                if 'published_at' not in _ncols:
+                    with db.engine.connect() as _conn:
+                        _conn.execute(_sa_text('ALTER TABLE news_article ADD COLUMN published_at TIMESTAMP WITH TIME ZONE'))
+                        _conn.commit()
             # 마을지기 홍보 지도 테이블 (신규: village_place_category / village_place / village_place_report)
             _place_ddl = [
                 ("CREATE TABLE IF NOT EXISTS village_place_category ("
