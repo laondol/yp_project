@@ -40,7 +40,7 @@ export default function FriendsList() {
   if (error) return <ErrorMessage message={error} onRetry={load} />
 
   return (
-    <div style={{ maxWidth: 700, margin: '0 auto' }}>
+    <div style={{ maxWidth: 1140, margin: '0 auto' }}>
       <div className="d-flex justify-content-between align-items-center mb-4">
         <h3 className="fw-bold text-success mb-0">내 벗 관리</h3>
         <button className="btn btn-sm btn-outline-primary" onClick={() => navigate('/friends/map')}>벗 위치 지도</button>

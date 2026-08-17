@@ -71,7 +71,7 @@ export default function AdminStoreEdit() {
   if (loading) return <Loading />
 
   return (
-    <div className="container mt-4" style={{ maxWidth: 600 }}>
+    <div className="container mt-4" style={{ maxWidth: 1140 }}>
       <a href="/admin/stores" className="btn btn-sm btn-outline-secondary mb-3">← 가게 목록</a>
       <h4 className="fw-bold mb-3">{isEdit ? '가게 수정' : '가게 등록'}</h4>
 

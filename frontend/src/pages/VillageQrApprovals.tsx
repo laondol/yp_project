@@ -46,7 +46,7 @@ export default function VillageQrApprovals() {
   }, [])
 
   return (
-    <div style={{ maxWidth: 600, margin: '0 auto' }}>
+    <div style={{ maxWidth: 1140, margin: '0 auto' }}>
       <div className="card border-0 shadow-sm" style={{ borderRadius: 16 }}>
         <div className="card-body p-4">
           <div className="d-flex justify-content-between align-items-center mb-3">

@@ -207,7 +207,7 @@ export default function SchedulePage() {
   if (error) return <ErrorMessage message={error} onRetry={load} />
 
   return (
-    <div style={{ maxWidth: 800, margin: '0 auto' }}>
+    <div style={{ maxWidth: 1140, margin: '0 auto' }}>
       <div className="d-flex gap-2 mb-3">
         <button className="btn btn-sm btn-outline-secondary" onClick={() => setShowForm(false)}>달력</button>
         <button className="btn btn-sm btn-success" onClick={() => openAdd()}>+ 일정등록</button>

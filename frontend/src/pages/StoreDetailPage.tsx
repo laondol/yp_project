@@ -35,7 +35,7 @@ export default function StoreDetailPage() {
   if (error) return <ErrorMessage message={error} onRetry={() => window.location.reload()} />
 
   return (
-    <div style={{ maxWidth: 800, margin: '0 auto' }}>
+    <div style={{ maxWidth: 1140, margin: '0 auto' }}>
       <div className="mb-3">
         <button className="btn btn-sm btn-outline-secondary" onClick={() => navigate('/construction')}>← 위치기반안내</button>
       </div>

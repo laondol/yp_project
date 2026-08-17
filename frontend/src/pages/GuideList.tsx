@@ -17,7 +17,7 @@ export default function GuideList() {
   if (loading) return <div className="text-center py-5"><div className="spinner-border text-success" /></div>
 
   return (
-    <div style={{ maxWidth: 800, margin: '0 auto', padding: '16px' }}>
+    <div style={{ maxWidth: 1140, margin: '0 auto', padding: '16px' }}>
       <div className="text-center mb-4">
         <h3 className="fw-bold" style={{ color: '#2c5f2d' }}>이용 안내</h3>
         <p className="text-muted small">함께사는양평의 모든 기능을 안내해 드립니다.</p>

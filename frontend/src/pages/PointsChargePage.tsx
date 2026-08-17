@@ -104,7 +104,7 @@ export default function PointsChargePage() {
   }
 
   return (
-    <div className="container mt-4" style={{ maxWidth: 600 }}>
+    <div className="container mt-4" style={{ maxWidth: 1140 }}>
       <div className="alert alert-warning small mb-4" role="alert">
         🧪 테스트 모드입니다. 실제 결제가 이루어지지 않을 수 있습니다.
       </div>

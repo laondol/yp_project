@@ -131,7 +131,7 @@ export default function MemoPage() {
   const allDone = [...recentDone, ...olderDone]
 
   return (
-    <div className="py-3" style={{ maxWidth: 800, margin: '0 auto' }}>
+    <div className="py-3" style={{ maxWidth: 1140, margin: '0 auto' }}>
       <h5 className="fw-bold mb-3">📝 메모</h5>
 
       {/* 입력 */}

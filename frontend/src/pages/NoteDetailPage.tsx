@@ -39,7 +39,7 @@ export default function NoteDetailPage() {
   if (!note) return null
 
   return (
-    <div className="py-3" style={{ maxWidth: 700, margin: '0 auto' }}>
+    <div className="py-3" style={{ maxWidth: 1140, margin: '0 auto' }}>
       <div className="mb-3 d-flex align-items-center justify-content-between">
         <Link to="/note" className="btn btn-sm btn-outline-secondary">← 목록</Link>
         <div className="d-flex gap-2">

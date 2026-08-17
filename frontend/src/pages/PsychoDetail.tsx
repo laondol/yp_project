@@ -44,7 +44,7 @@ export default function PsychoDetail() {
   const comments = ((post as any).comments || '').split('\n').filter(Boolean)
 
   return (
-    <div style={{ maxWidth: 700, margin: '0 auto' }}>
+    <div style={{ maxWidth: 1140, margin: '0 auto' }}>
       <div className="card border-0 shadow-sm" style={{ borderRadius: 16 }}>
         <div className="card-body p-4">
           <h4 className="fw-bold">{post.title}</h4>

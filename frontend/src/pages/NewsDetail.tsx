@@ -75,7 +75,7 @@ export default function NewsDetail() {
   if (!article) return <ErrorMessage message="뉴스를 찾을 수 없습니다." />
 
   return (
-    <div style={{ maxWidth: 800, margin: '0 auto' }}>
+    <div style={{ maxWidth: 1140, margin: '0 auto' }}>
       <button className="btn btn-sm btn-outline-secondary mb-3" onClick={() => navigate('/news')}>
         ← 목록으로
       </button>

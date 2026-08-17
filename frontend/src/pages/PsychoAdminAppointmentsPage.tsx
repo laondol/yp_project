@@ -158,7 +158,7 @@ export default function PsychoAdminAppointmentsPage() {
   }
 
   return (
-    <div className="container mt-4" style={{ maxWidth: 800 }}>
+    <div className="container mt-4" style={{ maxWidth: 1140 }}>
       <h4 className="fw-bold mb-4">🧑‍⚕️ 심리상담 예약 관리</h4>
 
       <ul className="nav nav-tabs mb-4">

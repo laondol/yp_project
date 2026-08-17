@@ -80,7 +80,7 @@ export default function PsychoAdminPage() {
   }
 
   return (
-    <div className="container mt-4" style={{ maxWidth: 800 }}>
+    <div className="container mt-4" style={{ maxWidth: 1140 }}>
       <div className="d-flex justify-content-between align-items-center mb-4">
         <h4 className="fw-bold mb-0">🧑‍⚕️ 심리상담 관리</h4>
         <a href="/psycho/admin/appointments" className="btn btn-outline-primary btn-sm">상담 예약 관리</a>

@@ -88,7 +88,7 @@ export default function MyDID() {
   if (authLoading || loading) return <Loading />
 
   return (
-    <div style={{ maxWidth: 700, margin: '0 auto' }}>
+    <div style={{ maxWidth: 1140, margin: '0 auto' }}>
       <h5 className="fw-bold mb-3">🔐 내 DID / VC</h5>
       <ul className="nav nav-tabs mb-3">
         <li className="nav-item"><button className={`nav-link ${tab === 'keys' ? 'active fw-bold' : ''}`} onClick={() => setTab('keys')}>🔑 DID 키</button></li>

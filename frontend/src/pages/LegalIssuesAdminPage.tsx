@@ -113,7 +113,7 @@ export default function LegalIssuesAdminPage() {
   if (authLoading) return <Loading />
 
   return (
-    <div style={{ maxWidth: 800, margin: '0 auto' }}>
+    <div style={{ maxWidth: 1140, margin: '0 auto' }}>
       <h4 className="fw-bold mb-3">노동 게시판 관리</h4>
 
       <ul className="nav nav-tabs mb-4">

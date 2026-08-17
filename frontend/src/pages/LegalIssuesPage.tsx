@@ -139,7 +139,7 @@ export default function LegalIssuesPage() {
   if (error) return <ErrorMessage message={error} onRetry={load} />
 
   return (
-    <div style={{ maxWidth: 700, margin: '0 auto' }}>
+    <div style={{ maxWidth: 1140, margin: '0 auto' }}>
       <div className="d-flex justify-content-between align-items-center mb-3">
         <h4 className="fw-bold mb-0">노동이슈</h4>
         <div className="d-flex gap-2">

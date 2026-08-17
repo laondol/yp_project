@@ -29,7 +29,7 @@ export default function VillageMyWishes() {
   if (error) return <ErrorMessage message={error} onRetry={load} />
 
   return (
-    <div style={{ maxWidth: 700, margin: '0 auto' }}>
+    <div style={{ maxWidth: 1140, margin: '0 auto' }}>
       <h4 className="fw-bold mb-3">내가 보낸 마을 바람</h4>
       {wishes.length === 0 ? (
         <EmptyState icon="💭" title="아직 보낸 바람이 없습니다." />

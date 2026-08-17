@@ -45,7 +45,7 @@ export default function VillageEventCreatePage() {
   if (!hasAccess) return <ErrorMessage message="접근 권한이 없습니다." />
 
   return (
-    <div style={{ maxWidth: 600, margin: '0 auto' }}>
+    <div style={{ maxWidth: 1140, margin: '0 auto' }}>
       <h4 className="fw-bold mb-3">새 활동 만들기</h4>
       {error && <ErrorMessage message={error} />}
       <form onSubmit={handleSubmit} className="card border-0 shadow-sm p-4" style={{ borderRadius: 16 }}>

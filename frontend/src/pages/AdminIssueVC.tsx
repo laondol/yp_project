@@ -81,7 +81,7 @@ export default function AdminIssueVC() {
   }
 
   return (
-    <div style={{ maxWidth: 700, margin: '0 auto' }}>
+    <div style={{ maxWidth: 1140, margin: '0 auto' }}>
       <h5 className="fw-bold mb-3">🏷️ VC 발급 (관리자)</h5>
 
       <ul className="nav nav-tabs mb-3">

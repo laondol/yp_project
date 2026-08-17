@@ -25,7 +25,7 @@ export default function CharterPage() {
   if (error) return <ErrorMessage message={error} onRetry={load} />
 
   return (
-    <div className="container py-4" style={{ maxWidth: 800 }}>
+    <div className="container py-4" style={{ maxWidth: 1140 }}>
       <h3 className="fw-bold text-center mb-4">📜 정관 (사회적협동조합 제안)</h3>
       <div className="card border-0 shadow-sm" style={{ borderRadius: 18 }}>
         <div className="card-body p-4" dangerouslySetInnerHTML={{ __html: content }} />

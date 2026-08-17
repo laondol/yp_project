@@ -32,7 +32,7 @@ export default function VillageEventList() {
   if (error) return <ErrorMessage message={error} onRetry={load} />
 
   return (
-    <div style={{ maxWidth: 800, margin: '0 auto' }}>
+    <div style={{ maxWidth: 1140, margin: '0 auto' }}>
       <div className="d-flex justify-content-between align-items-center mb-3">
         <h4 className="fw-bold mb-0">활동</h4>
         <button className="btn btn-sm btn-success" onClick={() => navigate('/village/events/create')}>+ 새로 만들기</button>

@@ -86,7 +86,7 @@ export default function AdminAlertEdit() {
   if (loading) return <Loading />
 
   return (
-    <div className="container mt-4" style={{ maxWidth: 600 }}>
+    <div className="container mt-4" style={{ maxWidth: 1140 }}>
       <a href="/admin/alerts" className="btn btn-sm btn-outline-secondary mb-3">← 알림 목록으로</a>
       <h3 className="fw-bold mb-4">{isEdit ? '✏️ 알림 수정' : '🚨 새 알림 등록'}</h3>
 

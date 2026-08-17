@@ -115,7 +115,7 @@ export default function ShareDetail() {
 
   if (isBlocked && !isAuthor) {
     return (
-      <div className="container mt-4" style={{maxWidth: 700}}>
+      <div className="container mt-4" style={{maxWidth: 1140}}>
         <a href="/share" className="btn btn-sm btn-outline-secondary mb-3">← 공유마당으로</a>
         <div className="card border-0 shadow-sm" style={{borderRadius: 18}}>
           <div className="card-body p-5 text-center">
@@ -129,7 +129,7 @@ export default function ShareDetail() {
   }
 
   return (
-    <div className="container mt-4" style={{maxWidth: 700}}>
+    <div className="container mt-4" style={{maxWidth: 1140}}>
       <a href="/share" className="btn btn-sm btn-outline-secondary mb-3">← 공유마당으로</a>
 
       {isBlocked && isAuthor && (

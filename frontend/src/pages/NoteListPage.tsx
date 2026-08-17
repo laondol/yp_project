@@ -100,7 +100,7 @@ export default function NoteListPage() {
   }
 
   return (
-    <div className="py-3" style={{ maxWidth: 700, margin: '0 auto' }}>
+    <div className="py-3" style={{ maxWidth: 1140, margin: '0 auto' }}>
       <div className="d-flex align-items-center justify-content-between mb-3">
         <h5 className="fw-bold mb-0">📒 노트</h5>
         <button className="btn btn-success btn-sm" onClick={() => navigate('/note/new')}>＋ 새 노트</button>

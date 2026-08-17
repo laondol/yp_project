@@ -38,7 +38,7 @@ export default function ServicePsychoEditPage() {
   }
 
   return (
-    <div style={{ maxWidth: 700, margin: '0 auto' }}>
+    <div style={{ maxWidth: 1140, margin: '0 auto' }}>
       <h4 className="fw-bold mb-3" style={{ color: '#198754' }}>심리상담소 페이지 편집</h4>
 
       {error && <div className="alert alert-danger py-2 small">{error}</div>}

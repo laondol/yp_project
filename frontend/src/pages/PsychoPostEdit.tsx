@@ -56,7 +56,7 @@ export default function PsychoPostEdit() {
   if (loading) return <Loading />
 
   return (
-    <div className="container py-4" style={{ maxWidth: 700 }}>
+    <div className="container py-4" style={{ maxWidth: 1140 }}>
       <h4 className="fw-bold mb-3">✏️ 심리상담 수정</h4>
       <form onSubmit={handleSubmit} className="card border-0 shadow-sm p-4" style={{ borderRadius: 16 }}>
         <div className="mb-2">

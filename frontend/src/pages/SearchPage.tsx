@@ -95,7 +95,7 @@ export default function SearchPage() {
   }
 
   return (
-    <div style={{ maxWidth: 700, margin: '0 auto' }}>
+    <div style={{ maxWidth: 1140, margin: '0 auto' }}>
       <h4 className="fw-bold mb-4">검색</h4>
       <form onSubmit={handleSubmit} className="mb-4">
         <div className="input-group">

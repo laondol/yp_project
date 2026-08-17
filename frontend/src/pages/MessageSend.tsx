@@ -63,7 +63,7 @@ export default function MessageSend() {
   if (error) return <ErrorMessage message={error} onRetry={load} />
 
   return (
-    <div style={{ maxWidth: 700, margin: '0 auto' }}>
+    <div style={{ maxWidth: 1140, margin: '0 auto' }}>
       <div className="d-flex justify-content-between align-items-center mb-4">
         <h3 className="fw-bold text-success">편지 보내기</h3>
         <button className="btn btn-sm btn-outline-success" onClick={() => navigate('/message/inbox')}>받은 편지</button>

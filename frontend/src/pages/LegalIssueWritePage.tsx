@@ -81,7 +81,7 @@ export default function LegalIssueWritePage() {
   if (authLoading) return null
 
   return (
-    <div style={{ maxWidth: 700, margin: '0 auto' }}>
+    <div style={{ maxWidth: 1140, margin: '0 auto' }}>
       <h4 className="fw-bold mb-3">노동 게시글 작성</h4>
 
       <ul className="nav nav-tabs mb-4">

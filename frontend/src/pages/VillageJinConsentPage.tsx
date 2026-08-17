@@ -29,7 +29,7 @@ export default function VillageJinConsentPage() {
   }
 
   return (
-    <div style={{ maxWidth: 600, margin: '0 auto' }}>
+    <div style={{ maxWidth: 1140, margin: '0 auto' }}>
       <div className="card border-0 shadow-sm p-4" style={{ borderRadius: 16 }}>
         <h4 className="fw-bold mb-3">JIN 초대 동의</h4>
         {error && <ErrorMessage message={error} />}

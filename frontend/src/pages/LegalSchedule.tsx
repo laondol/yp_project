@@ -66,7 +66,7 @@ export default function LegalSchedule() {
   if (error) return <ErrorMessage message={error} onRetry={load} />
 
   return (
-    <div style={{ maxWidth: 700, margin: '0 auto' }}>
+    <div style={{ maxWidth: 1140, margin: '0 auto' }}>
       <h4 className="fw-bold mb-3">방문상담 예약</h4>
 
       <div className="card border-0 shadow-sm" style={{ borderRadius: 16 }}>

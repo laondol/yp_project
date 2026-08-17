@@ -145,7 +145,7 @@ export default function UserProfilePage() {
   const hasBotActivity = data.is_own && (data.bot_memory || data.drafts.length > 0)
 
   return (
-    <div className="container mt-4" style={{ maxWidth: 800 }}>
+    <div className="container mt-4" style={{ maxWidth: 1140 }}>
 
       <SortableBlocks order={order} onReorder={saveOrder} dragEnabled={data.is_own}>
         {{
