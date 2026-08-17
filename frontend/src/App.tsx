@@ -118,9 +118,11 @@ function Footer() {
     : host === 'test.unocum.kr' ? '함께사는테스트' : '함께사는양평'
   return (
     <footer className="text-center py-4 border-top" style={{ background: '#f8f9fa' }}>
-      <span className="fw-bold text-success">{name}</span>
-      <span className="text-muted mx-2">|</span>
-      <a href="mailto:admin@unocum.kr" className="text-muted text-decoration-none small">admin@unocum.kr</a>
+      <div className="container">
+        <span className="fw-bold text-success">{name}</span>
+        <span className="text-muted mx-2">|</span>
+        <a href="mailto:admin@unocum.kr" className="text-muted text-decoration-none small">admin@unocum.kr</a>
+      </div>
     </footer>
   )
 }

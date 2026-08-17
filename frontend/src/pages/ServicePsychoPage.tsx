@@ -7,7 +7,7 @@ export default function ServicePsychoPage() {
   const canManage = user?.role === 'admin' || user?.role === 'leader' || user?.managed_pages?.includes('psycho')
 
   return (
-    <div style={{ maxWidth: 700, margin: '0 auto' }}>
+    <div className="py-3">
       <div className="card border-0 shadow-sm mb-4" style={{ borderRadius: 16 }}>
         <div className="card-body p-4">
           <div className="d-flex justify-content-between align-items-start mb-3">

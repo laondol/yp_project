@@ -150,7 +150,7 @@ export default function UserProfilePage() {
       <SortableBlocks order={order} onReorder={saveOrder} dragEnabled={data.is_own}>
         {{
           member_info: (
-            <div className="card border-0 shadow-sm mb-3" style={{ borderRadius: 18 }}>
+            <div className="card border-0 shadow-sm h-100" style={{ borderRadius: 18 }}>
               <div className="card-body p-3">
                 <div className="d-flex align-items-center gap-2 mb-2">
                   <div className="bg-success text-white rounded-circle d-flex align-items-center justify-content-center flex-shrink-0"
@@ -234,7 +234,7 @@ export default function UserProfilePage() {
           ),
 
           tongbot: (
-            <div className="card border-0 shadow-sm mb-3" style={{ borderRadius: 18 }}>
+            <div className="card border-0 shadow-sm h-100" style={{ borderRadius: 18 }}>
               <div className="card-body p-3">
                 {data.is_own ? (
                   <>
@@ -326,7 +326,7 @@ export default function UserProfilePage() {
           todo_memo: data.is_own ? <TodoMemoStrip /> : null,
 
           location: (
-            <div className="card border-0 shadow-sm mb-3" style={{ borderRadius: 18 }}>
+            <div className="card border-0 shadow-sm h-100" style={{ borderRadius: 18 }}>
               <div className="card-body p-2">
                 <div className="d-flex align-items-center gap-2 flex-wrap">
                   <small className="text-muted">📍</small>
@@ -384,7 +384,7 @@ export default function UserProfilePage() {
           dashboard: data.is_own ? <DashboardPanel /> : null,
 
           appointments: hasAppointments ? (
-            <div className="card border-0 shadow-sm mb-3" style={{ borderRadius: 18 }}>
+            <div className="card border-0 shadow-sm h-100" style={{ borderRadius: 18 }}>
               <div className="card-header bg-white fw-bold" style={{ borderRadius: '18px 18px 0 0' }}>📅 법률상담 예약</div>
               <div className="card-body p-0">
                 {data.appointments.map(a => (
@@ -403,7 +403,7 @@ export default function UserProfilePage() {
           ) : null,
 
           bot_activity: hasBotActivity ? (
-            <div className="card border-0 shadow-sm mb-3" style={{ borderRadius: 18 }}>
+            <div className="card border-0 shadow-sm h-100" style={{ borderRadius: 18 }}>
               <div className="card-header bg-white fw-bold" style={{ borderRadius: '18px 18px 0 0' }}>🤖 통벗 활동 (30일 보관)</div>
               <div className="card-body p-0">
                 {data.drafts.length > 0 && (
@@ -446,7 +446,7 @@ export default function UserProfilePage() {
           ) : null,
 
           points: (
-            <div className="card border-0 shadow-sm mb-3" style={{ borderRadius: 18 }}>
+            <div className="card border-0 shadow-sm h-100" style={{ borderRadius: 18 }}>
               <div className="card-header bg-white fw-bold d-flex justify-content-between"
                 style={{ borderRadius: '18px 18px 0 0', cursor: 'pointer' }}
                 onClick={() => setShowNip(!showNip)}>
@@ -485,7 +485,7 @@ export default function UserProfilePage() {
           ),
 
           friends_messages: (
-            <div className="card border-0 shadow-sm mb-3" style={{ borderRadius: 18 }}>
+            <div className="card border-0 shadow-sm h-100" style={{ borderRadius: 18 }}>
               <div className="card-header bg-white fw-bold" style={{ borderRadius: '18px 18px 0 0' }}>
                 {data.is_own ? '👥 벗 · 편지' : '💬 편지'}
               </div>
@@ -549,7 +549,7 @@ export default function UserProfilePage() {
           ),
 
           posts: data.posts.length > 0 ? (
-            <div className="card border-0 shadow-sm mb-3" style={{ borderRadius: 18 }}>
+            <div className="card border-0 shadow-sm h-100" style={{ borderRadius: 18 }}>
               <div className="card-header bg-white fw-bold" style={{ borderRadius: '18px 18px 0 0' }}>📝 작성한 글</div>
               <div className="card-body p-0">
                 {Object.entries(TYPE_LABELS).map(([tkey, tlabel]) => {
@@ -575,7 +575,7 @@ export default function UserProfilePage() {
           ) : null,
 
           photos: data.share_images.length > 0 ? (
-            <div className="card border-0 shadow-sm mb-3" style={{ borderRadius: 18 }}>
+            <div className="card border-0 shadow-sm h-100" style={{ borderRadius: 18 }}>
               <div className="card-header bg-white fw-bold" style={{ borderRadius: '18px 18px 0 0' }}>🖼️ 공유한 사진</div>
               <div className="card-body p-2">
                 <div className="row g-2">
@@ -745,7 +745,7 @@ function DashboardPanel() {
   if (!dash) return null
 
   return (
-    <div className="card border-0 shadow-sm mb-3" style={{ borderRadius: 18 }}>
+    <div className="card border-0 shadow-sm h-100" style={{ borderRadius: 18 }}>
       <div className="card-body p-3">
         {/* 통벗 AI Tip 한줄 */}
         {dash.ai_tip && (
@@ -1035,7 +1035,7 @@ function TodoMemoStrip() {
   const first = memos[0]
 
   return (
-    <div className="card border-0 shadow-sm mb-3" style={{ borderRadius: 18, background: '#fffdf5', borderLeft: '3px solid #f0ad4e' }}>
+    <div className="card border-0 shadow-sm h-100" style={{ borderRadius: 18, background: '#fffdf5', borderLeft: '3px solid #f0ad4e' }}>
       <div className="card-body p-2">
         <div className="d-flex align-items-center gap-2">
           <span title="할일메모">📌</span>

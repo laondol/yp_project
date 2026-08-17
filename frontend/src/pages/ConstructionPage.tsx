@@ -248,7 +248,7 @@ export default function ConstructionPage() {
   ]
 
   return (
-    <div style={{ maxWidth: 800, margin: '0 auto' }}>
+    <div className="container">
       <div className="d-flex justify-content-between align-items-center mb-4">
         <h3 className="fw-bold mb-0">📍 위치기반 안내</h3>
         {role === 'admin' || role === 'leader' ? (
@@ -272,9 +272,9 @@ export default function ConstructionPage() {
           ) : heritage.length === 0 ? (
             <EmptyState icon="🏛️" title="주변 국가유산이 없습니다." />
           ) : (
-            <div className="row g-3">
+            <div className="row g-2">
               {heritage.map(h => (
-                <div key={h.name} className="col-12">
+                <div key={h.name} className="col-6 col-md-4 col-lg-3 p-2">
                   <div className="card border-0 shadow-sm" style={{ borderRadius: 16 }}>
                     <div className="card-body p-3">
                       <div className="d-flex align-items-center gap-2 mb-2">
@@ -286,19 +286,21 @@ export default function ConstructionPage() {
                       <div className="d-flex gap-1 flex-wrap mb-2">
                         <a href={`https://ko.wikipedia.org/w/index.php?search=${encodeURIComponent(h.name)}`} target="_blank" className="btn btn-sm btn-outline-secondary" rel="noopener noreferrer">📖 위키백과</a>
                         <a href={`https://search.naver.com/search.naver?query=${encodeURIComponent(h.name + ' 문화재')}`} target="_blank" className="btn btn-sm btn-outline-success" rel="noopener noreferrer">🔍 자세히보기</a>
-                        <a href={`/compass?popup=1&lat=${h.lat}&lng=${h.lng}&name=${encodeURIComponent(h.name || '국가유산')}`} className="btn btn-sm btn-outline-primary">🧭 나침반</a>
+                        <div className="btn-group">
+                          <a href={`/compass?popup=1&lat=${h.lat}&lng=${h.lng}&name=${encodeURIComponent(h.name || '국가유산')}`} className="btn btn-sm btn-outline-primary">🧭 나침반</a>
+                          {h.stamped ? (
+                            <span className="btn btn-sm btn-warning disabled">✅ 방문완료</span>
+                          ) : (
+                            <button className="btn btn-sm btn-outline-danger" onClick={() => handleStamp(h.name)} disabled={heritageStampLoading[h.name]}>
+                              {heritageStampLoading[h.name] ? '...' : '🔖 스탬프'}
+                            </button>
+                          )}
+                        </div>
                       </div>
                       <div className="d-flex gap-1 flex-wrap">
                         <a href={`https://www.google.com/maps/dir/?api=1&origin=${heritageLat},${heritageLng}&destination=${h.lat},${h.lng}`} target="_blank" className="btn btn-sm btn-outline-secondary" rel="noopener noreferrer">Google</a>
                         <a href={`https://map.kakao.com/link/to/${encodeURIComponent(h.name)},${h.lat},${h.lng}`} target="_blank" className="btn btn-sm btn-outline-warning" rel="noopener noreferrer">카카오</a>
                         <a href={`https://map.naver.com/index.nhn?slat=${heritageLat}&slng=${heritageLng}&elat=${h.lat}&elng=${h.lng}&etitle=${encodeURIComponent(h.name)}`} target="_blank" className="btn btn-sm btn-outline-success" rel="noopener noreferrer">네이버</a>
-                        {h.stamped ? (
-                          <span className="btn btn-sm btn-warning disabled">✅ 방문완료</span>
-                        ) : (
-                          <button className="btn btn-sm btn-outline-danger" onClick={() => handleStamp(h.name)} disabled={heritageStampLoading[h.name]}>
-                            {heritageStampLoading[h.name] ? '...' : '🔖 스탬프'}
-                          </button>
-                        )}
                       </div>
                     </div>
                   </div>

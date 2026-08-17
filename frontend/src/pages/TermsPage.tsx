@@ -1,6 +1,6 @@
 export default function TermsPage() {
   return (
-    <div className="container py-4" style={{ maxWidth: 800 }}>
+    <div className="container py-4" style={{ maxWidth: 1140 }}>
       <h3 className="fw-bold text-center mb-4">📋 회원약관 및 닢 운영 규칙</h3>
       <p className="text-center text-muted small mb-4">시행일: 2026년 6월 10일 | 함께사는양평 운영위원회</p>
 

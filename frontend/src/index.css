@@ -29,3 +29,13 @@ a { text-decoration: none; }
   max-height: 500px;
   transition: max-height 0.3s ease;
 }
+
+/* 모든 페이지 콘텐츠 최대 폭을 네비바(.container) 폭과 일치시킴
+   - 페이지 래퍼 패턴 1: max-width + margin:0 auto 인라인 스타일
+   - 페이지 래퍼 패턴 2: className="container" + max-width 인라인 스타일 */
+div[style*="max-width"][style*="margin:0 auto"] {
+  max-width: 100% !important;
+}
+div.container[style*="max-width"] {
+  max-width: 100% !important;
+}

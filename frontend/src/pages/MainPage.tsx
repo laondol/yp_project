@@ -80,7 +80,7 @@ export default function MainPage() {
   }
 
   return (
-    <div style={{ maxWidth: 700, margin: '0 auto' }}>
+    <div className="py-3">
       <h3 className="fw-bold mb-4 text-center">💭 꿈꾸기</h3>
       <p className="text-muted text-center mb-4 small">
         양평을 위해 꾸는 꿈 그 꿈이 양평의 미래입니다. 

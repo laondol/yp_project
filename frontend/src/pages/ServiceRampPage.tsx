@@ -30,7 +30,7 @@ export default function ServiceRampPage() {
   }
 
   return (
-    <div style={{ maxWidth: 700, margin: '0 auto' }}>
+    <div className="py-3">
       <div className="card border-0 shadow-sm mb-4 text-center" style={{ borderRadius: 16, background: 'linear-gradient(135deg, #198754, #20c997)' }}>
         <div className="card-body p-5 text-white">
           <div style={{ fontSize: 48 }}>♿</div>

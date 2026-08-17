@@ -41,6 +41,7 @@ const ContentEditor = forwardRef<ContentEditorHandle, ContentEditorProps>(functi
   const drawingRef = useRef(false)
   const dragRef = useRef<{ kind: 'rotate' | 'resize'; corner?: 'br' | 'bl' | 'tr' | 'tl'; startX: number; startY: number; baseW: number; baseH: number; natRatio: number; orgAngle: number; cx: number; cy: number; startML: number; startMT: number } | null>(null)
   const matchSelRef = useRef<{ range: Range } | null>(null)
+  const savedRange = useRef<Range | null>(null)
   const [showCanvas, setShowCanvas] = useState(false)
   const [activeImg, setActiveImg] = useState<HTMLImageElement | null>(null)
   const [overlayRect, setOverlayRect] = useState<OverlayBox | null>(null)
@@ -49,6 +50,21 @@ const ContentEditor = forwardRef<ContentEditorHandle, ContentEditorProps>(functi
   const [addr, setAddr] = useState('')
   const [geoBusy, setGeoBusy] = useState(false)
   const [fileUploading, setFileUploading] = useState(false)
+  const [showFormat, setShowFormat] = useState(false)
+  const [showPara, setShowPara] = useState(false)
+  const [showTable, setShowTable] = useState(false)
+  const [fontSizePx, setFontSizePx] = useState('16')
+  const [tableRows, setTableRows] = useState(3)
+  const [tableCols, setTableCols] = useState(3)
+  const [tblBorderW, setTblBorderW] = useState('1')
+  const [tblBorderStyle, setTblBorderStyle] = useState('solid')
+  const [tblBorderColor, setTblBorderColor] = useState('#333333')
+  const [showDraw, setShowDraw] = useState(false)
+  const [drawMode, setDrawMode] = useState<'free' | 'line' | 'circle'>('free')
+  const [drawColor, setDrawColor] = useState('#333333')
+  const [drawWidth, setDrawWidth] = useState(3)
+  const drawStartRef = useRef<{ x: number; y: number } | null>(null)
+  const drawSnapRef = useRef<ImageData | null>(null)
 
   useEffect(() => {
     if (editorRef.current && initialContent && !editorRef.current.innerHTML) {
@@ -70,6 +86,30 @@ const ContentEditor = forwardRef<ContentEditorHandle, ContentEditorProps>(functi
     document.execCommand(cmd, false)
     editorRef.current?.focus()
   }, [])
+
+  const saveSelection = useCallback(() => {
+    const sel = window.getSelection()
+    if (sel && sel.rangeCount > 0) {
+      const r = sel.getRangeAt(0)
+      if (editorRef.current?.contains(r.commonAncestorContainer)) savedRange.current = r
+    }
+  }, [])
+
+  const restoreSelection = useCallback(() => {
+    const ed = editorRef.current
+    if (!ed) return
+    ed.focus()
+    if (savedRange.current) {
+      const sel = window.getSelection()
+      sel?.removeAllRanges()
+      sel?.addRange(savedRange.current)
+    }
+  }, [])
+
+  const applyCmd = useCallback((cmd: string, val?: string) => {
+    restoreSelection()
+    document.execCommand(cmd, false, val)
+  }, [restoreSelection])
 
   // ---------- 드래그 크기 조절 / 회전 핸들 ----------
   const imgBaseSize = useCallback((img: HTMLImageElement) => {
@@ -273,6 +313,194 @@ const ContentEditor = forwardRef<ContentEditorHandle, ContentEditorProps>(functi
     ed.dispatchEvent(new Event('input', { bubbles: true }))
   }
 
+  const applyStyleToSelection = useCallback((prop: string, val: string) => {
+    restoreSelection()
+    const sel = window.getSelection()
+    const ed = editorRef.current
+    if (!ed || !sel || sel.rangeCount === 0) return
+    const range = sel.getRangeAt(0)
+    if (range.collapsed) {
+      const span = document.createElement('span')
+      span.style.cssText = `${prop}:${val}`
+      span.appendChild(document.createTextNode('​'))
+      range.insertNode(span)
+      const r2 = document.createRange()
+      r2.setStart(span.firstChild as Text, 1)
+      r2.collapse(true)
+      sel.removeAllRanges()
+      sel.addRange(r2)
+      ed.dispatchEvent(new Event('input', { bubbles: true }))
+      return
+    }
+    const span = document.createElement('span')
+    span.style.cssText = `${prop}:${val}`
+    try {
+      range.surroundContents(span)
+    } catch {
+      const frag = range.extractContents()
+      span.appendChild(frag)
+      range.insertNode(span)
+    }
+    sel.removeAllRanges()
+    ed.dispatchEvent(new Event('input', { bubbles: true }))
+  }, [restoreSelection])
+
+  const insertTable = useCallback((rows: number, cols: number) => {
+    const r = Math.max(1, Math.min(50, rows | 0))
+    const c = Math.max(1, Math.min(50, cols | 0))
+    let html = '<table style="border-collapse:collapse;width:100%;margin:8px 0"><tbody>'
+    for (let i = 0; i < r; i++) {
+      html += '<tr>'
+      for (let j = 0; j < c; j++) {
+        html += '<td style="border:1px solid #ccc;padding:6px;">&nbsp;</td>'
+      }
+      html += '</tr>'
+    }
+    html += '</tbody></table>'
+    insertAtCursor(html)
+  }, [insertAtCursor])
+
+  const deleteTableAtCursor = useCallback(() => {
+    restoreSelection()
+    const sel = window.getSelection()
+    const ed = editorRef.current
+    if (!ed) return
+    let node: Node | null = sel && sel.rangeCount > 0 ? sel.getRangeAt(0).startContainer : ed
+    while (node && node !== ed) {
+      if ((node as HTMLElement).tagName === 'TABLE') {
+        (node as HTMLElement).remove()
+        ed.dispatchEvent(new Event('input', { bubbles: true }))
+        return
+      }
+      node = node.parentNode
+    }
+    alert('커서를 지울 표 안에 두고 눌러주세요.')
+  }, [restoreSelection])
+
+  const getTableContext = useCallback(() => {
+    const sel = window.getSelection()
+    const ed = editorRef.current
+    if (!ed || !sel || sel.rangeCount === 0) return null
+    let node: Node | null = sel.getRangeAt(0).startContainer
+    let cell: HTMLElement | null = null
+    let row: HTMLElement | null = null
+    let table: HTMLElement | null = null
+    while (node && node !== ed) {
+      const el = node as HTMLElement
+      if (el.tagName === 'TD' || el.tagName === 'TH') cell = el
+      if (el.tagName === 'TR') row = el
+      if (el.tagName === 'TABLE') { table = el; break }
+      node = node.parentNode
+    }
+    return table ? { table, row, cell } : null
+  }, [])
+
+  const insertRowBelow = useCallback(() => {
+    restoreSelection()
+    const ctx = getTableContext()
+    const rowEl = ctx?.row as HTMLTableRowElement | null
+    if (!ctx || !ctx.table || !rowEl) { alert('표 안에 커서를 두세요.'); return }
+    const n = rowEl.cells.length
+    const tr = document.createElement('tr')
+    for (let i = 0; i < n; i++) {
+      const td = document.createElement('td')
+      td.style.cssText = 'border:1px solid #ccc;padding:6px;'
+      td.innerHTML = '&nbsp;'
+      tr.appendChild(td)
+    }
+    if (rowEl.nextSibling) rowEl.parentNode!.insertBefore(tr, rowEl.nextSibling)
+    else rowEl.parentNode!.appendChild(tr)
+    editorRef.current?.dispatchEvent(new Event('input', { bubbles: true }))
+  }, [restoreSelection, getTableContext])
+
+  const deleteRow = useCallback(() => {
+    restoreSelection()
+    const ctx = getTableContext()
+    if (!ctx || !ctx.row) { alert('표 안에 커서를 두세요.'); return }
+    ctx.row.remove()
+    editorRef.current?.dispatchEvent(new Event('input', { bubbles: true }))
+  }, [restoreSelection, getTableContext])
+
+  const insertColRight = useCallback(() => {
+    restoreSelection()
+    const ctx = getTableContext()
+    const rowEl = ctx?.row as HTMLTableRowElement | null
+    const cellEl = ctx?.cell as HTMLTableCellElement | null
+    if (!ctx || !ctx.table || !rowEl || !cellEl) { alert('표 안에 커서를 두세요.'); return }
+    const idx = Array.prototype.indexOf.call(rowEl.cells, cellEl)
+    ctx.table.querySelectorAll('tr').forEach((el) => {
+      const tr = el as HTMLTableRowElement
+      const ref = tr.cells[idx]
+      const td = document.createElement('td')
+      td.style.cssText = 'border:1px solid #ccc;padding:6px;'
+      td.innerHTML = '&nbsp;'
+      if (ref && ref.nextSibling) tr.insertBefore(td, ref.nextSibling)
+      else tr.appendChild(td)
+    })
+    editorRef.current?.dispatchEvent(new Event('input', { bubbles: true }))
+  }, [restoreSelection, getTableContext])
+
+  const deleteCol = useCallback(() => {
+    restoreSelection()
+    const ctx = getTableContext()
+    const rowEl = ctx?.row as HTMLTableRowElement | null
+    const cellEl = ctx?.cell as HTMLTableCellElement | null
+    if (!ctx || !ctx.table || !rowEl || !cellEl) { alert('표 안에 커서를 두세요.'); return }
+    const idx = Array.prototype.indexOf.call(rowEl.cells, cellEl)
+    ctx.table.querySelectorAll('tr').forEach((el) => {
+      const tr = el as HTMLTableRowElement
+      if (tr.cells[idx]) tr.cells[idx].remove()
+    })
+    editorRef.current?.dispatchEvent(new Event('input', { bubbles: true }))
+  }, [restoreSelection, getTableContext])
+
+  const toggleHeaderRow = useCallback(() => {
+    restoreSelection()
+    const ctx = getTableContext()
+    const tableEl = ctx?.table as HTMLTableElement | null
+    if (!ctx || !tableEl || !tableEl.rows[0]) { alert('표 안에 커서를 두세요.'); return }
+    const firstRow = tableEl.rows[0]
+    const isHeader = firstRow.cells[0] && firstRow.cells[0].tagName === 'TH'
+    Array.from(firstRow.cells).forEach((c) => {
+      const cellEl = c as HTMLTableCellElement
+      const newEl = document.createElement(isHeader ? 'td' : 'th')
+      newEl.style.cssText = cellEl.style.cssText
+      newEl.innerHTML = cellEl.innerHTML
+      cellEl.replaceWith(newEl)
+    })
+    editorRef.current?.dispatchEvent(new Event('input', { bubbles: true }))
+  }, [restoreSelection, getTableContext])
+
+  const setCellBg = useCallback((color: string) => {
+    restoreSelection()
+    const ctx = getTableContext()
+    if (!ctx || !ctx.cell) { alert('표 안에 커서를 두세요.'); return }
+    ctx.cell.style.backgroundColor = color
+    editorRef.current?.dispatchEvent(new Event('input', { bubbles: true }))
+  }, [restoreSelection, getTableContext])
+
+  const applyTableBorder = useCallback(() => {
+    restoreSelection()
+    const ctx = getTableContext()
+    if (!ctx || !ctx.table) { alert('표 안에 커서를 두세요.'); return }
+    const b = `${tblBorderW}px ${tblBorderStyle} ${tblBorderColor}`
+    ctx.table.style.borderCollapse = 'collapse'
+    ctx.table.style.border = b
+    ctx.table.querySelectorAll('td,th').forEach((c) => {
+      const cell = c as HTMLTableCellElement
+      cell.style.border = b
+    })
+    editorRef.current?.dispatchEvent(new Event('input', { bubbles: true }))
+  }, [restoreSelection, getTableContext, tblBorderW, tblBorderStyle, tblBorderColor])
+
+  const setTableBg = useCallback((color: string) => {
+    restoreSelection()
+    const ctx = getTableContext()
+    if (!ctx || !ctx.table) { alert('표 안에 커서를 두세요.'); return }
+    ctx.table.style.backgroundColor = color
+    editorRef.current?.dispatchEvent(new Event('input', { bubbles: true }))
+  }, [restoreSelection, getTableContext])
+
   const IMG_EXTS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif']
   const isImageFile = (f: File): boolean => {
     const ext = (f.name.split('.').pop() || '').toLowerCase()
@@ -406,9 +634,23 @@ const ContentEditor = forwardRef<ContentEditorHandle, ContentEditorProps>(functi
     ctx.clearRect(0, 0, c.width, c.height)
   }
 
-  const startDraw = () => { drawingRef.current = true }
+  const startDraw = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const c = canvasRef.current
+    if (!c) return
+    drawingRef.current = true
+    const rect = c.getBoundingClientRect()
+    const x = (e.clientX - rect.left) * (c.width / rect.width)
+    const y = (e.clientY - rect.top) * (c.height / rect.height)
+    drawStartRef.current = { x, y }
+    const ctx = c.getContext('2d')
+    if (!ctx) return
+    drawSnapRef.current = ctx.getImageData(0, 0, c.width, c.height)
+    if (drawMode === 'free') { ctx.beginPath(); ctx.moveTo(x, y) }
+  }
+
   const stopDraw = () => {
     drawingRef.current = false
+    drawStartRef.current = null
     const c = canvasRef.current
     if (!c) return
     const ctx = c.getContext('2d')
@@ -423,17 +665,30 @@ const ContentEditor = forwardRef<ContentEditorHandle, ContentEditorProps>(functi
     const ctx = c.getContext('2d')
     if (!ctx) return
     const rect = c.getBoundingClientRect()
-    const sx = c.width / rect.width
-    const sy = c.height / rect.height
-    const x = (e.clientX - rect.left) * sx
-    const y = (e.clientY - rect.top) * sy
-    ctx.lineWidth = 3
+    const x = (e.clientX - rect.left) * (c.width / rect.width)
+    const y = (e.clientY - rect.top) * (c.height / rect.height)
+    const s = drawStartRef.current
+    ctx.lineWidth = drawWidth
     ctx.lineCap = 'round'
-    ctx.strokeStyle = '#333'
-    ctx.lineTo(x, y)
-    ctx.stroke()
+    ctx.lineJoin = 'round'
+    ctx.strokeStyle = drawColor
+    if (drawMode === 'free') {
+      ctx.lineTo(x, y)
+      ctx.stroke()
+      return
+    }
+    if (!s) return
+    if (drawSnapRef.current) ctx.putImageData(drawSnapRef.current, 0, 0)
     ctx.beginPath()
-    ctx.moveTo(x, y)
+    if (drawMode === 'line') {
+      ctx.moveTo(s.x, s.y)
+      ctx.lineTo(x, y)
+    } else {
+      const cx = (s.x + x) / 2
+      const cy = (s.y + y) / 2
+      ctx.ellipse(cx, cy, Math.abs(x - s.x) / 2, Math.abs(y - s.y) / 2, 0, 0, Math.PI * 2)
+    }
+    ctx.stroke()
   }
 
   const applyDrawing = async () => {
@@ -449,6 +704,24 @@ const ContentEditor = forwardRef<ContentEditorHandle, ContentEditorProps>(functi
     await uploadImage(file)
     setShowCanvas(false)
   }
+
+  useEffect(() => {
+    if (!showCanvas) return
+    const size = () => {
+      const c = canvasRef.current
+      const ed = editorRef.current
+      if (!c || !ed) return
+      const w = ed.clientWidth
+      const h = ed.clientHeight
+      c.width = w
+      c.height = h
+      c.style.width = w + 'px'
+      c.style.height = h + 'px'
+    }
+    size()
+    window.addEventListener('resize', size)
+    return () => window.removeEventListener('resize', size)
+  }, [showCanvas])
 
   const getMyPlace = () => {
     if (!navigator.geolocation) {
@@ -491,19 +764,131 @@ const ContentEditor = forwardRef<ContentEditorHandle, ContentEditorProps>(functi
   return (
     <div>
       <div className="mb-2">
-        <div className="btn-group btn-group-sm flex-wrap">
-          <button type="button" className="btn btn-outline-secondary" onClick={() => execCmd('bold')} title="굵게"><b>B</b></button>
-          <button type="button" className="btn btn-outline-secondary" onClick={() => execCmd('italic')} title="기울임"><i>I</i></button>
-          <button type="button" className="btn btn-outline-secondary" onClick={() => execCmd('underline')} title="밑줄"><u>U</u></button>
-          <button type="button" className="btn btn-outline-secondary" onClick={() => execCmd('insertUnorderedList')} title="목록">&bull;</button>
-          <button type="button" className="btn btn-outline-secondary" onClick={() => execCmd('insertOrderedList')} title="번호">1.</button>
-            <button type="button" className="btn btn-outline-secondary" onClick={() => fileInputRef.current?.click()} title="사진/파일">📎</button>
-            <button type="button" className="btn btn-outline-secondary" onClick={() => fileAttachRef.current?.click()} title="파일 첨부 (이미지 외 모든 파일)" disabled={fileUploading}>
-              {fileUploading ? '⏳' : '📁'}
-            </button>
-            <button type="button" className="btn btn-outline-secondary" onClick={() => setShowCanvas(prev => !prev)} title="그리기">✏️</button>
+        <div className="btn-group btn-group-sm" style={{ display: 'flex', flexWrap: 'nowrap' }}>
+
+          <div style={{ position: 'relative' }}>
+            <button type="button" className={`btn ${showFormat ? 'btn-primary' : 'btn-outline-secondary'}`} onClick={() => { setShowFormat(v => !v); setShowPara(false); setShowTable(false); setShowDraw(false) }} title="글꾸미기">🎨 글꾸미기 ▾</button>
+            {showFormat && (
+              <div className="btn-group btn-group-sm flex-wrap mt-1" style={{ position: 'absolute', top: '100%', left: 0, zIndex: 6000, background: '#fff', border: '1px solid #ccc', borderRadius: 8, padding: 4 }}>
+                <button type="button" className="btn btn-outline-secondary" onClick={() => execCmd('bold')} title="굵게"><b>B</b></button>
+                <button type="button" className="btn btn-outline-secondary" onClick={() => execCmd('italic')} title="기울임"><i>I</i></button>
+                <button type="button" className="btn btn-outline-secondary" onClick={() => execCmd('underline')} title="밑줄"><u>U</u></button>
+                <select className="btn btn-outline-secondary" defaultValue="" onChange={(e) => { const v = e.target.value; if (v) { applyCmd('fontName', v); e.target.value = '' } }} title="글꼴">
+                  <option value="">글꼴</option>
+                  <option value="Batang">바탕체</option>
+                  <option value="Gungsuh">궁서체</option>
+                  <option value="Dotum">돋움체</option>
+                  <option value="Gulim">굴림체</option>
+                  <option value="Malgun Gothic">맑은 고딕</option>
+                  <option value="Arial">Arial</option>
+                  <option value="Verdana">Verdana</option>
+                  <option value="Courier New">Courier New</option>
+                  <option value="Georgia">Georgia</option>
+                  <option value="Times New Roman">Times New Roman</option>
+                </select>
+                <input type="number" className="btn btn-outline-secondary" style={{ width: 64 }} min={6} max={200} placeholder="px" value={fontSizePx} onChange={(e) => setFontSizePx(e.target.value)} onBlur={() => { if (fontSizePx) applyStyleToSelection('font-size', fontSizePx + 'px') }} title="글자 크기(px)" />
+                <input type="color" className="btn btn-outline-secondary" style={{ padding: 2, width: 38 }} title="글자 색" onChange={(e) => applyCmd('foreColor', e.target.value)} />
+                <input type="color" className="btn btn-outline-secondary" style={{ padding: 2, width: 38 }} title="형광펜(배경)" onChange={(e) => applyCmd('hiliteColor', e.target.value)} />
+              </div>
+            )}
+          </div>
+
+          <div style={{ position: 'relative' }}>
+            <button type="button" className={`btn ${showPara ? 'btn-primary' : 'btn-outline-secondary'}`} onClick={() => { setShowPara(v => !v); setShowTable(false); setShowFormat(false); setShowDraw(false) }} title="문단">📑 문단 ▾</button>
+            {showPara && (
+              <div className="btn-group btn-group-sm flex-wrap mt-1" style={{ position: 'absolute', top: '100%', left: 0, zIndex: 6000, background: '#fff', border: '1px solid #ccc', borderRadius: 8, padding: 4 }}>
+                <button type="button" className="btn btn-outline-secondary" onClick={() => applyCmd('justifyLeft')} title="왼쪽 정렬">⬅</button>
+                <button type="button" className="btn btn-outline-secondary" onClick={() => applyCmd('justifyCenter')} title="가운데 정렬">⬌</button>
+                <button type="button" className="btn btn-outline-secondary" onClick={() => applyCmd('justifyRight')} title="오른쪽 정렬">➡</button>
+                <button type="button" className="btn btn-outline-secondary" onClick={() => applyCmd('justifyFull')} title="양쪽 정렬">⬌⬌</button>
+                <button type="button" className="btn btn-outline-secondary" onClick={() => execCmd('insertOrderedList')} title="번호 목록">1.</button>
+                <select className="btn btn-outline-secondary" defaultValue="" onChange={(e) => { const v = e.target.value; if (v) { applyCmd('formatBlock', v); e.target.value = '' } }} title="문단 서식">
+                  <option value="">문단</option>
+                  <option value="P">일반 문단</option>
+                  <option value="H2">제목 1</option>
+                  <option value="H3">제목 2</option>
+                  <option value="BLOCKQUOTE">인용</option>
+                  <option value="PRE">코드</option>
+                </select>
+              </div>
+            )}
+          </div>
+
+          <div style={{ position: 'relative' }}>
+            <button type="button" className={`btn ${showTable ? 'btn-primary' : 'btn-outline-secondary'}`} onClick={() => { setShowTable(v => !v); setShowPara(false); setShowFormat(false); setShowDraw(false) }} title="표">▦ 표 ▾</button>
+            {showTable && (
+              <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 6000, background: '#fff', border: '1px solid #ccc', borderRadius: 8, padding: 8, display: 'flex', flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'center', maxWidth: 560 }}>
+                <label>행 <input type="number" min={1} max={20} value={tableRows} onChange={(e) => setTableRows(Number(e.target.value))} style={{ width: 48 }} /></label>
+                <label>열 <input type="number" min={1} max={20} value={tableCols} onChange={(e) => setTableCols(Number(e.target.value))} style={{ width: 48 }} /></label>
+                <button type="button" className="btn btn-primary btn-sm" onClick={() => { insertTable(tableRows, tableCols); setShowTable(false) }}>표 삽입</button>
+                <button type="button" className="btn btn-outline-warning btn-sm" onClick={() => { deleteTableAtCursor(); setShowTable(false) }}>🗑 표 삭제</button>
+                <span style={{ flexBasis: '100%', height: 0 }} />
+                <button type="button" className="btn btn-outline-secondary btn-sm" onClick={insertRowBelow}>➕ 행 추가</button>
+                <button type="button" className="btn btn-outline-secondary btn-sm" onClick={deleteRow}>➖ 행 삭제</button>
+                <button type="button" className="btn btn-outline-secondary btn-sm" onClick={insertColRight}>➕ 열 추가</button>
+                <button type="button" className="btn btn-outline-secondary btn-sm" onClick={deleteCol}>➖ 열 삭제</button>
+                <button type="button" className="btn btn-outline-secondary btn-sm" onClick={toggleHeaderRow}>🔝 머리글 행</button>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>🎨 셀 배경 <input type="color" style={{ width: 32, height: 28 }} onChange={(e) => setCellBg(e.target.value)} /></label>
+                <span style={{ flexBasis: '100%', height: 0 }} />
+                <span style={{ fontWeight: 600 }}>테두리</span>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 2 }}>두께
+                  <select className="btn btn-outline-secondary btn-sm" value={tblBorderW} onChange={(e) => setTblBorderW(e.target.value)}>
+                    <option value="0">0</option>
+                    <option value="1">1px</option>
+                    <option value="2">2px</option>
+                    <option value="3">3px</option>
+                    <option value="4">4px</option>
+                  </select>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 2 }}>모양
+                  <select className="btn btn-outline-secondary btn-sm" value={tblBorderStyle} onChange={(e) => setTblBorderStyle(e.target.value)}>
+                    <option value="solid">실선</option>
+                    <option value="dashed">점선</option>
+                    <option value="dotted">점</option>
+                    <option value="double">이중선</option>
+                  </select>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 2 }}>색상
+                  <input type="color" value={tblBorderColor} style={{ width: 32, height: 28 }} onChange={(e) => setTblBorderColor(e.target.value)} />
+                </label>
+                <button type="button" className="btn btn-primary btn-sm" onClick={applyTableBorder}>테두리 적용</button>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 2 }}>▣ 표 배경
+                  <input type="color" style={{ width: 32, height: 28 }} onChange={(e) => setTableBg(e.target.value)} />
+                </label>
+              </div>
+            )}
+          </div>
+
+          <div style={{ position: 'relative' }}>
+            <button type="button" className={`btn ${showDraw ? 'btn-primary' : 'btn-outline-secondary'}`} onClick={() => { const n = !showDraw; setShowDraw(n); setShowCanvas(n); setShowFormat(false); setShowPara(false); setShowTable(false) }} title="그리기">✏️ 그리기 ▾</button>
+            {showDraw && (
+              <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 6000, background: '#fff', border: '1px solid #ccc', borderRadius: 8, padding: 8, display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', whiteSpace: 'nowrap' }}>
+                <span style={{ fontWeight: 600 }}>모드</span>
+                <button type="button" className={`btn btn-sm ${drawMode === 'free' ? 'btn-primary' : 'btn-outline-secondary'}`} onClick={() => setDrawMode('free')}>자유</button>
+                <button type="button" className={`btn btn-sm ${drawMode === 'line' ? 'btn-primary' : 'btn-outline-secondary'}`} onClick={() => setDrawMode('line')}>직선</button>
+                <button type="button" className={`btn btn-sm ${drawMode === 'circle' ? 'btn-primary' : 'btn-outline-secondary'}`} onClick={() => setDrawMode('circle')}>원형</button>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 2 }}>두께
+                  <input type="number" min={1} max={40} value={drawWidth} onChange={(e) => setDrawWidth(Number(e.target.value))} style={{ width: 56 }} />
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 2 }}>색상
+                  <input type="color" value={drawColor} onChange={(e) => setDrawColor(e.target.value)} style={{ width: 32, height: 28 }} />
+                </label>
+                <span style={{ flexBasis: '100%', height: 0 }} />
+                <button type="button" className="btn btn-light btn-sm" onClick={clearCanvas}>지우기</button>
+                <button type="button" className="btn btn-success btn-sm" onClick={applyDrawing}>그림 본문에 넣기</button>
+                <button type="button" className="btn btn-outline-secondary btn-sm" onClick={() => { setShowDraw(false); setShowCanvas(false) }}>닫기</button>
+              </div>
+            )}
+          </div>
+
+          <button type="button" className="btn btn-outline-secondary" onClick={() => fileInputRef.current?.click()} title="사진/파일 첨부">📎 이미지첨부</button>
+          <button type="button" className="btn btn-outline-secondary" onClick={() => fileAttachRef.current?.click()} title="파일 첨부 (이미지 외 모든 파일)" disabled={fileUploading}>
+            {fileUploading ? '⏳' : '📁'} 파일첨부
+          </button>
           <button type="button" className="btn btn-outline-secondary" onClick={startMatch} title="선택한 글자와 이미지 매치">💞 매치</button>
-        </div>
+          <button type="button" className="btn btn-outline-secondary" onClick={() => execCmd('insertUnorderedList')} title="목록">&bull; 단락</button>
+
+          </div>
         {activeImg && (
           <div className="btn-group btn-group-sm flex-wrap mt-1">
             <button type="button" className="btn btn-outline-primary" onClick={() => applyImgAlign('left')} title="왼쪽 정렬(글자가 옆으로)">↔️ 왼쪽</button>
@@ -529,7 +914,23 @@ const ContentEditor = forwardRef<ContentEditorHandle, ContentEditorProps>(functi
           }}
           onPaste={handlePaste}
           onClick={detectImage}
+          onMouseUp={saveSelection}
+          onKeyUp={saveSelection}
+          onBlur={saveSelection}
           data-placeholder={placeholder}
+        />
+        <canvas
+          ref={canvasRef}
+          style={{
+            position: 'absolute', left: 0, top: 0, zIndex: 4000,
+            pointerEvents: showCanvas ? 'auto' : 'none',
+            background: 'transparent', cursor: showCanvas ? 'crosshair' : 'default',
+            borderRadius: 12, display: showCanvas ? 'block' : 'none',
+          }}
+          onMouseDown={startDraw}
+          onMouseUp={stopDraw}
+          onMouseMove={draw}
+          onMouseLeave={stopDraw}
         />
         {activeImg && overlayRect && (
           <div style={{
@@ -578,24 +979,9 @@ const ContentEditor = forwardRef<ContentEditorHandle, ContentEditorProps>(functi
       <input type="file" ref={fileAttachRef} className="d-none" multiple accept="*/*" onChange={handleFileAttach} />
 
       {showCanvas && (
-        <div className="mb-3">
-          <canvas
-            ref={canvasRef}
-            width={400}
-            height={300}
-            style={{
-              border: '1px solid #ccc', background: 'white',
-              cursor: 'crosshair', width: '100%', borderRadius: 12,
-            }}
-            onMouseDown={startDraw}
-            onMouseUp={stopDraw}
-            onMouseMove={draw}
-            onMouseLeave={stopDraw}
-          />
-          <div className="d-flex gap-2 mt-1">
-            <button type="button" className="btn btn-sm btn-light" onClick={clearCanvas}>지우기</button>
-            <button type="button" className="btn btn-sm btn-success" onClick={applyDrawing}>그림 본문에 넣기</button>
-          </div>
+        <div className="d-flex gap-2 mb-2">
+          <button type="button" className="btn btn-sm btn-light" onClick={clearCanvas}>지우기</button>
+          <button type="button" className="btn btn-sm btn-success" onClick={applyDrawing}>그림 본문에 넣기</button>
         </div>
       )}
 
