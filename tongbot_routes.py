@@ -1774,7 +1774,7 @@ def bot_schedule():
         user = User.query.get(uid)
         home_lat = user.curr_latitude or user.reg_latitude
         home_lng = user.curr_longitude or user.reg_longitude
-        schedules = TongBotSchedule.query.filter_by(user_id=uid).order_by(TongBotSchedule.event_date.asc()).limit(30).all()
+        schedules = TongBotSchedule.query.filter_by(user_id=uid).order_by(TongBotSchedule.event_date.asc()).all()
         result_list = []
         for s in schedules:
             item = {
