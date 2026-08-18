@@ -1584,7 +1584,7 @@ def bot_schedule_ai_internal(uid, msg, user, bot=None):
             scheds = scheds.filter(TongBotSchedule.event_date >= tm.strftime('%Y-%m-%d')).filter(TongBotSchedule.event_date < (tm + timedelta(days=1)).strftime('%Y-%m-%d'))
         elif period == 'week':
             scheds = scheds.filter(TongBotSchedule.event_date >= now.strftime('%Y-%m-%d')).filter(TongBotSchedule.event_date < (now + timedelta(days=7)).strftime('%Y-%m-%d'))
-        result = scheds.limit(15).all()
+        result = scheds.all()
         if not result:
             return {"reply": "해당 기간에 등록된 일정이 없습니다.", "action": "query"}
         lines = [f"📅 {period} 일정 ({len(result)}건):"]
