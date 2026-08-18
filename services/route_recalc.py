@@ -324,6 +324,12 @@ def _ensure_day_routes(uid, evt_date, exclude_ids=None):
             naver_id=naver_id, naver_secret=naver_secret, odsay_key=odsay_key, google_key=google_key)
         plan_to.update({"from_lat":from_lat,"from_lng":from_lng,"to_lat":loc_lat,"to_lng":loc_lng})
         dep_dt = arr_dt - timedelta(minutes=plan_to['total_min'])
+        # 외출일(처리 기준일)에 고정: 이동 출발이 전날/다음 날로 밀리지 않도록 클램프
+        if dep_dt.date() != evt_date.date():
+            if dep_dt < datetime(evt_date.year, evt_date.month, evt_date.day):
+                dep_dt = datetime(evt_date.year, evt_date.month, evt_date.day, 0, 0)
+            else:
+                dep_dt = datetime(evt_date.year, evt_date.month, evt_date.day, 23, 59)
         _compact = format_memo_compact(plan_to)
         _narrative = format_memo_narrative(plan_to, origin_name=from_time, dest_name=evt.location or evt.title)
         plan_to["compact"] = _compact
@@ -401,6 +407,10 @@ def _ensure_day_routes(uid, evt_date, exclude_ids=None):
                     if ret_dep < last_end:
                         ret_dep = last_end + timedelta(minutes=5)
                     ret_arr = ret_dep + timedelta(minutes=plan_home['total_min'])
+                    # 외출일(처리 기준일)에 고정: 자정을 넘어 다음 날로 밀리지 않도록 클램프
+                    if ret_dep.date() != evt_date.date():
+                        ret_dep = datetime(evt_date.year, evt_date.month, evt_date.day, 23, 59)
+                        ret_arr = ret_dep + timedelta(minutes=plan_home['total_min'])
                     home_return = TongBotSchedule(user_id=uid, title=return_title,
                         description=_narrative_home if return_title != "집으로 이동" else f"🏠 귀가\n{_narrative_home}",
                         content=json.dumps(plan_home, ensure_ascii=False),

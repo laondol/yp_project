@@ -2918,6 +2918,10 @@ Rules:
         plan_home["narrative"] = _narrative_home
         memo_home = f"🏠 귀가\n{_narrative_home}"
         dep_dt = datetime.strptime(f"{event_date_str} {plan_home['departure']}", "%Y-%m-%d %H:%M")
+        # 외출일에 고정: 자정을 넘어 다음 날로 밀리지 않도록 클램프
+        _ed = datetime.strptime(event_date_str, '%Y-%m-%d')
+        if dep_dt.date() != _ed.date():
+            dep_dt = datetime(_ed.year, _ed.month, _ed.day, 23, 59)
         plan_json = _json.dumps(plan_home, ensure_ascii=False)
         sh = TongBotSchedule(user_id=uid, title="집으로 이동", description=memo_home,
             content=plan_json, event_date=dep_dt, location=home_addr,
