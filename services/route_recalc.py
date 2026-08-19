@@ -305,7 +305,7 @@ def _ensure_day_routes(uid, evt_date, exclude_ids=None):
         evt_start = evt.event_date
         # 이동 from previous location to this event
         arr_dt = evt_start - timedelta(minutes=10)
-        if idx > 0 and prev_end_dt and prev_end_dt > arr_dt:
+        if idx > 0 and prev_end_dt and prev_end_dt.date() == evt_date.date() and prev_end_dt > arr_dt:
             arr_dt = prev_end_dt
         if idx == 0:
             from_time = home_addr
@@ -326,10 +326,12 @@ def _ensure_day_routes(uid, evt_date, exclude_ids=None):
         dep_dt = arr_dt - timedelta(minutes=plan_to['total_min'])
         # 외출일(처리 기준일)에 고정: 이동 출발이 전날/다음 날로 밀리지 않도록 클램프
         if dep_dt.date() != evt_date.date():
-            if dep_dt < datetime(evt_date.year, evt_date.month, evt_date.day):
-                dep_dt = datetime(evt_date.year, evt_date.month, evt_date.day, 0, 0)
+            _mid0 = datetime(evt_date.year, evt_date.month, evt_date.day, 0, 0, tzinfo=dep_dt.tzinfo)
+            _mid23 = datetime(evt_date.year, evt_date.month, evt_date.day, 23, 59, tzinfo=dep_dt.tzinfo)
+            if dep_dt < _mid0:
+                dep_dt = _mid0
             else:
-                dep_dt = datetime(evt_date.year, evt_date.month, evt_date.day, 23, 59)
+                dep_dt = _mid23
         _compact = format_memo_compact(plan_to)
         _narrative = format_memo_narrative(plan_to, origin_name=from_time, dest_name=evt.location or evt.title)
         plan_to["compact"] = _compact
@@ -390,7 +392,7 @@ def _ensure_day_routes(uid, evt_date, exclude_ids=None):
                     _hh = int(_hh); _mm = int(_mm)
                     if not (0 <= _hh < 24 and 0 <= _mm < 60):
                         raise ValueError
-                    ret_dep = datetime(evt_date.year, evt_date.month, evt_date.day, _hh, _mm)
+                    ret_dep = datetime(evt_date.year, evt_date.month, evt_date.day, _hh, _mm, tzinfo=evt_date.tzinfo)
                 except (ValueError, TypeError, AttributeError, IndexError):
                     ret_dep = None
                 if ret_dep:
@@ -409,7 +411,7 @@ def _ensure_day_routes(uid, evt_date, exclude_ids=None):
                     ret_arr = ret_dep + timedelta(minutes=plan_home['total_min'])
                     # 외출일(처리 기준일)에 고정: 자정을 넘어 다음 날로 밀리지 않도록 클램프
                     if ret_dep.date() != evt_date.date():
-                        ret_dep = datetime(evt_date.year, evt_date.month, evt_date.day, 23, 59)
+                        ret_dep = datetime(evt_date.year, evt_date.month, evt_date.day, 23, 59, tzinfo=(ret_dep.tzinfo if ret_dep.tzinfo else (last_end.tzinfo if last_end and last_end.tzinfo else evt_date.tzinfo)))
                         ret_arr = ret_dep + timedelta(minutes=plan_home['total_min'])
                     home_return = TongBotSchedule(user_id=uid, title=return_title,
                         description=_narrative_home if return_title != "집으로 이동" else f"🏠 귀가\n{_narrative_home}",
