@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
+import { useAuth } from '../contexts/AuthContext'
 import Loading from '../components/common/Loading'
 import ErrorMessage from '../components/common/ErrorMessage'
 import EmptyState from '../components/common/EmptyState'
@@ -51,6 +52,8 @@ const truncate = (text: string | null | undefined, max: number) => {
 }
 
 function DetailModal({ r, onClose }: { r: ShareReport; onClose: () => void }) {
+  const { user } = useAuth()
+  const isMgr = !!user && (user.role === 'admin' || user.role === 'leader' || !!(user as any).share_mod_approved)
   const allImages: string[] = []
   if (r.image_path) allImages.push(r.image_path)
   if (r.extra_images) {
@@ -76,7 +79,12 @@ function DetailModal({ r, onClose }: { r: ShareReport; onClose: () => void }) {
       >
         <div className="d-flex justify-content-between align-items-center px-3 py-2 border-bottom">
           <strong>📍 #{r.id} 상세 검토</strong>
-          <button type="button" className="btn btn-sm btn-light" style={{ borderRadius: '50%', width: 30, height: 30, lineHeight: '20px', padding: 0 }} onClick={onClose}>&times;</button>
+          <div className="d-flex gap-2 align-items-center">
+            {isMgr && (!r.user_id || r.user_id === 0) && (
+              <a href={`/share/edit/${r.id}`} className="btn btn-sm btn-outline-primary">✏️ 수정</a>
+            )}
+            <button type="button" className="btn btn-sm btn-light" style={{ borderRadius: '50%', width: 30, height: 30, lineHeight: '20px', padding: 0 }} onClick={onClose}>&times;</button>
+          </div>
         </div>
 
         <div style={{ overflowY: 'auto', flex: 1, padding: 12 }}>
@@ -88,7 +96,7 @@ function DetailModal({ r, onClose }: { r: ShareReport; onClose: () => void }) {
             {r.video_path && <span className="badge bg-info text-dark">🎬 동영상</span>}
             {r.drawing_path && <span className="badge bg-secondary">✏️ 그리기</span>}
             <span className="badge bg-light text-dark">🏷️ {r.ai_category || '-'}</span>
-            <span className="badge bg-light text-dark">👤 {r.author_name || '비회원'}</span>
+            <span className="badge bg-light text-dark">👤 {r.author_name || '익명'}</span>
           </div>
 
           {/* 내용 */}
@@ -327,7 +335,7 @@ export default function AdminShareReports() {
                       <p className="text-muted small mb-2">{truncate(r.description, 80)}</p>
 
                       <div className="d-flex flex-wrap gap-2 mb-2">
-                        <span className="small text-secondary">👤 {r.author_name || '비회원'}</span>
+                        <span className="small text-secondary">👤 {r.author_name || '익명'}</span>
                         <span className="small text-secondary">📍 {r.village || r.town || '-'}</span>
                         {r.address && <span className="small text-secondary">🏠 {truncate(r.address, 20)}</span>}
                         {r.video_path && <span className="badge bg-info text-dark">🎬 동영상</span>}

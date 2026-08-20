@@ -31,6 +31,11 @@ export default function ShareEdit() {
   const [watermarkTarget, setWatermarkTarget] = useState('')
   const [wmApplying, setWmApplying] = useState(false)
 
+  const [me, setMe] = useState<any>(null)
+  const [authorEmail, setAuthorEmail] = useState('')
+  const [emailCheck, setEmailCheck] = useState<{ found: boolean; name?: string; email?: string } | null>(null)
+  const isMgr = !!me && (me.role === 'admin' || me.role === 'leader' || !!me.share_mod_approved)
+
   // 메뉴 목록
   const [storeMenus, setStoreMenus] = useState<any[]>([])
   const [newMenuName, setNewMenuName] = useState('')
@@ -76,8 +81,10 @@ export default function ShareEdit() {
       }
       originalLatRef.current = d.latitude || ''
       originalLonRef.current = d.longitude || ''
+      if (d.author_email) setAuthorEmail(d.author_email)
       setLoading(false)
     })
+    fetch('/api/me').then(r => r.json()).then(d => { if (d.id) setMe(d) }).catch(() => {})
   }, [id])
 
   function loadCropperLib(cb: () => void) {
@@ -133,6 +140,15 @@ export default function ShareEdit() {
     if (!confirm('이 사진을 삭제하시겠습니까?')) return
     fetch(`/share-report/delete-image/${id}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image_path: path }) })
       .then(r => r.json()).then(d => { if (d.status === 'success') setPhotos(prev => prev.filter(p => p.path !== path)); else alert(d.msg || '오류') })
+  }
+
+  async function checkEmail() {
+    if (!authorEmail.trim()) { setEmailCheck(null); return }
+    try {
+      const res = await fetch(`/api/admin/user-by-email?email=${encodeURIComponent(authorEmail.trim())}`)
+      const d = await res.json()
+      setEmailCheck(d.found ? { found: true, name: d.name, email: d.email } : { found: false })
+    } catch { setEmailCheck({ found: false }) }
   }
 
   function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -237,6 +253,7 @@ export default function ShareEdit() {
     fd.append('original_lon', originalLonRef.current)
     if (storeSuggestionId) fd.append('store_suggestion_id', storeSuggestionId)
     if (menuText.trim()) fd.append('menu_text', menuText)
+    if (isMgr && authorEmail.trim()) fd.append('author_email', authorEmail.trim())
 
     newFiles.forEach((f, i) => {
       const blob = editedBlobs[`new_${i}`]
@@ -312,6 +329,19 @@ export default function ShareEdit() {
               <input type="file" ref={fileInputRef} className="form-control" accept="image/*,.heic,.heif" multiple onChange={onFileChange} />
               <small className="text-muted">C 자르기, R 회전, W 워터마크</small>
             </div>
+
+            {isMgr && (
+              <div className="mb-3 p-2 border rounded" style={{ background: '#fff8e1' }}>
+                <label className="form-label fw-bold small">작성자 지정 (이메일 ID)</label>
+                <div className="input-group input-group-sm">
+                  <input type="email" className="form-control" value={authorEmail} onChange={e => { setAuthorEmail(e.target.value); setEmailCheck(null) }} placeholder="작성자 계정 이메일 입력" />
+                  <button type="button" className="btn btn-outline-secondary" onClick={checkEmail}>확인</button>
+                </div>
+                {emailCheck && emailCheck.found && <div className="small text-success mt-1">✅ {emailCheck.name} 님({emailCheck.email})으로 지정됩니다.</div>}
+                {emailCheck && !emailCheck.found && <div className="small text-danger mt-1">⚠️ 해당 이메일의 사용자를 찾지 못했습니다.</div>}
+                <label className="form-label fw-bold small">제목</label>
+              </div>
+            )}
 
             <div className="mb-3">
               <label className="form-label fw-bold small">제목</label>

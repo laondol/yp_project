@@ -886,6 +886,14 @@ def share_report_edit(report_id):
                         place_id=(report.store_suggestion_id and str(report.store_suggestion_id) or None),
                         name=l, sub_category=(labels[i] if i < len(labels) else '기타'), ai_generated=True))
 
+        # 작성자 지정 (관리자 전용): 이메일 -> 해당 회원 계정으로 게시물 귀속
+        if is_admin:
+            _assign_email = request.form.get('author_email', '').strip()
+            if _assign_email:
+                _assign_user = User.query.filter_by(email=_assign_email).first()
+                if _assign_user:
+                    report.user_id = _assign_user.id
+                    report.author_name = _assign_user.username or _assign_user.real_name or report.author_name
         db.session.commit()
         return jsonify({"status": "success", "msg": "수정되었습니다."})
     return _serve_react_share()
@@ -920,6 +928,18 @@ def share_report_delete_image(report_id):
         os.remove(abs_path)
             
     return jsonify({"status": "success", "msg": "삭제되었습니다."})
+
+@share_bp.route('/api/admin/user-by-email')
+def api_admin_user_by_email():
+    if not _share_mgr():
+        return jsonify({"found": False, "error": "권한 없음"}), 403
+    email = (request.args.get('email') or '').strip()
+    if not email:
+        return jsonify({"found": False})
+    u = User.query.filter_by(email=email).first()
+    if u:
+        return jsonify({"found": True, "id": u.id, "name": (u.username or u.real_name or ""), "email": u.email})
+    return jsonify({"found": False})
 
 @share_bp.route('/api/share/reports')
 def api_share_reports():

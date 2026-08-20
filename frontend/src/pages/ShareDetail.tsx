@@ -206,7 +206,9 @@ export default function ShareDetail() {
           <hr />
 
           <div className="d-flex justify-content-between small text-muted">
-            <span>공유자: <AuthorName name={r.author_name} email={r.author_email} userId={r.user_id} /></span>
+            <span>공유자: {r.author_email
+              ? <AuthorName name={r.author_name} email={r.author_email} userId={r.user_id} />
+              : (!r.user_id ? (r.author_name || '익명') : null)}</span>
             <span>{r.created_at}</span>
           </div>
           <div className="d-flex justify-content-between small text-muted">
