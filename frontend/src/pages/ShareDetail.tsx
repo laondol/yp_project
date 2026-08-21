@@ -109,7 +109,7 @@ export default function ShareDetail() {
   const extraImages = r.extra_images ? r.extra_images.split(',').filter(Boolean) : []
   const catColor: Record<string, string> = { '사건': 'danger', '풍경': 'success', '맛집': 'warning' }
   const isAuthor = myId === r.user_id
-  const isAdminEditTarget = (r.my_role === 'admin' || r.my_role === 'leader') && (!r.user_id || r.user_id === 0)
+  const isAdminEditTarget = (r.my_role === 'admin' || r.my_role === 'leader') && (!r.user_id || r.user_id === 0 || r.user_id === 1)
   const canEdit = isAuthor || isAdminEditTarget
   const isBlocked = r.status !== 'approved'
 
@@ -206,9 +206,7 @@ export default function ShareDetail() {
           <hr />
 
           <div className="d-flex justify-content-between small text-muted">
-            <span>공유자: {r.author_email
-              ? <AuthorName name={r.author_name} email={r.author_email} userId={r.user_id} />
-              : (!r.user_id ? (r.author_name || '익명') : null)}</span>
+            <span>공유자: <AuthorName name={r.author_name} email={r.author_email} userId={r.user_id} /></span>
             <span>{r.created_at}</span>
           </div>
           <div className="d-flex justify-content-between small text-muted">

@@ -80,7 +80,7 @@ function DetailModal({ r, onClose }: { r: ShareReport; onClose: () => void }) {
         <div className="d-flex justify-content-between align-items-center px-3 py-2 border-bottom">
           <strong>📍 #{r.id} 상세 검토</strong>
           <div className="d-flex gap-2 align-items-center">
-            {isMgr && (!r.user_id || r.user_id === 0) && (
+            {isMgr && (!r.user_id || r.user_id === 0 || r.user_id === 1) && (
               <a href={`/share/edit/${r.id}`} className="btn btn-sm btn-outline-primary">✏️ 수정</a>
             )}
             <button type="button" className="btn btn-sm btn-light" style={{ borderRadius: '50%', width: 30, height: 30, lineHeight: '20px', padding: 0 }} onClick={onClose}>&times;</button>
@@ -96,7 +96,7 @@ function DetailModal({ r, onClose }: { r: ShareReport; onClose: () => void }) {
             {r.video_path && <span className="badge bg-info text-dark">🎬 동영상</span>}
             {r.drawing_path && <span className="badge bg-secondary">✏️ 그리기</span>}
             <span className="badge bg-light text-dark">🏷️ {r.ai_category || '-'}</span>
-            <span className="badge bg-light text-dark">👤 {r.author_name || '익명'}</span>
+            <span className="badge bg-light text-dark">👤 {(r.author_name && r.author_name !== '익명' ? r.author_name : '')}</span>
           </div>
 
           {/* 내용 */}
@@ -335,7 +335,7 @@ export default function AdminShareReports() {
                       <p className="text-muted small mb-2">{truncate(r.description, 80)}</p>
 
                       <div className="d-flex flex-wrap gap-2 mb-2">
-                        <span className="small text-secondary">👤 {r.author_name || '익명'}</span>
+                        <span className="small text-secondary">👤 {(r.author_name && r.author_name !== '익명' ? r.author_name : '')}</span>
                         <span className="small text-secondary">📍 {r.village || r.town || '-'}</span>
                         {r.address && <span className="small text-secondary">🏠 {truncate(r.address, 20)}</span>}
                         {r.video_path && <span className="badge bg-info text-dark">🎬 동영상</span>}

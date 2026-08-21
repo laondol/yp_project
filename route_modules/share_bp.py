@@ -625,7 +625,7 @@ def share_report_edit(report_id):
         pass
     is_admin = _share_mgr()
     is_author = report.user_id == session.get('user_id')
-    is_anonymous_share = not report.user_id or report.user_id == 0
+    is_anonymous_share = not report.user_id or report.user_id == 0 or report.user_id == 1
     if not (is_author or (is_admin and is_anonymous_share)):
         return jsonify({"status": "error", "msg": "권한 없음"}), 403
     if request.method == 'POST':
@@ -903,7 +903,7 @@ def share_report_delete_image(report_id):
     report = ShareReport.query.get_or_404(report_id)
     is_admin = _share_mgr()
     is_author = report.user_id == session.get('user_id')
-    is_anonymous_share = not report.user_id or report.user_id == 0
+    is_anonymous_share = not report.user_id or report.user_id == 0 or report.user_id == 1
     if not (is_author or (is_admin and is_anonymous_share)):
         return jsonify({"status": "error", "msg": "권한 없음"}), 403
     data = request.get_json()
