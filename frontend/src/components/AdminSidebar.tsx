@@ -7,6 +7,7 @@ const MENUS = [
   { path: '/admin/share-reports', label: '공유관리', icon: '📍' },
   { path: '/admin/stores', label: '가게관리', icon: '🏪' },
   { path: '/admin/alerts', label: '알림관리', icon: '🚨' },
+  { path: '/admin/construction-notices', label: '공사알림관리', icon: '🚧' },
   { path: '/admin/ai-chat', label: 'AI 채팅', icon: '🤖' },
   { path: '/admin/ai-feedback', label: 'AI 피드백', icon: '📋' },
   { path: '/admin/ai-train', label: 'AI 가르치기', icon: '📚' },

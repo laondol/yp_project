@@ -350,6 +350,7 @@ class ConstructionNotice(db.Model):
     title = db.Column(db.String(300), nullable=False)
     description = db.Column(db.Text)
     location = db.Column(db.String(200))
+    address = db.Column(db.String(300))  # 도로명 주소 (역지오코딩)
     latitude = db.Column(db.Float)
     longitude = db.Column(db.Float)
     source = db.Column(db.String(50))

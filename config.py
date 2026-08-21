@@ -75,3 +75,4 @@ class Config:
         'client_id': NAVER_CLIENT_ID,
         'client_secret': NAVER_CLIENT_SECRET,
     } if NAVER_CLIENT_ID else None
+    ODCLOUD_API_KEY = os.getenv('ODCLOUD_API_KEY', '')

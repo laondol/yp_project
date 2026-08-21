@@ -459,3 +459,112 @@ def sync_public_facilities(app, api_key):
             time.sleep(0.1)
 
     print(f"[FACILITY] 동기화 완료: {count}건 저장, {skip}건 스킵")
+
+# --- [odcloud 양평군 건축인허가현황] ---
+ODCLOUD_BASE = "https://api.odcloud.kr/api"
+# 경기도 양평군_건축인허가현황 최신 스냅샷(20251130). 기타 버전: 20220928(uddi:909b4bd8-...), 20230925(uddi:a6d63986-...)
+ODCLOUD_UDDI = "uddi:0153cbea-b522-483e-a780-8da54bb4109a"
+
+def sync_odcloud_building(app, api_key):
+    """odcloud 경기도 양평군 건축인허가현황 -> ConstructionNotice(notice_type='building_permit')"""
+    if not api_key:
+        print("[ODCLOUD] No API key. Skipping.")
+        return
+    with app.app_context():
+        from models import ConstructionNotice
+        import requests
+        count = 0
+        try:
+            page = 1
+            per_page = 1000
+            fetched = 0
+            while True:
+                resp = requests.get(
+                    f"{ODCLOUD_BASE}/15106850/v1/{ODCLOUD_UDDI}",
+                    params={"page": page, "perPage": per_page, "serviceKey": api_key},
+                    timeout=20,
+                )
+                if resp.status_code != 200:
+                    print(f"[ODCLOUD] API error: {resp.status_code}")
+                    break
+                js = resp.json()
+                rows = js.get("data") or []
+                if not rows:
+                    break
+                total = js.get("totalCount") or 0
+                for row in rows:
+                    loc = (row.get("대지위치") or "").strip()
+                    purpose = (row.get("건축목적") or "").strip()
+                    guk = (row.get("구분") or "").strip()
+                    area = row.get("연면적") or ""
+                    key_str = f"{loc}|{purpose}|{area}"
+                    if ConstructionNotice.query.filter_by(source="odcloud", source_url=key_str).first():
+                        continue
+                    desc_parts = []
+                    if guk: desc_parts.append(f"구분: {guk}")
+                    if purpose: desc_parts.append(f"건축목적: {purpose}")
+                    if area: desc_parts.append(f"연면적: {area}㎡")
+                    if row.get("증축연면적"): desc_parts.append(f"증축연면적: {row.get('증축연면적')}㎡")
+                    if row.get("구조"): desc_parts.append(f"구조: {row.get('구조')}")
+                    if row.get("동수") is not None: desc_parts.append(f"동수: {row.get('동수')}")
+                    if row.get("세대수") is not None: desc_parts.append(f"세대수: {row.get('세대수')}")
+                    if row.get("호수") is not None: desc_parts.append(f"호수: {row.get('호수')}")
+                    if row.get("가구수") is not None: desc_parts.append(f"가구수: {row.get('가구수')}")
+                    if row.get("주건축물수") is not None: desc_parts.append(f"주건축물수: {row.get('주건축물수')}")
+                    if row.get("부속건축물수") is not None: desc_parts.append(f"부속건축물수: {row.get('부속건축물수')}")
+                    db.session.add(ConstructionNotice(
+                        title=loc or "건축인허가",
+                        description=" | ".join(desc_parts),
+                        location=loc,
+                        latitude=None,
+                        longitude=None,
+                        source="odcloud",
+                        source_url=key_str,
+                        notice_type="building_permit",
+                        start_date=None,
+                        end_date=None,
+                        is_active=True,
+                    ))
+                    count += 1
+                fetched += len(rows)
+                if not rows or fetched >= total:
+                    break
+                page += 1
+            if count:
+                db.session.commit()
+            print(f"[ODCLOUD] Synced {count} new building permits.")
+        except Exception as e:
+            print(f"[ODCLOUD] Error: {e}")
+            import traceback; traceback.print_exc()
+
+def geocode_missing_notices(app, sleep_sec=0.05):
+    """좌표가 없거나 도로명 주소(address)가 없는 ConstructionNotice를 채움 (idempotent)."""
+    from models import ConstructionNotice
+    from services.geocode import geocode_text, gps_to_road_address
+    import time
+    with app.app_context():
+        rows = ConstructionNotice.query.filter(
+            ConstructionNotice.is_active == True,
+            db.or_(
+                db.or_(ConstructionNotice.latitude.is_(None), ConstructionNotice.latitude == 0),
+                db.or_(ConstructionNotice.address.is_(None), ConstructionNotice.address == ''),
+            ),
+        ).all()
+        geo_count = 0
+        addr_count = 0
+        for n in rows:
+            if (not n.latitude or n.latitude == 0) and (n.location or n.title):
+                lat, lng = geocode_text(n.location or n.title or '')
+                if lat is not None and lng is not None:
+                    n.latitude = lat
+                    n.longitude = lng
+                    geo_count += 1
+            if (not n.address) and n.latitude and n.latitude != 0:
+                addr = gps_to_road_address(n.latitude, n.longitude)
+                if addr:
+                    n.address = addr
+                    addr_count += 1
+            time.sleep(sleep_sec)
+        if geo_count or addr_count:
+            db.session.commit()
+        print(f'[GEOCODE] Geocoded {geo_count} coords, filled {addr_count} addresses.')

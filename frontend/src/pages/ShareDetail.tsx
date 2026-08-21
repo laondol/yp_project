@@ -163,12 +163,12 @@ export default function ShareDetail() {
           <div className="row g-2 mb-3">
             {r.image_path && (
               <div className="col-12">
-                <img src={r.image_path} className="img-fluid rounded" style={{maxHeight: 400, width: '100%', objectFit: 'cover'}} />
+                <img src={r.image_path} className="img-fluid rounded" style={{ width: '100%' }} />
               </div>
             )}
             {(r.image_path ? extraImages : extraImages.slice(0, 6)).map((img, i) => (
               <div key={i} className="col-4 col-md-3">
-                <img src={img} className="img-fluid rounded" style={{height: 120, objectFit: 'cover', width: '100%'}} />
+                <img src={img} className="img-fluid rounded" style={{height: 120, objectFit: 'contain', width: '100%', backgroundColor:'#f8f9fa'}} />
               </div>
             ))}
             {!r.image_path && extraImages.length === 0 && !r.drawing_path && (

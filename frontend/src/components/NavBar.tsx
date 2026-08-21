@@ -219,6 +219,7 @@ export default function NavBar() {
                   <li><a className="dropdown-item" href="/admin/share-reports">공유(관리)</a></li>
                   <li><a className="dropdown-item" href="/admin/stores">🏪 동네가게(관리)</a></li>
                   <li><a className="dropdown-item" href="/admin/alerts">🚨 알림(관리)</a></li>
+                  <li><a className="dropdown-item" href="/admin/construction-notices">🚧 공사알림(관리)</a></li>
                   <li><div className="dropdown-divider"></div></li>
                   <li><a className="dropdown-item" href="/admin/ai-chat">🤖 관리자 AI</a></li>
                   <li><a className="dropdown-item" href="/admin/ai-feedback">📋 AI 피드백</a></li>

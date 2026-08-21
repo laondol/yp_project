@@ -1,0 +1,91 @@
+server {
+    listen 80;
+    server_name unocum.kr www.unocum.kr;
+    return 301 https://www.unocum.kr$request_uri;
+}
+
+server {
+    listen 80;
+    server_name test.unocum.kr;
+    return 301 https://test.unocum.kr$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name unocum.kr;
+
+    ssl_certificate /etc/letsencrypt/live/unocum.kr/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/unocum.kr/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    return 301 https://www.unocum.kr$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name www.unocum.kr;
+
+    ssl_certificate /etc/letsencrypt/live/unocum.kr/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/unocum.kr/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    client_max_body_size 50M;
+
+    location = /google20a81024374c5206.html {
+        alias /home/ubuntu/yp_project/static/google20a81024374c5206.html;
+    }
+
+    location = /naverea3c23aaaf5536dabb7a4c6e0b81545e.html {
+        alias /home/ubuntu/yp_project/static/naverea3c23aaaf5536dabb7a4c6e0b81545e.html;
+    }
+
+    location /static/ {
+        alias /home/ubuntu/yp_project/static/;
+    }
+
+    location /uploads/ {
+        alias /home/ubuntu/yp_project/uploads/;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 300;
+        proxy_connect_timeout 300;
+    }
+}
+
+server {
+    listen 443 ssl;
+    server_name test.unocum.kr;
+
+    ssl_certificate /etc/letsencrypt/live/test.unocum.kr/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/test.unocum.kr/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    client_max_body_size 50M;
+
+    location /static/ {
+        alias /home/ubuntu/yp_project/static/;
+    }
+
+    location /uploads/ {
+        alias /home/ubuntu/yp_project/uploads/;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 300;
+        proxy_connect_timeout 300;
+    }
+}

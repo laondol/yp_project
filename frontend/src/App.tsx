@@ -39,6 +39,7 @@ import AdminNews from './pages/AdminNews'
 import AdminShareReports from './pages/AdminShareReports'
 import AdminStores from './pages/AdminStores'
 import AdminAlerts from './pages/AdminAlerts'
+import AdminConstructionNotices from './pages/AdminConstructionNotices'
 import AdminAiChat from './pages/AdminAiChat'
 import AdminAiTrain from './pages/AdminAiTrain'
 import AdminAiBroadcasts from './pages/AdminAiBroadcasts'
@@ -261,6 +262,7 @@ export default function App() {
             <Route path="/admin/alerts" element={<ProtectedRoute><AdminAlerts /></ProtectedRoute>} />
             <Route path="/admin/alerts/new" element={<ProtectedRoute><AdminAlertEdit /></ProtectedRoute>} />
             <Route path="/admin/alerts/edit/:id" element={<ProtectedRoute><AdminAlertEdit /></ProtectedRoute>} />
+            <Route path="/admin/construction-notices" element={<ProtectedRoute><AdminConstructionNotices /></ProtectedRoute>} />
             <Route path="/admin/ai-chat" element={<ProtectedRoute><AdminAiChat /></ProtectedRoute>} />
             <Route path="/admin/ai-train" element={<ProtectedRoute><AdminAiTrain /></ProtectedRoute>} />
             <Route path="/admin/ai-broadcasts" element={<ProtectedRoute><AdminAiBroadcasts /></ProtectedRoute>} />

@@ -191,11 +191,11 @@ export default function ShareList() {
       {loading ? (
         <div className="text-center py-5 text-muted"><div className="spinner-border" /></div>
       ) : items.length > 0 ? (
-        <div className="row g-3">
+        <div className="row g-3 flex-nowrap flex-sm-wrap" style={{ overflowX: 'auto', paddingBottom: 4 }}>
           {items.map(r => {
             const dist = userLoc && r.latitude ? haversine(userLoc.lat, userLoc.lon, r.latitude, r.longitude) : null
             return (
-            <div key={r.id} className="col-12 col-md-6 col-lg-4">
+            <div key={r.id} className="col-12 col-md-6 col-lg-4" style={{ minWidth: 340 }}>
               <div className="card border-0 shadow-sm h-100" style={{borderRadius:16,overflow:'hidden'}}>
                 {(() => {
                   const extraImgs = r.extra_images ? r.extra_images.split(',').filter(Boolean) : []
@@ -204,9 +204,9 @@ export default function ShareList() {
                   return (
                     <>
                       {allImgs.length > 0 ? (
-                        <img src={allImgs[0]} className="card-img-top" style={{height:160,objectFit:'cover'}} />
+                        <img src={allImgs[0]} className="card-img-top" />
                       ) : r.drawing_path ? (
-                        <img src={r.drawing_path} className="card-img-top" style={{height:160,objectFit:'cover'}} />
+                        <img src={r.drawing_path} className="card-img-top" />
                       ) : (
                         <div className="bg-light d-flex align-items-center justify-content-center" style={{height:160}}>
                           <span className="text-muted">이미지 없음</span>
@@ -215,15 +215,15 @@ export default function ShareList() {
                       {allImgs.length > 1 && (
                         <div className="d-flex gap-1 px-2 pt-1 pb-2 bg-white" style={{overflow:'auto'}}>
                           {allImgs.slice(0, 5).map((img, i) => (
-                            <img key={i} src={img} style={{width:50,height:50,objectFit:'cover',borderRadius:6,border:'1px solid #eee',flexShrink:0}} />
+                            <img key={i} src={img} style={{width:50,height:50,objectFit:'contain',borderRadius:6,border:'1px solid #eee',flexShrink:0,backgroundColor:'#f8f9fa'}} />
                           ))}
                           {allImgs.length > 5 && <span className="small text-muted align-self-center">+{allImgs.length-5}</span>}
-                          {r.drawing_path && <img src={r.drawing_path} style={{width:50,height:50,objectFit:'cover',borderRadius:6,border:'1px solid #dee2fc',flexShrink:0}} title="그리기" />}
+                          {r.drawing_path && <img src={r.drawing_path} style={{width:50,height:50,objectFit:'contain',borderRadius:6,border:'1px solid #dee2fc',flexShrink:0,backgroundColor:'#f8f9fa'}} title="그리기" />}
                         </div>
                       )}
                       {allImgs.length <= 1 && r.drawing_path && !showDraw && (
                         <div className="px-2 pb-2 bg-white">
-                          <img src={r.drawing_path} style={{width:50,height:50,objectFit:'cover',borderRadius:6,border:'1px solid #dee2fc'}} title="그리기" />
+                          <img src={r.drawing_path} style={{width:50,height:50,objectFit:'contain',borderRadius:6,border:'1px solid #dee2fc',backgroundColor:'#f8f9fa'}} title="그리기" />
                         </div>
                       )}
                     </>

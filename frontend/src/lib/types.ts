@@ -159,6 +159,8 @@ export interface ConstructionNotice {
   source?: string; notice_type?: string;
   start_date?: string; end_date?: string;
   is_active?: boolean;
+  unit?: string; distance_km?: number;
+  address?: string;
 }
 
 // Epub

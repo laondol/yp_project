@@ -222,6 +222,32 @@ def gps_to_address(lat, lon, kakao_key=None):
     d = _resolve_place(lat, lon, kakao_key)
     return d.get('address', '')
 
+def gps_to_road_address(lat, lon, kakao_key=None):
+    """좌표 → 도로명 주소 (Kakao coord2address). 실패 시 지번 주소."""
+    if kakao_key is None:
+        try:
+            kakao_key = current_app.config.get('KAKAO_REST_API_KEY', '')
+        except RuntimeError:
+            kakao_key = ''
+    if not kakao_key:
+        return ''
+    try:
+        url = 'https://dapi.kakao.com/v2/local/geo/coord2address.json'
+        headers = {'Authorization': f'KakaoAK {kakao_key}'}
+        res = requests.get(url, headers=headers, params={'x': lon, 'y': lat}, timeout=5)
+        if res.status_code == 200:
+            docs = (res.json().get('documents') or [])
+            if docs:
+                road = docs[0].get('road_address') or {}
+                if road.get('address_name'):
+                    return road['address_name']
+                jibun = docs[0].get('address') or {}
+                if jibun.get('address_name'):
+                    return jibun['address_name']
+    except Exception as e:
+        print(f'[GEO] Kakao coord2address fail: {e}')
+    return ''
+
 def _fallback_lookup(lat, lon):
     best_town = None
     best_village = ''
@@ -274,3 +300,37 @@ def calibrate_gps(lat, lon, town=None, village=None):
     except:
         pass
     return lat, lon
+
+def geocode_text(addr, kakao_key=None, juso_key=None):
+    """주소/지역명 문자열 -> (lat, lng). 실패 시 (None, None)."""
+    if not addr:
+        return None, None
+    addr = str(addr).strip()
+    if kakao_key is None:
+        kakao_key = current_app.config.get('KAKAO_REST_API_KEY', '')
+    if kakao_key:
+        try:
+            url = 'https://dapi.kakao.com/v2/local/search/address.json'
+            r = requests.get(url, headers={'Authorization': f'KakaoAK {kakao_key}'},
+                             params={'query': addr}, timeout=10)
+            if r.status_code == 200:
+                docs = r.json().get('documents') or []
+                if docs:
+                    return float(docs[0]['y']), float(docs[0]['x'])
+        except Exception as e:
+            print(f'[GEO] Kakao fwd fail: {e}')
+    if juso_key is None:
+        juso_key = current_app.config.get('JUSO_API_KEY', '')
+    if juso_key:
+        try:
+            url = 'https://business.juso.go.kr/addrlink/addrCoordApi.do'
+            r = requests.get(url, params={'confmKey': juso_key, 'keyword': addr,
+                             'resultType': 'json', 'countPerPage': 1}, timeout=10)
+            if r.status_code == 200:
+                data = r.json()
+                juso = (data.get('results', {}) or {}).get('juso', [])
+                if juso:
+                    return float(juso[0]['entY']), float(juso[0]['entX'])
+        except Exception as e:
+            print(f'[GEO] JUSO fwd fail: {e}')
+    return None, None

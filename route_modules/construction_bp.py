@@ -9,6 +9,8 @@ from config import Config
 
 construction_bp = Blueprint('construction', __name__)
 
+_ADDR_BACKFILL_RUNNING = False
+
 def _serve_spa():
     import os
     path = os.path.join(current_app.root_path, 'frontend', 'dist', 'index.html')
@@ -613,6 +615,39 @@ def admin_alerts_delete(alert_id):
     db.session.commit()
     return redirect('/admin/alerts')
 
+@construction_bp.route('/admin/construction-notices')
+def admin_construction_notices():
+    if session.get('role') not in ('admin', 'leader'):
+        return "권한 없음", 403
+    return _serve_spa()
+
+@construction_bp.route('/api/admin/construction-notices')
+def api_admin_construction_notices():
+    if session.get('role') not in ('admin', 'leader'):
+        return jsonify({"error": "forbidden"}), 403
+    notices = ConstructionNotice.query.order_by(
+        ConstructionNotice.start_date.is_(None),
+        ConstructionNotice.start_date.desc()
+    ).all()
+    out = [{
+        "id": n.id, "title": n.title, "location": n.location,
+        "notice_type": n.notice_type, "source": n.source,
+        "start_date": n.start_date.strftime('%Y-%m-%d') if n.start_date else None,
+        "end_date": n.end_date.strftime('%Y-%m-%d') if n.end_date else None,
+        "is_active": n.is_active,
+        "latitude": n.latitude, "longitude": n.longitude,
+    } for n in notices]
+    return jsonify({"notices": out})
+
+@construction_bp.route('/api/admin/construction-notices/<int:notice_id>/toggle', methods=['POST'])
+def api_admin_construction_notices_toggle(notice_id):
+    if session.get('role') not in ('admin', 'leader'):
+        return jsonify({"error": "forbidden"}), 403
+    n = ConstructionNotice.query.get_or_404(notice_id)
+    n.is_active = not n.is_active
+    db.session.commit()
+    return jsonify({"id": n.id, "is_active": n.is_active})
+
 @construction_bp.route('/api/user/unread')
 def api_user_unread():
     uid = session.get('user_id')
@@ -671,6 +706,7 @@ def construction_refresh():
     gg_key = getattr(Config, 'GG_TRAFFIC_API_KEY', '')
     build_key = getattr(Config, 'GG_BUILDING_API_KEY', '')
     arch_hub_key = getattr(Config, 'ARCH_HUB_API_KEY', '')
+    odcloud_key = getattr(Config, 'ODCLOUD_API_KEY', '')
     if not dg_key and not gg_key and not build_key and not arch_hub_key:
         return "<script>alert('API 키가 설정되지 않았습니다. config.py를 확인하세요.'); history.back();</script>"
     import threading
@@ -685,26 +721,58 @@ def construction_refresh():
     if arch_hub_key:
         from services.construction import sync_architecture_hub
         threading.Thread(target=sync_architecture_hub, args=(current_app._get_current_object(), arch_hub_key)).start()
+    if odcloud_key:
+        from services.construction import sync_odcloud_building
+        threading.Thread(target=sync_odcloud_building, args=(current_app._get_current_object(), odcloud_key)).start()
+    from services.construction import geocode_missing_notices
+    threading.Thread(target=geocode_missing_notices, args=(current_app._get_current_object(),)).start()
     return "<script>alert('정보 갱신이 시작되었습니다.'); location.href='/construction';</script>"
 
 # --- [상시 서비스 3종] ---
 
 
+def _unit_of(loc):
+    if not loc:
+        return ''
+    s = str(loc).replace('경기도', '').replace('양평군', '')
+    for suf in ('면', '읍', '동', '리'):
+        i = s.find(suf)
+        if i >= 0:
+            return s[max(0, i - 4):i + 1].strip()
+    return ''
+
 @construction_bp.route('/api/construction/notices')
 def api_construction_notices():
-    six_months_ago = datetime.now(timezone.utc) - timedelta(days=180)
+    # 도로명 주소 누락 시 백그라운드 역지오코딩 1회 자동 수행
+    global _ADDR_BACKFILL_RUNNING
+    if not _ADDR_BACKFILL_RUNNING:
+        try:
+            missing = ConstructionNotice.query.filter(
+                ConstructionNotice.is_active == True,
+                db.or_(ConstructionNotice.address.is_(None), ConstructionNotice.address == ''),
+            ).first()
+            if missing:
+                _ADDR_BACKFILL_RUNNING = True
+                from services.construction import geocode_missing_notices
+                import threading
+                def _run():
+                    try:
+                        geocode_missing_notices(current_app._get_current_object())
+                    finally:
+                        global _ADDR_BACKFILL_RUNNING
+                        _ADDR_BACKFILL_RUNNING = False
+                threading.Thread(target=_run).start()
+        except Exception:
+            _ADDR_BACKFILL_RUNNING = False
     notices = ConstructionNotice.query.filter(
-        ConstructionNotice.is_active == True,
-        db.or_(
-            ConstructionNotice.start_date >= six_months_ago,
-            ConstructionNotice.start_date == None
-        )
+        ConstructionNotice.is_active == True
     ).all()
-    # GPS 우선, 없으면 집/회사 위치
     gps_lat = request.args.get('lat', type=float)
     gps_lng = request.args.get('lng', type=float)
     ref_lat = ref_lng = None
     town = village = ''
+    uid = session.get('user_id')
+    user = User.query.get(uid) if uid else None
     if gps_lat and gps_lng:
         ref_lat, ref_lng = gps_lat, gps_lng
         try:
@@ -714,14 +782,12 @@ def api_construction_notices():
         except Exception:
             pass
     else:
-        uid = session.get('user_id')
-        if uid:
-            user = User.query.get(uid)
-            if user and (user.curr_latitude or user.reg_latitude):
-                ref_lat = user.curr_latitude or user.reg_latitude
-                ref_lng = user.curr_longitude or user.reg_longitude
-                town = user.curr_town or ''
-                village = user.curr_village or ''
+        if user and (user.curr_latitude or user.reg_latitude):
+            ref_lat = user.curr_latitude or user.reg_latitude
+            ref_lng = user.curr_longitude or user.reg_longitude
+            town = user.curr_town or ''
+            village = user.curr_village or ''
+    user_unit = _unit_of(village or (getattr(user, 'curr_address', '') if user else '') or '')
     out = []
     for n in notices:
         d = None
@@ -729,14 +795,19 @@ def api_construction_notices():
             d = round(haversine_km(ref_lat, ref_lng, n.latitude, n.longitude), 1)
         out.append({
             "id": n.id, "title": n.title, "description": n.description,
-            "location": n.location, "latitude": n.latitude, "longitude": n.longitude,
+            "location": n.location, "address": n.address, "latitude": n.latitude, "longitude": n.longitude,
             "notice_type": n.notice_type, "source": n.source,
             "start_date": n.start_date.strftime('%Y-%m-%d') if n.start_date else None,
             "end_date": n.end_date.strftime('%Y-%m-%d') if n.end_date else None,
             "distance_km": d,
+            "unit": _unit_of(n.location),
         })
     if ref_lat:
-        out.sort(key=lambda x: x['distance_km'] if x['distance_km'] is not None else 999)
+        out.sort(key=lambda x: (
+            0 if (user_unit and x['unit'] == user_unit) else 1,
+            x['distance_km'] if x['distance_km'] is not None else 999,
+            -int((x['start_date'] or '0000-00-00').replace('-', '') or 0),
+        ))
     return jsonify({"notices": out, "town": town, "village": village,
                     "based_on": "gps" if (gps_lat and gps_lng) else "home"})
 

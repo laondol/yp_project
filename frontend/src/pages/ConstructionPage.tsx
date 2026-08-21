@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { constructionApi } from '../lib/api'
 import type { ConstructionNotice } from '../lib/types'
@@ -7,6 +7,8 @@ import Loading from '../components/common/Loading'
 import ErrorMessage from '../components/common/ErrorMessage'
 import EmptyState from '../components/common/EmptyState'
 import FacilityMap from '../components/FacilityMap'
+import L from 'leaflet'
+import 'leaflet/dist/leaflet.css'
 import { formatKST } from '../utils/format';
 
 interface HeritageItem {
@@ -50,6 +52,33 @@ export default function ConstructionPage() {
   const [stores, setStores] = useState<StoreGroup[]>([])
   const [trafficHtml, setTrafficHtml] = useState('')
   const [alerts, setAlerts] = useState<AlertItem[]>([])
+
+  const [mapNotice, setMapNotice] = useState<ConstructionNotice | null>(null)
+  const mapModalRef = useRef<HTMLDivElement>(null)
+  const mapModalObj = useRef<any>(null)
+
+  useEffect(() => {
+    if (!mapNotice || !mapModalRef.current) return
+    if (mapModalObj.current) { mapModalObj.current.remove(); mapModalObj.current = null }
+    const lat = mapNotice.latitude as number
+    const lng = mapNotice.longitude as number
+    const map = L.map(mapModalRef.current).setView([lat, lng], 19)
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors',
+      maxZoom: 19,
+    }).addTo(map)
+    const pin = L.divIcon({
+      className: '',
+      html: `<div style="width:24px;height:24px;border-radius:50% 50% 50% 0;background:#dc3545;transform:rotate(-45deg);border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4);"></div>`,
+      iconSize: [24, 24],
+      iconAnchor: [12, 24],
+    })
+    L.marker([lat, lng], { icon: pin }).addTo(map).bindPopup(mapNotice.address || '건축공사 위치').openPopup()
+    mapModalObj.current = map
+    return () => {
+      if (mapModalObj.current) { mapModalObj.current.remove(); mapModalObj.current = null }
+    }
+  }, [mapNotice])
   const [sceneryVillage, setSceneryVillage] = useState('')
   const [sceneryTown, setSceneryTown] = useState('')
   const [scenerySeason, setScenerySeason] = useState('')
@@ -72,10 +101,10 @@ export default function ConstructionPage() {
   const [heritageLat, setHeritageLat] = useState(0)
   const [heritageLng, setHeritageLng] = useState(0)
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (lat?: number, lng?: number) => {
     setLoading(true); setError('')
     try {
-      const data = await constructionApi.notices()
+      const data = await constructionApi.notices(lat, lng)
       setNotices(data?.notices || [])
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : '불러오기 실패')
@@ -83,6 +112,34 @@ export default function ConstructionPage() {
   }, [])
 
   useEffect(() => { load() }, [load])
+
+  useEffect(() => {
+    if (activeTab !== 'building') return
+    navigator.geolocation.getCurrentPosition(
+      pos => { load(pos.coords.latitude, pos.coords.longitude) },
+      () => {},
+      { enableHighAccuracy: true, timeout: 10000 }
+    )
+  }, [activeTab, load])
+
+  const grouped = useMemo(() => {
+    const m: Record<string, ConstructionNotice[]> = {}
+    notices.forEach(n => {
+      const key = n.address || n.unit || '기타'
+      ;(m[key] ||= []).push(n)
+    })
+    return m
+  }, [notices])
+
+  const groupList = useMemo(() => {
+    return Object.entries(grouped)
+      .map(([addr, items]) => ({
+        addr,
+        items,
+        minDist: items.reduce((a: number, i) => Math.min(a, i.distance_km != null ? i.distance_km : 999), 999),
+      }))
+      .sort((a, b) => a.minDist - b.minDist)
+  }, [grouped])
 
   useEffect(() => {
     if (activeTab !== 'heritage') return
@@ -272,9 +329,9 @@ export default function ConstructionPage() {
           ) : heritage.length === 0 ? (
             <EmptyState icon="🏛️" title="주변 국가유산이 없습니다." />
           ) : (
-            <div className="row g-2">
+            <div className="row g-3 flex-nowrap flex-sm-wrap" style={{ overflowX: 'auto', paddingBottom: 4 }}>
               {heritage.map(h => (
-                <div key={h.name} className="col-6 col-md-4 col-lg-3 p-2">
+                <div key={h.name} className="col-4" style={{ minWidth: 340 }}>
                   <div className="card border-0 shadow-sm" style={{ borderRadius: 16 }}>
                     <div className="card-body p-3">
                       <div className="d-flex align-items-center gap-2 mb-2">
@@ -286,21 +343,19 @@ export default function ConstructionPage() {
                       <div className="d-flex gap-1 flex-wrap mb-2">
                         <a href={`https://ko.wikipedia.org/w/index.php?search=${encodeURIComponent(h.name)}`} target="_blank" className="btn btn-sm btn-outline-secondary" rel="noopener noreferrer">📖 위키백과</a>
                         <a href={`https://search.naver.com/search.naver?query=${encodeURIComponent(h.name + ' 문화재')}`} target="_blank" className="btn btn-sm btn-outline-success" rel="noopener noreferrer">🔍 자세히보기</a>
-                        <div className="btn-group">
-                          <a href={`/compass?popup=1&lat=${h.lat}&lng=${h.lng}&name=${encodeURIComponent(h.name || '국가유산')}`} className="btn btn-sm btn-outline-primary">🧭 나침반</a>
-                          {h.stamped ? (
-                            <span className="btn btn-sm btn-warning disabled">✅ 방문완료</span>
-                          ) : (
-                            <button className="btn btn-sm btn-outline-danger" onClick={() => handleStamp(h.name)} disabled={heritageStampLoading[h.name]}>
-                              {heritageStampLoading[h.name] ? '...' : '🔖 스탬프'}
-                            </button>
-                          )}
-                        </div>
+                        <a href={`/compass?popup=1&lat=${h.lat}&lng=${h.lng}&name=${encodeURIComponent(h.name || '국가유산')}`} className="btn btn-sm btn-outline-primary">🧭 나침반</a>
                       </div>
                       <div className="d-flex gap-1 flex-wrap">
                         <a href={`https://www.google.com/maps/dir/?api=1&origin=${heritageLat},${heritageLng}&destination=${h.lat},${h.lng}`} target="_blank" className="btn btn-sm btn-outline-secondary" rel="noopener noreferrer">Google</a>
                         <a href={`https://map.kakao.com/link/to/${encodeURIComponent(h.name)},${h.lat},${h.lng}`} target="_blank" className="btn btn-sm btn-outline-warning" rel="noopener noreferrer">카카오</a>
                         <a href={`https://map.naver.com/index.nhn?slat=${heritageLat}&slng=${heritageLng}&elat=${h.lat}&elng=${h.lng}&etitle=${encodeURIComponent(h.name)}`} target="_blank" className="btn btn-sm btn-outline-success" rel="noopener noreferrer">네이버</a>
+                        {h.stamped ? (
+                          <span className="btn btn-sm btn-warning disabled">✅ 방문완료</span>
+                        ) : (
+                          <button className="btn btn-sm btn-outline-danger" onClick={() => handleStamp(h.name)} disabled={heritageStampLoading[h.name]}>
+                            {heritageStampLoading[h.name] ? '...' : '🔖 스탬프'}
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -513,33 +568,59 @@ export default function ConstructionPage() {
           {notices.length === 0 ? (
             <EmptyState icon="📡" title="현재 등록된 정보가 없습니다." />
           ) : (
-            <div className="row g-3">
-              {notices.map(n => (
-                <div key={n.id} className="col-12">
-                  <div className="card border-0 shadow-sm" style={{ borderRadius: 16, borderLeft: n.notice_type === 'traffic_incident' ? '4px solid #dc3545' : undefined }}>
-                    <div className="card-body p-3">
-                      <div className="d-flex justify-content-between">
-                        <h6 className="fw-bold mb-2">{n.title}</h6>
-                        <span className={`badge ${typeColors[n.notice_type as string] || 'bg-info'}`}>
-                          {typeLabels[n.notice_type as string] || n.notice_type}
-                        </span>
+            groupList.map(({ addr, items }) => (
+              <div key={addr} className="mt-3">
+                <h6 className="fw-bold text-muted mb-2 d-flex justify-content-between align-items-center">
+                  <span>📍 {addr}</span>
+                  <span className="badge bg-secondary">{items.length}건</span>
+                </h6>
+                <div className="row g-3">
+                  {items.map(n => (
+                    <div key={n.id} className="col-12">
+                      <div className="card border-0 shadow-sm" style={{ borderRadius: 16, borderLeft: n.notice_type === 'traffic_incident' ? '4px solid #dc3545' : undefined }}>
+                        <div className="card-body p-3">
+                          <div className="d-flex justify-content-between">
+                            <h6 className="fw-bold mb-2">{n.title}</h6>
+                            <span className={`badge ${typeColors[n.notice_type as string] || 'bg-info'}`}>
+                              {typeLabels[n.notice_type as string] || n.notice_type}
+                            </span>
+                          </div>
+                          {n.description && <p className="small text-muted mb-2">{n.description}</p>}
+                          <div className="d-flex gap-3 flex-wrap small text-muted">
+                            {n.start_date && <span>📅 시작: {formatKST(n.start_date, { year: 'numeric', month: '2-digit', day: '2-digit' })}</span>}
+                            {n.end_date && <span>➡ 종료: {formatKST(n.end_date, { year: 'numeric', month: '2-digit', day: '2-digit' })}</span>}
+                            {n.source && <span>🔗 {{ gg_traffic: '경기교통정보', cals: '건설CALS', yp_gov: '양평군청' }[n.source] || n.source}</span>}
+                            {n.distance_km != null && <span>📏 {n.distance_km}km</span>}
+                          </div>
+                          {n.latitude && n.longitude && (
+                            <button onClick={() => setMapNotice(n)} className="btn btn-sm btn-outline-secondary mt-2">🗺️ 지도보기</button>
+                          )}
+                        </div>
                       </div>
-                      {n.description && <p className="small text-muted mb-2">{n.description}</p>}
-                      <div className="d-flex gap-3 flex-wrap small text-muted">
-                        {n.location && <span>📍 {n.location}</span>}
-                        {n.start_date && <span>📅 시작: {formatKST(n.start_date, { year: 'numeric', month: '2-digit', day: '2-digit' })}</span>}
-                        {n.end_date && <span>➡ 종료: {formatKST(n.end_date, { year: 'numeric', month: '2-digit', day: '2-digit' })}</span>}
-                        {n.source && <span>🔗 {{ gg_traffic: '경기교통정보', cals: '건설CALS', yp_gov: '양평군청' }[n.source] || n.source}</span>}
-                      </div>
-                      {n.latitude && n.longitude && (
-                        <a href={`https://maps.google.com/?q=${n.latitude},${n.longitude}`} target="_blank" className="btn btn-sm btn-outline-secondary mt-2" rel="noopener noreferrer">🗺️ 지도보기</a>
-                      )}
                     </div>
-                  </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+              </div>
+            ))
           )}
+        </div>
+      )}
+
+      {mapNotice && (
+        <div
+          onClick={() => setMapNotice(null)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)', zIndex: 4000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{ position: 'relative', width: '92%', maxWidth: 520, height: 480, background: '#fff', borderRadius: 12, overflow: 'hidden' }}
+          >
+            <button
+              onClick={() => setMapNotice(null)}
+              style={{ position: 'absolute', top: 8, right: 8, zIndex: 5000, width: 30, height: 30, borderRadius: '50%', border: 'none', background: '#e9ecef', color: '#333', fontSize: 14, cursor: 'pointer' }}
+            >✕</button>
+            <div ref={mapModalRef} style={{ width: '100%', height: '100%' }} />
+          </div>
         </div>
       )}
     </div>
