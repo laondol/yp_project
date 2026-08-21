@@ -753,6 +753,9 @@ def share_report_edit(report_id):
 
         # 기존 사진 회전 편집 처리 (replace_rotate: "oldpath||angle") - 서버 Pillow 1회 적용
         from PIL import Image as _PILImage
+        import uuid as _uuid
+        img_dir = os.path.join(current_app.root_path, 'static', 'uploads', 'share_reports')
+        if not os.path.exists(img_dir): os.makedirs(img_dir)
         replace_rotations = request.form.getlist('replace_rotate')
         try:
             with open('/tmp/edit_dbg.log', 'a') as _f:
@@ -780,7 +783,21 @@ def share_report_edit(report_id):
                 if not exists:
                     continue
                 im = _PILImage.open(abs_path).convert('RGB').rotate(angle, expand=True)
-                im.save(abs_path, format='JPEG', optimize=True)
+                new_name = _uuid.uuid4().hex + '.jpg'
+                new_rel = '/static/uploads/share_reports/' + new_name
+                new_abs = os.path.join(img_dir, new_name)
+                im.save(new_abs, format='JPEG', optimize=True)
+                if report.image_path == old_path:
+                    report.image_path = new_rel
+                elif report.extra_images:
+                    _parts = [p.strip() for p in report.extra_images.split(',') if p.strip()]
+                    if old_path in _parts:
+                        _parts[_parts.index(old_path)] = new_rel
+                        report.extra_images = ','.join(_parts)
+                try:
+                    if os.path.exists(abs_path): os.remove(abs_path)
+                except Exception:
+                    pass
                 try:
                     with open('/tmp/edit_dbg.log', 'a') as _f:
                         _f.write('ROTATED %s by %s -> %s\n' % (old_path, angle, im.size))
