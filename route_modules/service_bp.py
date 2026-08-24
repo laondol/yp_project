@@ -137,14 +137,14 @@ def service_ramp_apply():
 
 @service_bp.route('/service/ramp/apply-status')
 def service_ramp_apply_status():
-    open_row = SiteSetting.query.get('ramp_apply_open')
-    is_open = (open_row is None) or (open_row.value != 'false')
-    waiting = RampApplication.query.filter_by(status='pending').count()
-    return jsonify({'open': is_open, 'waiting': waiting})
+    return jsonify(_ramp_status())
 
 
 @service_bp.route('/service/ramp/volunteer', methods=['POST'])
 def service_ramp_volunteer():
+    vol_row = SiteSetting.query.get('volunteer_apply_open')
+    if vol_row is not None and vol_row.value == 'false':
+        return jsonify({'status': 'error', 'msg': '현재 자원봉사 신청을 받지 않고 있습니다.'}), 400
     data = request.get_json(silent=True) or {}
     name = (data.get('name') or '').strip()
     email = (data.get('email') or '').strip()
@@ -162,13 +162,28 @@ def service_ramp_apply_toggle():
     if session.get('role') != 'leader':
         return jsonify({'status': 'error', 'msg': '권한이 없습니다.'}), 403
     data = request.get_json(silent=True) or {}
+    section = data.get('section', 'ramp')
     open_val = 'true' if data.get('open') else 'false'
-    row = SiteSetting.query.get('ramp_apply_open')
+    key = 'volunteer_apply_open' if section == 'volunteer' else 'ramp_apply_open'
+    row = SiteSetting.query.get(key)
     if row is None:
-        row = SiteSetting(key='ramp_apply_open', value=open_val)
+        row = SiteSetting(key=key, value=open_val)
         db.session.add(row)
     else:
         row.value = open_val
     db.session.commit()
-    return jsonify({'open': open_val == 'true'})
+    return jsonify(_ramp_status())
+
+
+def _ramp_status():
+    ramp = SiteSetting.query.get('ramp_apply_open')
+    is_ramp = (ramp is None) or (ramp.value != 'false')
+    vol = SiteSetting.query.get('volunteer_apply_open')
+    is_vol = (vol is None) or (vol.value != 'false')
+    return {
+        'open': is_ramp,
+        'volunteer_open': is_vol,
+        'all_closed': (not is_ramp) and (not is_vol),
+        'waiting': RampApplication.query.filter_by(status='pending').count(),
+    }
 
