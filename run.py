@@ -186,6 +186,17 @@ def create_app():
                     with db.engine.connect() as _conn:
                         _conn.execute(_sa_text('ALTER TABLE construction_notice ADD COLUMN address VARCHAR(300)'))
                         _conn.commit()
+                        # 건축공사 id 시퀀스 보장 (프로덕션에서 seq 누락 시 싱크 NotNullViolation 방지)
+            if 'construction_notice' in _tbls:
+                _cn_id = next((c for c in _inspector.get_columns('construction_notice') if c['name'] == 'id'), None)
+                if _cn_id is not None and not _cn_id.get('default'):
+                    with db.engine.connect() as _conn:
+                        _conn.execute(_sa_text('CREATE SEQUENCE IF NOT EXISTS construction_notice_id_seq INCREMENT 1 START 1'))
+                        _max = _conn.execute(_sa_text('SELECT COALESCE(MAX(id), 0) FROM construction_notice')).scalar() or 0
+                        _conn.execute(_sa_text('SELECT setval("construction_notice_id_seq", ' + str(int(_max)) + ')'))
+                        _conn.execute(_sa_text('ALTER TABLE construction_notice ALTER COLUMN id SET DEFAULT nextval("construction_notice_id_seq")'))
+                        _conn.execute(_sa_text('ALTER SEQUENCE construction_notice_id_seq OWNED BY construction_notice.id'))
+                        _conn.commit()
             # 뉴스 published_at (122ee23 추가분: 프로덕션에 누락 시 자동 보완)
             if 'news_article' in _tbls:
                 _ncols = [c['name'] for c in _inspector.get_columns('news_article')]

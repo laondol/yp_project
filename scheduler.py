@@ -80,12 +80,10 @@ def run_monthly_payout(app):
             with app.app_context():
                 from models import User
                 from services.point_service import add_points
-                now = datetime.now(timezone.utc)
+                now = datetime.now()
                 granted = 0
                 for u in User.query.all():
                     base = u.last_payout or u.created_at
-                    if base is not None and base.tzinfo is None:
-                        base = base.replace(tzinfo=timezone.utc)
                     if base and (now - base).days >= 30:
                         add_points(u.id, 1000, 'monthly', '30일 주기 물맑은머니 지급')
                         if 'village' in (u.managed_pages or ''):
@@ -145,7 +143,7 @@ def run_startup_tasks(app):
     # 낙제 게시물 만료 삭제
     try:
         with app.app_context():
-            expired = Post.query.filter(Post.total_score <= -50, Post.deadline != None, Post.deadline < datetime.now(timezone.utc)).all()
+            expired = Post.query.filter(Post.total_score <= -50, Post.deadline != None, Post.deadline < datetime.now()).all()
             for p in expired:
                 db.session.delete(p)
             if expired:
@@ -158,7 +156,7 @@ def run_startup_tasks(app):
     try:
         with app.app_context():
             from sqlalchemy import or_
-            cutoff = datetime.now(timezone.utc) - timedelta(days=1)
+            cutoff = datetime.now() - timedelta(days=1)
             flagged_legal = LegalPost.query.filter(
                 LegalPost.status == 'flagged',
                 LegalPost.created_at < cutoff,

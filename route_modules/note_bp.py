@@ -72,7 +72,7 @@ def note_create():
         longitude=data.get('longitude'),
         address=(data.get('address') or '').strip()[:300],
         is_public=bool(data.get('is_public')),
-        updated_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(),
     )
     db.session.add(note)
     db.session.commit()
@@ -113,7 +113,7 @@ def note_update(note_id):
         note.address = (data.get('address') or '').strip()[:300]
     if 'is_public' in data:
         note.is_public = bool(data.get('is_public'))
-    note.updated_at = datetime.now(timezone.utc)
+    note.updated_at = datetime.now()
     db.session.commit()
     return jsonify({"success": True, "id": note.id})
 

@@ -141,7 +141,7 @@ def bot_rename():
         return jsonify({"error": "이미 다른 회원이 사용 중인 이름입니다."})
     bot = _get_bot(uid)
     bot.bot_name = new_name
-    bot.updated_at = datetime.now(timezone.utc)
+    bot.updated_at = datetime.now()
     db.session.commit()
     return jsonify({"success": True, "name": new_name})
 
@@ -164,7 +164,7 @@ def bot_llm_settings():
     if data.get('api_key'):
         settings['llm_api_key'] = data['api_key']
     bot.personality = json.dumps(settings)
-    bot.updated_at = datetime.now(timezone.utc)
+    bot.updated_at = datetime.now()
     db.session.commit()
     return jsonify({"success": True})
 
@@ -178,13 +178,13 @@ def bot_tone():
         return jsonify({"error": "올바른 말투를 선택하세요."})
     bot = _get_bot(uid)
     bot.tone = tone
-    bot.updated_at = datetime.now(timezone.utc)
+    bot.updated_at = datetime.now()
     db.session.commit()
     return jsonify({"success": True, "tone": tone})
 
 def _time_greeting(user):
     from datetime import datetime, timezone, timedelta, timezone
-    h = (datetime.now(timezone.utc) + timedelta(hours=9)).hour
+    h = datetime.now().hour
     if h < 6: return "깊은 밤"
     if h < 9: return "상쾌한 아침"
     if h < 12: return "활기찬 오전"
@@ -194,7 +194,7 @@ def _time_greeting(user):
     return "조용한 밤"
 
 def _weather_hint(user):
-    m = datetime.now(timezone.utc).month
+    m = datetime.now().month
     if m in (3,4,5): return "봄꽃이 피는 계절"
     if m in (6,7,8): return "여름 더위"
     if m in (9,10,11): return "가을 바람"
@@ -289,7 +289,7 @@ def bot_chat():
     # 공과금 납부 의도 감지 → 오늘 20시 마감 일정 자동 생성
     if _detect_bill_intent(msg) and not schedule_info:
         try:
-            now_kst = datetime.now(KST)
+            now_kst = datetime.now()
             today_20 = now_kst.replace(hour=20, minute=0, second=0, microsecond=0).replace(tzinfo=None)
             # 이미 오늘 20시 공과금 일정이 있는지 확인
             existing = TongBotSchedule.query.filter_by(user_id=uid).filter(
@@ -333,7 +333,7 @@ def bot_chat():
         try:
             groq_key = current_app.config.get('GROQ_API_KEY', os.getenv('GROQ_API_KEY', ''))
             if groq_key:
-                now = datetime.now(KST)
+                now = datetime.now()
                 reminder_prompt = f"""사용자의 알림 요청을 분석하여 아래 JSON만 출력하세요:
 {{
   "title": "짧은 제목",
@@ -469,7 +469,7 @@ def bot_memo_detail(memo_id):
                 memo.end_date = None
         else:
             memo.end_date = None
-    memo.updated_at = datetime.now(timezone.utc)
+    memo.updated_at = datetime.now()
     db.session.commit()
     return jsonify({"success": True, "id": memo.id})
 
@@ -553,7 +553,7 @@ def bot_feedback():
     from models import BotFeedback, TongBot
     # 중복 방지: 같은 사용자가 같은 통벗에 24시간 내 재투표 방지
     recent = BotFeedback.query.filter_by(user_id=uid, bot_user_id=target_bot_user_id).order_by(BotFeedback.created_at.desc()).first()
-    if recent and (datetime.now(timezone.utc) - recent.created_at).total_seconds() < 86400:
+    if recent and (datetime.now() - recent.created_at).total_seconds() < 86400:
         return jsonify({"error": "24시간 후에 다시 평가할 수 있습니다."})
     fb = BotFeedback(user_id=uid, bot_user_id=target_bot_user_id, is_positive=is_positive)
     db.session.add(fb)
@@ -575,7 +575,7 @@ def bot_recall():
     if not bot:
         return jsonify({"error": "통벗이 없습니다."}), 404
     bot.is_active = False
-    bot.recalled_at = datetime.now(timezone.utc)
+    bot.recalled_at = datetime.now()
     bot.recall_reason = reason
     db.session.commit()
     return jsonify({"success": True, "bot_name": bot.bot_name})
@@ -710,7 +710,7 @@ def _auto_recurring_schedule(uid, content):
         if tm2:
             hour = int(tm2.group(1))
             minute = int(tm2.group(2))
-    now = datetime.now(KST)
+    now = datetime.now()
     def _mk(d):
         return d.replace(hour=hour, minute=minute, second=0, microsecond=0)
     def _next_month(y, m):
@@ -858,7 +858,7 @@ def _parse_korean_datetime(msg, now):
 def _memo_deadline(content):
     """메모 내용에서 1회성 날짜/시간(예: '내일 오후 3시')을 파싱해 마감 시각 반환. 없으면 None"""
     try:
-        dt = _parse_korean_datetime(content, datetime.now(KST))
+        dt = _parse_korean_datetime(content, datetime.now())
         if dt:
             return dt.replace(tzinfo=None)
     except Exception:
@@ -868,7 +868,7 @@ def _memo_deadline(content):
 def _parse_memo_reminder(content):
     """메모 내용에서 '오후 8시' 등 알림 시각을 파싱해 예약 시각(KST naive) 반환. 없으면 None."""
     try:
-        dt = _parse_korean_datetime(content, datetime.now(KST))
+        dt = _parse_korean_datetime(content, datetime.now())
         if dt:
             return dt.replace(tzinfo=None)
     except Exception:
@@ -878,7 +878,7 @@ def _parse_memo_reminder(content):
 def _parse_schedule_from_text(msg, uid):
     """자연어에서 일정 정보 추출: title, event_date, location, memo"""
     result = {'title': '', 'event_date': None, 'location': '', 'memo': ''}
-    now = datetime.now(KST)
+    now = datetime.now()
 
     # 1) 한글 날짜/시간 파싱
     dt = _parse_korean_datetime(msg, now)
@@ -1038,7 +1038,7 @@ def _ai_reply(bot, user, user_msg):
                       'respectful':'존중하고 예의 바른 말투로, ~합니다/～요 체를 사용하세요.',
                       'strict':'엄격하고 간결한 말투로, 핵심만 전달하며 군더더기 없이 답변하세요.'}.get(tone, '')
         from datetime import datetime, timezone
-        today = datetime.now(timezone.utc).strftime('%Y년 %m월 %d일 %A')
+        today = datetime.now().strftime('%Y년 %m월 %d일 %A')
 
         weather_text = ""
         try:
@@ -1247,7 +1247,7 @@ def bot_draft():
         draft.content = data.get('content', draft.content)
         draft.category = data.get('category', draft.category)
         draft.status = data.get('status', draft.status)
-        draft.updated_at = datetime.now(timezone.utc)
+        draft.updated_at = datetime.now()
     else:
         draft = TongBotDraft(user_id=uid, title=data.get('title',''), content=data.get('content',''), category=data.get('category',''), status='draft')
         db.session.add(draft)
@@ -1294,7 +1294,7 @@ def bot_review(draft_id):
         draft.bot_review = review
         draft.bot_suggestion = suggestion
         draft.status = 'reviewed'
-        draft.updated_at = datetime.now(timezone.utc)
+        draft.updated_at = datetime.now()
         db.session.commit()
         return jsonify({"success": True, "review": review, "suggestion": suggestion})
     except Exception as e:
@@ -1419,7 +1419,7 @@ def _detect_page_links(msg):
 def _get_proactive_suggestions(user, msg):
     """문맥 기반 추천 제안"""
     suggestions = []
-    now = datetime.now(KST)
+    now = datetime.now()
     h = now.hour
     has_home = bool(user.curr_latitude or user.reg_latitude)
 
@@ -1451,7 +1451,7 @@ def _get_proactive_suggestions(user, msg):
     return suggestions[:3] if suggestions else None
 
 def bot_schedule_ai_internal(uid, msg, user, bot=None):
-    now = datetime.now(KST)
+    now = datetime.now()
     today_str = now.strftime('%Y-%m-%d %H:%M')
     weekday = ['월','화','수','목','금','토','일'][now.weekday()]
 
@@ -1745,7 +1745,7 @@ def bot_schedule_calc_time():
         parts = event_time.split(':')
         h = int(parts[0]) if parts and parts[0] else 9
         m = int(parts[1]) if len(parts)>1 and parts[1] else 0
-        et = datetime.now(KST).replace(hour=h, minute=m, second=0, microsecond=0)
+        et = datetime.now().replace(hour=h, minute=m, second=0, microsecond=0)
         # 막차 정보
         last_transit = ""
         try:
@@ -2006,7 +2006,7 @@ def bot_messages_unread():
     out = []
     for m in unread:
         if m.id not in already_notified:
-            log = MessageReminderLog(user_id=uid, message_id=m.id, sender_name=m.sender_name, subject=m.subject or '(제목 없음)', sent_at=datetime.now(timezone.utc), seen=False)
+            log = MessageReminderLog(user_id=uid, message_id=m.id, sender_name=m.sender_name, subject=m.subject or '(제목 없음)', sent_at=datetime.now(), seen=False)
             db.session.add(log)
             out.append({"id": log.id, "sender": m.sender_name or '알 수 없음', "subject": m.subject or '(제목 없음)', "created_at": m.created_at.strftime('%Y-%m-%d %H:%M') if m.created_at else ''})
     if out:
@@ -2083,7 +2083,7 @@ def run_notification_check():
     from run import app
     from models import TongBotSchedule, ScheduleReminderLog
     with app.app_context():
-        now = datetime.utcnow() + timedelta(hours=9)  # KST
+        now = datetime.now()  # KST
         scheds = TongBotSchedule.query.filter(TongBotSchedule.reminder_minutes != 0).all()
         def _add_months(dt, n):
             y, m = dt.year, dt.month + n
@@ -2643,7 +2643,7 @@ def _rebuild_friend_cache(uid):
     cache = FriendCache.query.get(uid)
     if cache:
         cache.friend_ids = json.dumps(list(friend_ids))
-        cache.updated_at = datetime.now(timezone.utc)
+        cache.updated_at = datetime.now()
     else:
         db.session.add(FriendCache(user_id=uid, friend_ids=json.dumps(list(friend_ids))))
     db.session.commit()
@@ -2664,7 +2664,7 @@ def chat_rooms():
         for f in friends: status_map[str(f)] = 'invited'
         room = ChatRoom(name=name, creator_id=uid, participants=json.dumps(pids),
                        status_map=json.dumps(status_map),
-                       expires_at=datetime.now(timezone.utc) + _dt.timedelta(hours=2))
+                       expires_at=datetime.now() + _dt.timedelta(hours=2))
         db.session.add(room)
         db.session.flush()
         # 일정 연결
@@ -2690,7 +2690,7 @@ def chat_rooms():
         return jsonify({"id": room.id, "name": name})
     import json
     # 만료된 방 정리
-    ChatRoom.query.filter(ChatRoom.is_active==True, ChatRoom.expires_at < datetime.now(timezone.utc)).update({"is_active":False}, synchronize_session=False)
+    ChatRoom.query.filter(ChatRoom.is_active==True, ChatRoom.expires_at < datetime.now()).update({"is_active":False}, synchronize_session=False)
     db.session.commit()
     rooms = ChatRoom.query.filter(ChatRoom.is_active==True, ChatRoom.participants.contains(str(uid))).order_by(ChatRoom.created_at.desc()).limit(20).all()
     result = []
@@ -2755,8 +2755,7 @@ def bot_trip_plan():
     if not groq_key: return jsonify({"error":"AI 서비스 불가"})
 
     # Step 1: Parse date first
-    KST = timedelta(hours=9)
-    today = datetime.now(KST)
+    today = datetime.now()
     date_prompt = f"""Extract the date from this Korean text as YYYY-MM-DD format. If "오늘" → {today.strftime('%Y-%m-%d')}. If "내일" → {(today+timedelta(days=1)).strftime('%Y-%m-%d')}. If month/day given like "7월11일" → 2026-07-11.
 Output ONLY the date in YYYY-MM-DD format, nothing else.
 Text: {msg}"""
@@ -3016,7 +3015,7 @@ def bot_route_detail(schedule_id):
             from services.directions import next_trains_for_station, bus_stop_timetable
             odsay_key = os.getenv('ODSAY_API_KEY', current_app.config.get('ODSAY_API_KEY', ''))
             steps = route_data["steps"]
-            now = datetime.now(timezone.utc)
+            now = datetime.now()
             prev_walk_end = now.hour * 60 + now.minute
             for i, step in enumerate(steps):
                 mode = step.get("mode", "")

@@ -244,7 +244,7 @@ def construction_traffic_gg():
     import json
     # 캐시 우선 조회
     cache = VillageCache.query.filter_by(data_type='traffic').order_by(VillageCache.updated_at.desc()).first()
-    if cache and cache.updated_at and (datetime.now(timezone.utc) - cache.updated_at).seconds < 600:
+    if cache and cache.updated_at and (datetime.now() - cache.updated_at).seconds < 600:
         data = json.loads(cache.data_json or '[]')
         return jsonify({"available":True,"yangpyeong":cache.data_count,"incidents":data,"cached":True})
     from services.utic_traffic import traffic_summary as utic_summary
@@ -456,7 +456,7 @@ def construction_local_scenery():
     user = User.query.get(uid)
     if not user or not user.curr_town or not user.curr_village:
         return jsonify({"error": "등록된 주소(리)가 없습니다."}), 400
-    now = datetime.now(timezone.utc)
+    now = datetime.now()
     cur_month = now.month
     season_months = {1,2,12} if cur_month in (1,2,12) else {3,4,5} if cur_month in (3,4,5) else {6,7,8} if cur_month in (6,7,8) else {9,10,11}
     season_name = '겨울' if cur_month in (1,2,12) else '봄' if cur_month in (3,4,5) else '여름' if cur_month in (6,7,8) else '가을'
@@ -601,7 +601,7 @@ def admin_alerts_edit(alert_id):
         if session.get('role') == 'admin':
             alert.town = request.form.get('town', '').strip()
             alert.village = request.form.get('village', '').strip()
-        alert.updated_at = datetime.now(timezone.utc)
+        alert.updated_at = datetime.now()
         db.session.commit()
         return redirect('/admin/alerts')
     return _serve_spa()
@@ -683,7 +683,7 @@ def api_user_location():
         if len(parts) >= 2:
             user.curr_town = parts[0]
             user.curr_village = parts[1]
-            user.location_updated_at = datetime.now(timezone.utc)
+            user.location_updated_at = datetime.now()
             db.session.commit()
             return jsonify({"status":"success","msg":"ok"})
         return jsonify({"status":"error","msg":"format"})
@@ -965,7 +965,7 @@ def api_facilities_update(fid):
     for field in ['latitude', 'longitude']:
         if field in data and data[field] is not None:
             setattr(f, field, float(data[field]))
-    f.updated_at = datetime.now(timezone.utc)
+    f.updated_at = datetime.now()
     db.session.commit()
     return jsonify({"success": True, "msg": "수정되었습니다."})
 
@@ -984,7 +984,7 @@ def api_facilities_report(fid):
     existing = FacilityReport.query.filter_by(facility_id=fid, user_id=uid, report_type=report_type).first()
     if existing:
         existing.comment = comment
-        existing.created_at = datetime.now(timezone.utc)
+        existing.created_at = datetime.now()
     else:
         r = FacilityReport(facility_id=fid, user_id=uid, report_type=report_type, comment=comment)
         db.session.add(r)

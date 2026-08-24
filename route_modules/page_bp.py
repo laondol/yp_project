@@ -139,7 +139,7 @@ def note_page(path=''):
 
 @page_bp.route('/all-proposals')
 def all_proposals():
-    now = datetime.now(timezone.utc)
+    now = datetime.now()
     user_id = session.get('user_id')
     _cleanup_expired_posts()
     
@@ -262,7 +262,7 @@ def api_intro():
 @page_bp.route('/api/page/all-proposals')
 def api_all_proposals():
     from datetime import timedelta
-    now = datetime.now(timezone.utc)
+    now = datetime.now()
     posts = Post.query.order_by(Post.created_at.desc()).all()
     result = []
     uid = session.get('user_id')
@@ -295,7 +295,7 @@ def api_all_proposals():
 @page_bp.route('/api/page/index-posts')
 def api_index_posts():
     from datetime import timedelta
-    now = datetime.now(timezone.utc)
+    now = datetime.now()
     posts = Post.query.filter(Post.total_score > -50, ((Post.created_at <= now - timedelta(hours=48)) | (Post.is_forced_approved == True))).order_by(Post.created_at.desc()).all()
     return jsonify([{
         'id': p.id, 'title': p.title, 'content': p.content[:150] if p.content else '',

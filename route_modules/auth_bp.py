@@ -241,7 +241,7 @@ def register():
             session.pop('verify_email', None)
             return "<script>alert('이미 등록된 이메일입니다.'); location.href='/register';</script>"
         hashed_pw = generate_password_hash(password)
-        now = datetime.now(timezone.utc)
+        now = datetime.now()
         new_user = User(
             username=username, password=hashed_pw,
             real_name=real_name, email=verified_email,
@@ -324,7 +324,7 @@ def login():
         u = User.query.filter_by(email=login_id).first()
         if u and check_password_hash(u.password, request.form['password']):
             session.update({'user_id': u.id, 'username': u.username, 'role': u.role, 'email': u.email or '', 'real_name': u.real_name or '', 'managed_pages': u.managed_pages or ''})
-            now = datetime.now(timezone.utc)
+            now = datetime.now()
             u.last_login = now
             # 로그인 알림 이메일 발송
             try:
@@ -349,7 +349,7 @@ def login():
                     u.login_town = town
                     u.login_village = village or ''
             # 30일 주기 닢 지급 (가입일 기준, 가입 시 1000P만 지급)
-            now = datetime.now(timezone.utc)
+            now = datetime.now()
             if u.last_payout:
                 if (now - u.last_payout).days >= 30:
                     add_points(u.id, 1000, 'monthly', '30일 주기 물맑은머니 지급')
@@ -370,7 +370,7 @@ def logout():
     if uid:
         user = User.query.get(uid)
         if user:
-            user.last_logout = datetime.now(timezone.utc)
+            user.last_logout = datetime.now()
             db.session.commit()
     session.clear()
     return redirect(url_for('page.intro'))
@@ -441,7 +441,7 @@ def oauth_callback(provider):
                 username = f"{base_username}{counter}"
                 counter += 1
             hashed_pw = generate_password_hash(os.urandom(16).hex())
-            now = datetime.now(timezone.utc)
+            now = datetime.now()
             user = User(
                 username=username,
                 password=hashed_pw,
@@ -467,7 +467,7 @@ def oauth_callback(provider):
             db.session.commit()
 
     session.update({'user_id': user.id, 'username': user.username, 'role': user.role, 'email': user.email or '', 'real_name': user.real_name or ''})
-    now = datetime.now(timezone.utc)
+    now = datetime.now()
     user.last_login = now
     if user.last_payout and (now - user.last_payout).days >= 30:
         add_points(user.id, 1000, 'monthly', '30일 주기 물맑은머니 지급')
@@ -497,7 +497,7 @@ def verify_email_send():
     import secrets
     token = secrets.token_urlsafe(32)
     user.email_verification_token = token
-    user.email_verification_sent_at = datetime.now(timezone.utc)
+    user.email_verification_sent_at = datetime.now()
     db.session.commit()
     verify_url = url_for('auth.verify_email_confirm', token=token, _external=True)
     from services.email_service import EmailService
@@ -561,7 +561,7 @@ def api_login():
     if not verified:
         return jsonify({'status': 'error', 'msg': '로그인 정보가 올바르지 않습니다.'}), 401
     session.update({'user_id': u.id, 'username': u.username, 'role': u.role, 'email': u.email or '', 'real_name': u.real_name or '', 'managed_pages': u.managed_pages or ''})
-    u.last_login = datetime.now(timezone.utc)
+    u.last_login = datetime.now()
     db.session.commit()
     # 로그인 알림 이메일 발송
     try:
@@ -652,7 +652,7 @@ def login_link_confirm(token):
         'email': u.email or '', 'real_name': u.real_name or '',
         'managed_pages': u.managed_pages or '',
     })
-    u.last_login = datetime.now(timezone.utc)
+    u.last_login = datetime.now()
     db.session.delete(record)
     db.session.commit()
     return f"<script>location.href='{target}';</script>"
@@ -699,7 +699,7 @@ def api_register():
     # v2: 클라이언트 해시(password_hash) 저장. 레거시 폴백: 평문 저장(기존 동작)
     hashed_pw = generate_password_hash(password_hash) if password_hash else generate_password_hash(password)
     is_v2 = bool(password_hash)
-    now = datetime.now(timezone.utc)
+    now = datetime.now()
     new_user = User(username=username, password=hashed_pw, real_name=real_name, email=verified_email, email_verified=True, town=town, village=village, reg_town=town, reg_village=village, curr_town=town, curr_village=village, curr_address=home_address[:200] if home_address else None, office_address=office_address[:200] if office_address else None, is_neighbor=neighbor, location_updated_at=now, points=1000, password_v2=is_v2)
     profile_img = request.files.get('profile_img')
     if profile_img and profile_img.filename:
@@ -728,7 +728,7 @@ def api_logout():
     if uid:
         user = User.query.get(uid)
         if user:
-            user.last_logout = datetime.now(timezone.utc)
+            user.last_logout = datetime.now()
             db.session.commit()
     session.clear()
     return jsonify({'status': 'success'})

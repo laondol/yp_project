@@ -68,7 +68,7 @@ def issue_vc():
         'id': vc_id,
         'type': ['VerifiableCredential', 'ResidentCredential'],
         'issuer': issuer_did,
-        'issuanceDate': datetime.utcnow().isoformat() + 'Z',
+        'issuanceDate': datetime.now().isoformat(),
         'credentialSubject': {
             'id': user_did,
             'resident': subject.is_verified_resident,
@@ -241,7 +241,7 @@ def approve_qr_session():
                 'id': vc_id,
                 'type': ['VerifiableCredential', 'ResidentCredential'],
                 'issuer': issuer_did,
-                'issuanceDate': datetime.utcnow().isoformat() + 'Z',
+                'issuanceDate': datetime.now().isoformat(),
                 'credentialSubject': {
                     'id': doc.did,
                     'resident': subject.is_verified_resident,
@@ -307,7 +307,7 @@ def auto_issue_vc():
         'id': vc_id,
         'type': ['VerifiableCredential', 'ResidentCredential'],
         'issuer': issuer_did,
-        'issuanceDate': datetime.utcnow().isoformat() + 'Z',
+        'issuanceDate': datetime.now().isoformat(),
         'credentialSubject': {
             'id': doc.did,
             'resident': True,

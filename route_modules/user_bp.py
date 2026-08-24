@@ -25,7 +25,7 @@ def api_user_dashboard():
     if not uid:
         return jsonify({'error': 'login'}), 401
     from sqlalchemy import func as _func
-    today = datetime.now(timezone.utc).date()
+    today = datetime.now().date()
 
     # 1. 오늘 일정
     schedules = TongBotSchedule.query.filter(
@@ -289,7 +289,7 @@ def user_location_refresh():
     if town:
         user.curr_town = town
         user.curr_village = village or ''
-    user.location_updated_at = datetime.now(timezone.utc)
+    user.location_updated_at = datetime.now()
     db.session.commit()
     return jsonify({
         "status": "success",
@@ -352,7 +352,7 @@ def user_location_correct():
         user.curr_longitude = geo['lng']
     user.curr_address = manual_loc[:200]
     user.address = manual_loc[:200]
-    user.location_updated_at = datetime.now(timezone.utc)
+    user.location_updated_at = datetime.now()
     already_got = PointHistory.query.filter_by(user_id=user.id, change_type='location_correct').first()
     if not already_got:
         user.points = (user.points or 0) + 1
@@ -368,7 +368,7 @@ def user_location_correct():
         return redirect('/construction?tab=home')
     return redirect('/user/' + str(user.id))
 def _cleanup_expired_posts():
-    now = datetime.now(timezone.utc)
+    now = datetime.now()
     expired = Post.query.filter(Post.total_score <= -50, Post.deadline != None, Post.deadline < now).all()
     for p in expired:
         db.session.delete(p)

@@ -142,7 +142,7 @@ def psycho_admin_answer(post_id):
         return "<script>alert('권한 없음'); history.back();</script>"
     post = PsychoPost.query.get_or_404(post_id)
     post.answer = request.form['answer']
-    post.answered_at = datetime.now(timezone.utc)
+    post.answered_at = datetime.now()
     post.is_public = True
     post.fee = int(request.form.get('fee')) if request.form.get('fee') else None
     post.travel_allowance = int(request.form.get('travel_allowance')) if request.form.get('travel_allowance') else None
@@ -164,7 +164,7 @@ def psycho_appointment_approve(appt_id):
         return "<script>alert('권한 없음'); history.back();</script>"
     appt = PsychoAppointment.query.get_or_404(appt_id)
     appt.status = 'approved'
-    appt.approved_at = datetime.now(timezone.utc)
+    appt.approved_at = datetime.now()
     appt.approved_by = session.get('user_id')
     appt.fee = int(request.form.get('fee')) if request.form.get('fee') else None
     appt.travel_allowance = int(request.form.get('travel_allowance')) if request.form.get('travel_allowance') else None
@@ -229,7 +229,7 @@ def psycho_admin_google_calendar():
     if calendar_id:
         gc.calendar_id = calendar_id
     gc.is_connected = bool(gc.service_account_json and gc.calendar_id)
-    gc.updated_at = datetime.now(timezone.utc)
+    gc.updated_at = datetime.now()
     db.session.commit()
     msg = '연동 저장 완료' if gc.is_connected else 'JSON 파일과 캘린더 ID를 모두 입력해야 합니다.'
     return f"<script>alert('{msg}'); location.href='/psycho/admin/appointments';</script>"
@@ -323,7 +323,7 @@ def api_psycho_comment(post_id):
     comments = post.comments or ''
     name = session.get('real_name') or session.get('username', '익명')
     from datetime import datetime, timezone
-    comments += f'\n[{name}] {content} ({datetime.now(timezone.utc).strftime("%m/%d %H:%M")})'
+    comments += f'\n[{name}] {content} ({datetime.now().strftime("%m/%d %H:%M")})'
     post.comments = comments
     db.session.commit()
     return jsonify({'status': 'success'})

@@ -35,14 +35,14 @@ def api_daily_info():
 
     memos = []
     if user_id:
-        today = datetime.utcnow().date()
+        today = datetime.now().date()
         items = TongBotMemo.query.filter_by(user_id=user_id, done=False).order_by(TongBotMemo.created_at.desc()).limit(5).all()
         for m in items:
             memos.append({"id": m.id, "content": (m.content or "")[:100], "created_at": m.created_at.isoformat() if m.created_at else ""})
 
     schedules = []
     if user_id:
-        now = datetime.utcnow()
+        now = datetime.now()
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         today_end = today_start.replace(hour=23, minute=59, second=59)
         items = TongBotSchedule.query.filter(
@@ -179,7 +179,7 @@ def admin_news_toggle(news_id):
         return jsonify({"status": "error", "msg": "권한 없음"}), 403
     article = NewsArticle.query.get_or_404(news_id)
     article.is_selected = not article.is_selected
-    article.updated_at = datetime.now(timezone.utc)
+    article.updated_at = datetime.now()
     db.session.commit()
     return jsonify({"status": "success", "is_selected": article.is_selected})
 
@@ -203,7 +203,7 @@ def admin_news_approve(news_id, tab, approver):
             article.kr_yp_ai_approved = not article.kr_yp_ai_approved
         elif approver == 'admin':
             article.kr_yp_admin_approved = not article.kr_yp_admin_approved
-    article.updated_at = datetime.now(timezone.utc)
+    article.updated_at = datetime.now()
     db.session.commit()
     return jsonify({"status": "success"})
 
@@ -320,7 +320,7 @@ def admin_news_edit(news_id):
         article.category = request.form.get('category', '세계뉴스')
         article.ai_reason = request.form.get('ai_reason', '')
         article.is_selected = 'is_selected' in request.form
-        article.updated_at = datetime.now(timezone.utc)
+        article.updated_at = datetime.now()
         if 'image' in request.files:
             file = request.files['image']
             from services.security import validate_upload, secure_save
@@ -372,7 +372,7 @@ def admin_news_clean_cjk():
                 a.summary = cleaned_summary
             if cleaned_content and cleaned_content != a.content:
                 a.content = cleaned_content
-            a.updated_at = datetime.now(timezone.utc)
+            a.updated_at = datetime.now()
             count += 1
         except:
             pass
@@ -680,7 +680,7 @@ def admin_news_recommendation_approve(rec_id):
     rec = NewsRecommendation.query.get_or_404(rec_id)
     rec.is_approved = True
     rec.approved_by = session.get('user_id')
-    rec.approved_at = datetime.now(timezone.utc)
+    rec.approved_at = datetime.now()
     db.session.commit()
     return redirect(url_for('.admin_news_recommendations'))
 
@@ -865,7 +865,7 @@ def admin_labor_news_toggle(news_id):
         return jsonify({"status": "error", "msg": "권한 없음"}), 403
     article = LaborNewsArticle.query.get_or_404(news_id)
     article.is_selected = not article.is_selected
-    article.updated_at = datetime.now(timezone.utc)
+    article.updated_at = datetime.now()
     db.session.commit()
     return jsonify({"status": "success", "is_selected": article.is_selected})
 
@@ -892,7 +892,7 @@ def admin_labor_news_edit(news_id):
         article.category = request.form.get('category', '정책정보')
         article.ai_reason = request.form.get('ai_reason', '')
         article.is_selected = 'is_selected' in request.form
-        article.updated_at = datetime.now(timezone.utc)
+        article.updated_at = datetime.now()
         db.session.commit()
         return redirect(url_for('.admin_news'))
     return _serve_spa()

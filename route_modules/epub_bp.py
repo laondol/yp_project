@@ -172,7 +172,7 @@ def api_epub_book_update(book_id):
     if 'status' in data: book.status = data['status']
     if 'town' in data: book.town = data['town']
     if 'village' in data: book.village = data['village']
-    book.updated_at = datetime.now(timezone.utc)
+    book.updated_at = datetime.now()
     db.session.commit()
     return jsonify({"status": "success", "msg": "수정되었습니다."})
 
