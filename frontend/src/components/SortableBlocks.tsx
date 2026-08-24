@@ -28,7 +28,6 @@ function CollapseItem({ children }: { children: ReactNode }) {
     <>
       <div
         style={{
-          minHeight: 320,
           maxHeight: expanded ? 'none' : 320,
           overflow: expanded ? 'visible' : 'hidden',
           transition: 'max-height 0.2s ease',
@@ -99,10 +98,8 @@ export default function SortableBlocks({
   return (
     <div
       style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
-        gap: '16px',
-        alignItems: 'start',
+        columnWidth: '360px',
+        columnGap: '10px',
       }}
     >
       {order.map(key => {
@@ -110,7 +107,7 @@ export default function SortableBlocks({
         return (
           <div
             key={key}
-            style={{ position: 'relative' }}
+            style={{ position: 'relative', breakInside: 'avoid', marginBottom: '10px' }}
             onDragOver={dragEnabled ? handleDragOver : undefined}
             onDrop={dragEnabled ? (e) => handleDrop(e, key) : undefined}
           >

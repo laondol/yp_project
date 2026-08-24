@@ -1,4 +1,6 @@
 import { useRef, useState, useCallback, useEffect, forwardRef, useImperativeHandle } from 'react'
+import Cropper from 'cropperjs'
+import 'cropperjs/dist/cropper.css'
 
 export interface LocationValue {
   lat: string
@@ -62,6 +64,22 @@ const ContentEditor = forwardRef<ContentEditorHandle, ContentEditorProps>(functi
   const [showDraw, setShowDraw] = useState(false)
   const [drawMode, setDrawMode] = useState<'free' | 'line' | 'circle'>('free')
   const [drawColor, setDrawColor] = useState('#333333')
+
+  // 이미지 크롭 모달
+  const [cropSrc, setCropSrc] = useState<string | null>(null)
+  const cropImgRef = useRef<HTMLImageElement>(null)
+  const cropperRef = useRef<any>(null)
+  const cropFileRef = useRef<File | null>(null)
+  const cropMatchRef = useRef<Range | null>(null)
+  const [cropMode, setCropMode] = useState<'upload' | 'replace'>('upload')
+  const cropTargetImgRef = useRef<HTMLImageElement | null>(null)
+
+  // 이미지 투명화 모달 (색상 기반 마법봉)
+  const [transSrc, setTransSrc] = useState<string | null>(null)
+  const transCanvasRef = useRef<HTMLCanvasElement | null>(null)
+  const [transTol, setTransTol] = useState(30)
+  const transWorkRef = useRef<{ ctx: CanvasRenderingContext2D; img: ImageData; w: number; h: number } | null>(null)
+
   const [drawWidth, setDrawWidth] = useState(3)
   const drawStartRef = useRef<{ x: number; y: number } | null>(null)
   const drawSnapRef = useRef<ImageData | null>(null)
@@ -183,19 +201,17 @@ const ContentEditor = forwardRef<ContentEditorHandle, ContentEditorProps>(functi
     if (how === 'left') {
       style.float = 'left'
       style.display = ''
-      style.marginRight = '12px'
-      style.marginLeft = '0px'
+      style.margin = '2px 2px 2px 0'
       style.width = ''
     } else if (how === 'right') {
       style.float = 'right'
       style.display = ''
-      style.marginLeft = '12px'
-      style.marginRight = '0px'
+      style.margin = '2px 0 2px 2px'
       style.width = ''
     } else {
       style.float = 'none'
       style.display = 'block'
-      style.margin = '10px auto'
+      style.margin = '2px auto'
       style.width = ''
     }
     setActiveImg(null)
@@ -534,19 +550,190 @@ const ContentEditor = forwardRef<ContentEditorHandle, ContentEditorProps>(functi
         r.insertNode(img)
         editorRef.current?.dispatchEvent(new Event('input', { bubbles: true }))
       } else {
-        insertAtCursor(`<img draggable="false" src="${data.url}" style="max-width:100%;border-radius:10px;margin:6px 0" alt="첨부 이미지" />`)
+        insertAtCursor(`<img draggable="false" src="${data.url}" style="float:left;margin:2px;border-radius:8px;max-width:60%;height:auto" alt="첨부 이미지" />`)
       }
     } catch {
       alert('이미지 업로드에 실패했습니다.')
     }
   }, [uploadUrl, insertAtCursor])
 
+  // cropperjs is bundled (imported at top) — no CDN dependency
+
+  const requestCrop = (file: File, matchRange?: Range | null) => {
+    if (!isImageFile(file)) {
+      uploadImage(file, matchRange ?? null)
+      return
+    }
+    setCropMode('upload')
+    cropFileRef.current = file
+    cropMatchRef.current = matchRange ?? null
+    setCropSrc(URL.createObjectURL(file))
+  }
+
+  useEffect(() => {
+    if (!cropSrc) return
+    const img = cropImgRef.current
+    if (!img) return
+    img.onload = () => {
+      if (cropperRef.current) cropperRef.current.destroy()
+      cropperRef.current = new Cropper(img, { viewMode: 1, autoCropArea: 1 })
+    }
+    img.src = cropSrc
+  }, [cropSrc])
+
+  const closeCrop = () => {
+    if (cropperRef.current) { cropperRef.current.destroy(); cropperRef.current = null }
+    if (cropSrc && cropSrc.startsWith('blob:')) URL.revokeObjectURL(cropSrc)
+    setCropSrc(null)
+    cropFileRef.current = null
+    cropMatchRef.current = null
+    setCropMode('upload')
+    cropTargetImgRef.current = null
+  }
+
+  const uploadCroppedBlob = (blob: Blob): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const fd = new FormData()
+      fd.append('file', blob, 'cropped.png')
+      fetch(uploadUrl, { method: 'POST', body: fd, credentials: 'include' })
+        .then(r => r.json())
+        .then(d => { if (d.status === 'success' && d.url) resolve(d.url); else reject(new Error(d.msg || 'fail')) })
+        .catch(reject)
+    })
+
+  const startCropActive = () => {
+    if (!activeImg) return
+    cropTargetImgRef.current = activeImg
+    setCropMode('replace')
+    setCropSrc(activeImg.src)
+  }
+
+  const applyCrop = () => {
+    if (!cropperRef.current) return
+    const canvas = cropperRef.current.getCroppedCanvas({ maxWidth: 1600, maxHeight: 1600, imageSmoothingQuality: 'high' })
+    canvas.toBlob((b: Blob | null) => {
+      if (!b) return
+      if (cropMode === 'replace' && cropTargetImgRef.current) {
+        uploadCroppedBlob(b)
+          .then(url => {
+            const el = cropTargetImgRef.current
+            if (el) {
+              el.src = url
+              editorRef.current?.dispatchEvent(new Event('input', { bubbles: true }))
+            }
+            closeCrop()
+          })
+          .catch(() => alert('이미지 자르기 업로드에 실패했습니다.'))
+        return
+      }
+      const base = (cropFileRef.current?.name || 'image').replace(/\.[^.]+$/, '')
+      const f = new File([b], base + '.png', { type: 'image/png' })
+      uploadImage(f, cropMatchRef.current)
+      closeCrop()
+    }, 'image/png')
+  }
+
+  const startTransparent = () => {
+    if (!activeImg) return
+    cropTargetImgRef.current = activeImg
+    setTransSrc(activeImg.src)
+  }
+
+  useEffect(() => {
+    if (!transSrc) return
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+    img.onload = () => {
+      const max = 1600
+      let w = img.naturalWidth
+      let h = img.naturalHeight
+      const scale = Math.min(1, max / Math.max(w, h))
+      w = Math.max(1, Math.round(w * scale))
+      h = Math.max(1, Math.round(h * scale))
+      const canvas = transCanvasRef.current
+      if (!canvas) return
+      canvas.width = w
+      canvas.height = h
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return
+      ctx.clearRect(0, 0, w, h)
+      ctx.drawImage(img, 0, 0, w, h)
+      const imgData = ctx.getImageData(0, 0, w, h)
+      transWorkRef.current = { ctx, img: imgData, w, h }
+    }
+    img.src = transSrc
+  }, [transSrc])
+
+  const transClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const work = transWorkRef.current
+    const canvas = transCanvasRef.current
+    if (!work || !canvas) return
+    const rect = canvas.getBoundingClientRect()
+    const x = Math.floor((e.clientX - rect.left) * (canvas.width / rect.width))
+    const y = Math.floor((e.clientY - rect.top) * (canvas.height / rect.height))
+    if (x < 0 || y < 0 || x >= work.w || y >= work.h) return
+    const d = work.img.data
+    const si = (y * work.w + x) * 4
+    if (d[si + 3] === 0) return
+    const sr = d[si]
+    const sg = d[si + 1]
+    const sb = d[si + 2]
+    const sa = d[si + 3]
+    const tol = transTol
+    const match = (i: number) =>
+      Math.abs(d[i] - sr) <= tol &&
+      Math.abs(d[i + 1] - sg) <= tol &&
+      Math.abs(d[i + 2] - sb) <= tol &&
+      Math.abs(d[i + 3] - sa) <= tol
+    const stack: number[] = [x, y]
+    while (stack.length) {
+      const py = stack.pop() as number
+      const px = stack.pop() as number
+      if (px < 0 || py < 0 || px >= work.w || py >= work.h) continue
+      const i = (py * work.w + px) * 4
+      if (!match(i)) continue
+      d[i + 3] = 0
+      stack.push(px + 1, py, px - 1, py, px, py + 1, px, py - 1)
+    }
+    work.ctx.putImageData(work.img, 0, 0)
+  }
+
+  const closeTrans = () => {
+    if (transSrc && transSrc.startsWith('blob:')) URL.revokeObjectURL(transSrc)
+    setTransSrc(null)
+    transWorkRef.current = null
+    cropTargetImgRef.current = null
+  }
+
+  const applyTrans = () => {
+    const canvas = transCanvasRef.current
+    if (!canvas) return
+    canvas.toBlob((b: Blob | null) => {
+      if (!b) return
+      if (cropTargetImgRef.current) {
+        uploadCroppedBlob(b)
+          .then(url => {
+            const el = cropTargetImgRef.current
+            if (el) {
+              el.src = url
+              editorRef.current?.dispatchEvent(new Event('input', { bubbles: true }))
+            }
+            closeTrans()
+          })
+          .catch(() => alert('이미지 투명화 업로드에 실패했습니다.'))
+        return
+      }
+      closeTrans()
+    }, 'image/png')
+  }
+
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
     if (!files?.length) { matchSelRef.current = null; return }
     const mr = matchSelRef.current?.range ?? null
     for (const f of Array.from(files)) {
-      await uploadImage(f, mr)
+      if (files.length === 1) requestCrop(f, mr)
+      else await uploadImage(f, mr)
     }
     matchSelRef.current = null
     e.target.value = ''
@@ -620,7 +807,7 @@ const ContentEditor = forwardRef<ContentEditorHandle, ContentEditorProps>(functi
       if (it.type.startsWith('image/')) {
         e.preventDefault()
         const file = it.getAsFile()
-        if (file) uploadImage(file)
+        if (file) requestCrop(file)
         return
       }
     }
@@ -898,6 +1085,8 @@ const ContentEditor = forwardRef<ContentEditorHandle, ContentEditorProps>(functi
             <button type="button" className="btn btn-outline-secondary" onClick={() => scaleActiveImg('up')} title="확대">➕</button>
             <button type="button" className="btn btn-outline-secondary" onClick={() => rotateActive('ccw')} title="왼쪽으로 90° 회전">⟲</button>
             <button type="button" className="btn btn-outline-secondary" onClick={() => rotateActive('cw')} title="오른쪽으로 90° 회전">⟳</button>
+            <button type="button" className="btn btn-outline-primary" onClick={startCropActive} title="이미지 자르기">✂ 자르기</button>
+            <button type="button" className="btn btn-outline-primary" onClick={startTransparent} title="배경/색상 투명화">🪄 투명화</button>
             <button type="button" className="btn btn-outline-warning" onClick={() => { const img = activeImg; if (img) img.remove(); setActiveImg(null); }} title="이미지 삭제">🗑</button>
           </div>
         )}
@@ -1019,6 +1208,62 @@ const ContentEditor = forwardRef<ContentEditorHandle, ContentEditorProps>(functi
             />
           </div>
           <small className="text-muted d-block mt-1">주소 검색·수정 가능하며, GPS로 현재 위치를 자동 입력할 수 있습니다.</small>
+        </div>
+      )}
+
+      {cropSrc && (
+        <div
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 7000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+          onClick={closeCrop}
+        >
+          <div
+            style={{ background: '#fff', borderRadius: 12, padding: 16, maxWidth: 520, width: '100%' }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="fw-bold mb-2">이미지 자르기</div>
+            <div style={{ maxHeight: '60vh', overflow: 'hidden' }}>
+              <img ref={cropImgRef} alt="crop" style={{ maxWidth: '100%', display: 'block' }} />
+            </div>
+            <div className="d-flex justify-content-end gap-2 mt-3">
+              <button type="button" className="btn btn-sm btn-secondary" onClick={closeCrop}>취소</button>
+              <button type="button" className="btn btn-sm btn-success" onClick={applyCrop}>적용</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {transSrc && (
+        <div
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 7000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+          onClick={closeTrans}
+        >
+          <div
+            style={{ background: '#fff', borderRadius: 12, padding: 16, maxWidth: 520, width: '100%' }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="fw-bold mb-2">이미지 투명화 (클릭한 색 제거)</div>
+            <div
+              style={{
+                maxHeight: '60vh', overflow: 'auto',
+                backgroundImage: 'linear-gradient(45deg,#ccc 25%,transparent 25%),linear-gradient(-45deg,#ccc 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#ccc 75%),linear-gradient(-45deg,transparent 75%,#ccc 75%)',
+                backgroundSize: '16px 16px',
+                backgroundPosition: '0 0,0 8px,8px -8px,-8px 0',
+                backgroundColor: '#fff',
+              }}
+            >
+              <canvas ref={transCanvasRef} onClick={transClick} style={{ maxWidth: '100%', display: 'block', cursor: 'crosshair' }} />
+            </div>
+            <div className="d-flex align-items-center gap-2 my-2">
+              <label className="small mb-0">유사도</label>
+              <input type="range" min={0} max={255} value={transTol} onChange={e => setTransTol(Number(e.target.value))} style={{ flex: 1 }} />
+              <span className="small">{transTol}</span>
+            </div>
+            <small className="text-muted d-block mb-2">이미지에서 제거할 색을 클릭하세요. 여러 번 클릭해 영역을 추가로 지울 수 있습니다.</small>
+            <div className="d-flex justify-content-end gap-2 mt-2">
+              <button type="button" className="btn btn-sm btn-secondary" onClick={closeTrans}>취소</button>
+              <button type="button" className="btn btn-sm btn-success" onClick={applyTrans}>적용</button>
+            </div>
+          </div>
         </div>
       )}
     </div>

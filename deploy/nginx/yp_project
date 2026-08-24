@@ -31,7 +31,7 @@ server {
     include /etc/letsencrypt/options-ssl-nginx.conf;
     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
 
-    client_max_body_size 50M;
+    client_max_body_size 0;
 
     location = /google20a81024374c5206.html {
         alias /home/ubuntu/yp_project/static/google20a81024374c5206.html;
@@ -69,7 +69,7 @@ server {
     include /etc/letsencrypt/options-ssl-nginx.conf;
     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
 
-    client_max_body_size 50M;
+    client_max_body_size 0;
 
     location /static/ {
         alias /home/ubuntu/yp_project/static/;
