@@ -6,7 +6,7 @@ from flask import Blueprint, render_template, request, redirect, url_for, jsonif
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import or_
 from werkzeug.utils import secure_filename
-from models import db, User, ShareReport, ShareComment, Message, Post, Comment, NewsArticle, VillagePage, RampApplication, RampVolunteer, SiteSetting, PointHistory, Friend, VillageWish, LegalPost, ChatMessage, FriendGroup, LegalAppointment, TongBot, TongBotDraft, ConstructionNotice, GpsCalibration, StoreSuggestion, StoreMenu
+from models import db, User, ShareReport, ShareComment, Message, Post, Comment, NewsArticle, VillagePage, RampApplication, PointHistory, Friend, VillageWish, LegalPost, ChatMessage, FriendGroup, LegalAppointment, TongBot, TongBotDraft, ConstructionNotice, GpsCalibration, StoreSuggestion, StoreMenu
 from services.security import save_village_file
 from services.ai_service import background_process_share, moderate_image
 from services.geocode import haversine, gps_to_town_village, gps_to_address, get_nearby_reports, is_in_yangpyeong, YANGPYEONG_BOUNDS, YANGPYEONG_VILLAGES
@@ -210,7 +210,7 @@ def share_report():
     drawing = request.form.get('drawing_data')
     if drawing and len(drawing) > 2000:
         data = base64.b64decode(drawing.split(",")[1])
-        fname = f"draw_{datetime.now().strftime('%Y%m%d%H%M%S')}.png"
+        fname = f"draw_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}.png"
         target_dir = os.path.join(current_app.root_path, 'static', 'uploads', 'share_reports')
         if not os.path.exists(target_dir): os.makedirs(target_dir)
         with open(os.path.join(target_dir, fname), "wb") as f: f.write(data)
@@ -223,7 +223,7 @@ def share_report():
             ext = file.filename.rsplit('.', 1)[1].lower()
             if ext in ('mp4', 'avi', 'mov', 'mkv', 'webm'):
                 img_dir = os.path.join(current_app.root_path, 'static', 'uploads', 'share_reports')
-                fname = f"video_{datetime.now().strftime('%Y%m%d%H%M%S')}_{secure_filename(file.filename)}"
+                fname = f"video_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}_{secure_filename(file.filename)}"
                 file.save(os.path.join(img_dir, fname))
                 video_path = f"/static/uploads/share_reports/{fname}"
 
@@ -341,7 +341,7 @@ def share_report_auto_save():
     if drawing and len(drawing) > 2000:
         try:
             data = base64.b64decode(drawing.split(",")[1])
-            fname = f"draw_{datetime.now().strftime('%Y%m%d%H%M%S')}_{report.id}.png"
+            fname = f"draw_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}_{report.id}.png"
             with open(os.path.join(img_dir, fname), "wb") as f:
                 f.write(data)
             drawing_path = f"/static/uploads/share_reports/{fname}"
@@ -354,7 +354,7 @@ def share_report_auto_save():
         if file and file.filename and '.' in file.filename:
             ext = file.filename.rsplit('.', 1)[1].lower()
             if ext in ('mp4', 'avi', 'mov', 'mkv', 'webm'):
-                fname = f"video_{datetime.now().strftime('%Y%m%d%H%M%S')}_{report.id}_{secure_filename(file.filename)}"
+                fname = f"video_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}_{report.id}_{secure_filename(file.filename)}"
                 file.save(os.path.join(img_dir, fname))
                 video_path = f"/static/uploads/share_reports/{fname}"
 
@@ -495,7 +495,7 @@ def share_report_confirm_auto(report_id):
         if not os.path.exists(img_dir): os.makedirs(img_dir)
         try:
             data = base64.b64decode(drawing.split(",")[1])
-            fname = f"draw_{datetime.now().strftime('%Y%m%d%H%M%S')}_{report.id}.png"
+            fname = f"draw_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}_{report.id}.png"
             with open(os.path.join(img_dir, fname), "wb") as f:
                 f.write(data)
             report.drawing_path = f"/static/uploads/share_reports/{fname}"
@@ -536,34 +536,6 @@ def admin_ramp_applications():
     if session.get('role') not in ['admin', 'leader']:
         return "권한 없음", 403
     return _serve_react_share()
-
-@share_bp.route('/admin/ramp-applications/api')
-def admin_ramp_applications_api():
-    role = session.get('role')
-    managed = session.get('managed_pages', '') or ''
-    if role not in ('admin', 'leader') and 'ramp' not in managed:
-        return jsonify({'error': '권한 없음'}), 403
-    open_row = SiteSetting.query.get('ramp_apply_open')
-    is_open = (open_row is None) or (open_row.value != 'false')
-    apps = RampApplication.query.order_by(RampApplication.created_at.desc()).all()
-    vols = RampVolunteer.query.order_by(RampVolunteer.created_at.desc()).all()
-    def fmt(v):
-        return v.strftime('%Y-%m-%d %H:%M') if v else ''
-    return jsonify({
-        'open': is_open,
-        'applications': [
-            {'id': a.id, 'name': a.name, 'email': a.email, 'phone': a.phone,
-             'location': a.location, 'step_height': a.step_height, 'ownership': a.ownership,
-             'status': a.status, 'created_at': fmt(a.created_at), 'signed_at': fmt(a.signed_at),
-             'photo_path': a.photo_path}
-            for a in apps
-        ],
-        'volunteers': [
-            {'id': v.id, 'name': v.name, 'email': v.email, 'phone': v.phone,
-             'created_at': fmt(v.created_at)}
-            for v in vols
-        ],
-    })
 
 @share_bp.route('/admin/message/send', methods=['GET', 'POST'])
 def admin_message_send():
@@ -653,7 +625,7 @@ def share_report_edit(report_id):
         pass
     is_admin = _share_mgr()
     is_author = report.user_id == session.get('user_id')
-    is_anonymous_share = not report.user_id or report.user_id == 0 or report.user_id == 1
+    is_anonymous_share = not report.user_id or report.user_id == 0
     if not (is_author or (is_admin and is_anonymous_share)):
         return jsonify({"status": "error", "msg": "권한 없음"}), 403
     if request.method == 'POST':
@@ -781,9 +753,6 @@ def share_report_edit(report_id):
 
         # 기존 사진 회전 편집 처리 (replace_rotate: "oldpath||angle") - 서버 Pillow 1회 적용
         from PIL import Image as _PILImage
-        import uuid as _uuid
-        img_dir = os.path.join(current_app.root_path, 'static', 'uploads', 'share_reports')
-        if not os.path.exists(img_dir): os.makedirs(img_dir)
         replace_rotations = request.form.getlist('replace_rotate')
         try:
             with open('/tmp/edit_dbg.log', 'a') as _f:
@@ -811,21 +780,7 @@ def share_report_edit(report_id):
                 if not exists:
                     continue
                 im = _PILImage.open(abs_path).convert('RGB').rotate(angle, expand=True)
-                new_name = _uuid.uuid4().hex + '.jpg'
-                new_rel = '/static/uploads/share_reports/' + new_name
-                new_abs = os.path.join(img_dir, new_name)
-                im.save(new_abs, format='JPEG', optimize=True)
-                if report.image_path == old_path:
-                    report.image_path = new_rel
-                elif report.extra_images:
-                    _parts = [p.strip() for p in report.extra_images.split(',') if p.strip()]
-                    if old_path in _parts:
-                        _parts[_parts.index(old_path)] = new_rel
-                        report.extra_images = ','.join(_parts)
-                try:
-                    if os.path.exists(abs_path): os.remove(abs_path)
-                except Exception:
-                    pass
+                im.save(abs_path, format='JPEG', optimize=True)
                 try:
                     with open('/tmp/edit_dbg.log', 'a') as _f:
                         _f.write('ROTATED %s by %s -> %s\n' % (old_path, angle, im.size))
@@ -889,14 +844,14 @@ def share_report_edit(report_id):
                         report.moderation_result = 'unanalyzable'
                         report.moderation_reason = reason
                         report.is_moderated = True
-                        report.moderation_at = datetime.now()
+                        report.moderation_at = datetime.now(timezone.utc)
                         break
                     if flagged:
                         report.status = 'pending_person' if cat == 'person' else 'flagged'
                         report.moderation_result = cat
                         report.moderation_reason = reason
                         report.is_moderated = True
-                        report.moderation_at = datetime.now()
+                        report.moderation_at = datetime.now(timezone.utc)
                         break
                 except:
                     pass
@@ -931,14 +886,6 @@ def share_report_edit(report_id):
                         place_id=(report.store_suggestion_id and str(report.store_suggestion_id) or None),
                         name=l, sub_category=(labels[i] if i < len(labels) else '기타'), ai_generated=True))
 
-        # 작성자 지정 (관리자 전용): 이메일 -> 해당 회원 계정으로 게시물 귀속
-        if is_admin:
-            _assign_email = request.form.get('author_email', '').strip()
-            if _assign_email:
-                _assign_user = User.query.filter_by(email=_assign_email).first()
-                if _assign_user:
-                    report.user_id = _assign_user.id
-                    report.author_name = _assign_user.username or _assign_user.real_name or report.author_name
         db.session.commit()
         return jsonify({"status": "success", "msg": "수정되었습니다."})
     return _serve_react_share()
@@ -948,7 +895,7 @@ def share_report_delete_image(report_id):
     report = ShareReport.query.get_or_404(report_id)
     is_admin = _share_mgr()
     is_author = report.user_id == session.get('user_id')
-    is_anonymous_share = not report.user_id or report.user_id == 0 or report.user_id == 1
+    is_anonymous_share = not report.user_id or report.user_id == 0
     if not (is_author or (is_admin and is_anonymous_share)):
         return jsonify({"status": "error", "msg": "권한 없음"}), 403
     data = request.get_json()
@@ -973,18 +920,6 @@ def share_report_delete_image(report_id):
         os.remove(abs_path)
             
     return jsonify({"status": "success", "msg": "삭제되었습니다."})
-
-@share_bp.route('/api/admin/user-by-email')
-def api_admin_user_by_email():
-    if not _share_mgr():
-        return jsonify({"found": False, "error": "권한 없음"}), 403
-    email = (request.args.get('email') or '').strip()
-    if not email:
-        return jsonify({"found": False})
-    u = User.query.filter_by(email=email).first()
-    if u:
-        return jsonify({"found": True, "id": u.id, "name": (u.username or u.real_name or ""), "email": u.email})
-    return jsonify({"found": False})
 
 @share_bp.route('/api/share/reports')
 def api_share_reports():
@@ -1092,14 +1027,14 @@ def share_report_toggle(report_id, action):
     if action == 'approve':
         _move_report_files(report, 'approved')
         report.status = 'approved'
-        report.created_at = datetime.now()  # 승인 즉시 공유 목록 맨 앞에 표시
+        report.created_at = datetime.now(timezone.utc)  # 승인 즉시 공유 목록 맨 앞에 표시
         _resolve_canonical_store_name(report)
-        report.updated_at = datetime.now()
+        report.updated_at = datetime.now(timezone.utc)
     elif action == 'reject':
         _move_report_files(report, 'rejected')
         report.status = 'rejected'
-        report.rejected_at = datetime.now()
-        report.updated_at = datetime.now()
+        report.rejected_at = datetime.now(timezone.utc)
+        report.updated_at = datetime.now(timezone.utc)
         # AI 학습: rejected 이미지는 AI가 다시 참고하도록 기록
         report.moderation_reason = (report.moderation_reason or '') + ' | 관리자 반려'
         # 작성자(회원)에게 보류 통보
@@ -1167,7 +1102,7 @@ def share_accept_person(report_id):
         return "<script>alert('현재 상태에서 동의할 수 없습니다.'); location.href='/main';</script>"
     report.moderation_result = 'person_accepted'
     report.status = 'approved'
-    report.created_at = datetime.now()  # 승인 즉시 공유 목록 맨 앞에 표시
+    report.created_at = datetime.now(timezone.utc)  # 승인 즉시 공유 목록 맨 앞에 표시
     _resolve_canonical_store_name(report)
     report.moderation_reason = (report.moderation_reason or '') + ' | 회원 책임 동의함'
     db.session.commit()
@@ -1303,6 +1238,7 @@ def api_me():
             bot = _get_bot(user.id)
             return jsonify({
                 "id": user.id, "username": user.username, "role": user.role,
+                "email": user.email or '', "real_name": user.real_name or '',
                 "town": user.town or '', "village": user.village or '',
                 "curr_town": user.curr_town or '', "curr_village": user.curr_village or '',
                 "login_village": user.login_village or '',
@@ -1474,7 +1410,7 @@ def api_user_profile(user_id):
     bot_message = ''
     if is_own and bot_name:
         try:
-            h = datetime.now().hour
+            h = (datetime.now(timezone.utc) + timedelta(hours=9)).hour
             time_ctx = '아침' if h < 12 else ('오후' if h < 18 else '저녁')
             import random
             tips = ['오늘 양평 날씨에 맞는 옷차림을 추천해 드릴까요?','잠시 스트레칭 어떠세요? 건강이 최고예요!','오늘 하루 감사한 일 세 가지만 떠올려 보세요.','좋아하는 음악 한 곡 들으면서 잠시 쉬어 가세요.','오늘 양평의 맛집 정보가 궁금하신가요?']

@@ -142,7 +142,7 @@ def psycho_admin_answer(post_id):
         return "<script>alert('권한 없음'); history.back();</script>"
     post = PsychoPost.query.get_or_404(post_id)
     post.answer = request.form['answer']
-    post.answered_at = datetime.now()
+    post.answered_at = datetime.now(timezone.utc)
     post.is_public = True
     post.fee = int(request.form.get('fee')) if request.form.get('fee') else None
     post.travel_allowance = int(request.form.get('travel_allowance')) if request.form.get('travel_allowance') else None
@@ -164,7 +164,7 @@ def psycho_appointment_approve(appt_id):
         return "<script>alert('권한 없음'); history.back();</script>"
     appt = PsychoAppointment.query.get_or_404(appt_id)
     appt.status = 'approved'
-    appt.approved_at = datetime.now()
+    appt.approved_at = datetime.now(timezone.utc)
     appt.approved_by = session.get('user_id')
     appt.fee = int(request.form.get('fee')) if request.form.get('fee') else None
     appt.travel_allowance = int(request.form.get('travel_allowance')) if request.form.get('travel_allowance') else None
@@ -229,7 +229,7 @@ def psycho_admin_google_calendar():
     if calendar_id:
         gc.calendar_id = calendar_id
     gc.is_connected = bool(gc.service_account_json and gc.calendar_id)
-    gc.updated_at = datetime.now()
+    gc.updated_at = datetime.now(timezone.utc)
     db.session.commit()
     msg = '연동 저장 완료' if gc.is_connected else 'JSON 파일과 캘린더 ID를 모두 입력해야 합니다.'
     return f"<script>alert('{msg}'); location.href='/psycho/admin/appointments';</script>"
@@ -303,12 +303,22 @@ def api_psycho_create():
     content = request.form.get('content', '').strip()
     if not title or not content:
         return jsonify({'status': 'error', 'msg': '제목과 내용을 입력하세요.'})
+    uid = session.get('user_id')
+    email = request.form.get('email', '').strip()
+    if uid:
+        _u = User.query.get(uid)
+        if _u and _u.email:
+            email = _u.email
+    else:
+        if not (session.get('email_verified_for_psycho') and session.get('verify_email')):
+            return jsonify({'status': 'error', 'msg': '이메일 인증을 먼저 완료해 주세요.'})
+        email = session.get('verify_email')
     post = PsychoPost(
         title=title, content=content,
         author_name=request.form.get('author_name', '익명'),
-        email=request.form.get('email', ''),
+        email=email,
         password=request.form.get('password', ''),
-        user_id=session.get('user_id'),
+        user_id=uid,
     )
     db.session.add(post)
     db.session.commit()
@@ -323,7 +333,7 @@ def api_psycho_comment(post_id):
     comments = post.comments or ''
     name = session.get('real_name') or session.get('username', '익명')
     from datetime import datetime, timezone
-    comments += f'\n[{name}] {content} ({datetime.now().strftime("%m/%d %H:%M")})'
+    comments += f'\n[{name}] {content} ({datetime.now(timezone.utc).strftime("%m/%d %H:%M")})'
     post.comments = comments
     db.session.commit()
     return jsonify({'status': 'success'})
@@ -349,29 +359,58 @@ def api_psycho_schedules():
 
 # --- 기존 라우트 ---
 
+def _schedule_time_conflict(user_id, appt_date, time_slot):
+    if not user_id:
+        return False
+    parts = (time_slot or '').split('-')
+    if len(parts) != 2:
+        return False
+    try:
+        sh, sm = (int(x) for x in parts[0].split(':'))
+        eh, em = (int(x) for x in parts[1].split(':'))
+    except ValueError:
+        return False
+    from datetime import datetime
+    slot_start = datetime(appt_date.year, appt_date.month, appt_date.day, sh, sm)
+    slot_end = datetime(appt_date.year, appt_date.month, appt_date.day, eh, em)
+    items = TongBotSchedule.query.filter(
+        TongBotSchedule.user_id == user_id,
+        db.func.date(TongBotSchedule.event_date) == appt_date
+    ).all()
+    for it in items:
+        if it.is_allday:
+            return True
+        ev_start = it.event_date.replace(tzinfo=None) if it.event_date else None
+        ev_end = (it.end_date or it.event_date).replace(tzinfo=None)
+        if ev_start and slot_start < ev_end and slot_end > ev_start:
+            return True
+    return False
+
+
 @psycho_bp.route('/psycho/appointment/book', methods=['POST'])
 def psycho_appointment_book():
-    name = request.form['name']
-    email = request.form['email']
+    name = request.form.get('name', '').strip()
+    email = request.form.get('email', '').strip()
+    if not name or not email:
+        return jsonify({'status': 'error', 'msg': '이름과 이메일을 입력하세요.'})
     from models import BlockedEmail
     if BlockedEmail.query.filter_by(email=email).first():
-        return "<script>alert('이 이메일은 예약이 제한되었습니다.'); history.back();</script>"
+        return jsonify({'status': 'error', 'msg': '이 이메일은 예약이 제한되었습니다.'})
     phone = request.form.get('phone', '')
-    date_str = request.form['date']
-    time_slot = request.form['time_slot']
-    title = request.form.get('title', '심리상담')
-    from datetime import date
-    appt_date = date.fromisoformat(date_str)
+    date_str = request.form.get('date', '').strip()
+    time_slot = request.form.get('time_slot', '').strip()
+    if not date_str or not time_slot:
+        return jsonify({'status': 'error', 'msg': '날짜와 시간대를 선택하세요.'})
+    from datetime import date, timedelta
+    try:
+        appt_date = date.fromisoformat(date_str)
+    except ValueError:
+        return jsonify({'status': 'error', 'msg': '날짜 형식이 올바르지 않습니다.'})
     if appt_date <= date.today() + timedelta(days=1):
-        return "<script>alert('이틀 후부터 예약 가능합니다.'); history.back();</script>"
+        return jsonify({'status': 'error', 'msg': '이틀 후부터 예약 가능합니다.'})
     uid = session.get('user_id')
-    if uid:
-        conflict = TongBotSchedule.query.filter(
-            TongBotSchedule.user_id == uid,
-            db.func.date(TongBotSchedule.event_date) == appt_date
-        ).first()
-        if conflict:
-            return "<script>alert('해당 날짜에 통벗 일정이 있습니다. 상담 예약이 불가능합니다.'); history.back();</script>"
+    if uid and _schedule_time_conflict(uid, appt_date, time_slot):
+        return jsonify({'status': 'error', 'msg': '해당 날짜/시간에 개인 일정이 있어 상담 예약이 불가능합니다.'})
     location_parts = [request.form.get('location', ''), request.form.get('location_detail', '')]
     location = ' '.join(p for p in location_parts if p)
     content = request.form.get('content', '')
@@ -386,10 +425,10 @@ def psycho_appointment_book():
     admins = User.query.filter(User.role.in_(['admin','leader'])).all()
     for admin in admins:
         try:
-            EmailService.send(admin.email, f'[심리상담 예약] {title}',
+            EmailService.send(admin.email, f'[심리상담 예약] {request.form.get("title", "심리상담")}',
                 f'신청자: {name}\n이메일: {email}\n연락처: {phone}\n날짜: {date_str} {time_slot}\n장소: {location}\n내용: {content}')
         except:
             pass
-    return "<script>alert('예약이 신청되었습니다. 승인 후 이메일로 안내드립니다.'); location.href='/service/psycho';</script>"
+    return jsonify({'status': 'success', 'id': appt.id})
 
 

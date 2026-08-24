@@ -1,37 +1,29 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { legalApi } from '../lib/api'
-import { useAuth } from '../contexts/AuthContext'
+import { useEmailGate } from '../lib/useEmailGate'
 
 export default function LegalWrite() {
   const navigate = useNavigate()
-  const { user } = useAuth()
+  const gate = useEmailGate('legal')
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
-  const [authorName, setAuthorName] = useState('')
-  const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-
-  useEffect(() => {
-    if (user) {
-      if (!email) setEmail(user.email || '')
-      if (!authorName) setAuthorName(user.real_name || '')
-    }
-  }, [user])
   const [file, setFile] = useState<File | null>(null)
   const [sending, setSending] = useState(false)
   const editorRef = useRef<HTMLDivElement>(null)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!gate.verified) { alert('이메일 인증을 먼저 완료해 주세요.'); return }
     if (!title.trim() || !content.trim()) return
     setSending(true)
     try {
       const fd = new FormData()
       fd.append('title', title.trim())
       fd.append('content', content)
-      fd.append('author_name', authorName)
-      fd.append('email', email)
+      fd.append('author_name', gate.name)
+      fd.append('email', gate.email)
       if (password) fd.append('password', password)
       if (file) fd.append('attachment', file)
       const res = await legalApi.create(fd)
@@ -59,18 +51,32 @@ export default function LegalWrite() {
   }
 
   return (
-    <div style={{ maxWidth: 1140, margin: '0 auto' }}>
+    <div style={{ maxWidth: 700, margin: '0 auto' }}>
       <h4 className="fw-bold mb-3">법률상담 작성</h4>
       <form onSubmit={handleSubmit} className="card border-0 shadow-sm p-4" style={{ borderRadius: 16 }}>
         <div className="mb-2">
           <label className="small fw-bold">이름</label>
-          <input type="text" className="form-control form-control-sm" value={authorName}
-            onChange={e => setAuthorName(e.target.value)} required />
+          <input type="text" className="form-control form-control-sm" value={gate.name}
+            onChange={e => gate.setName(e.target.value)} required />
         </div>
         <div className="mb-2">
           <label className="small fw-bold">이메일</label>
-          <input type="email" className="form-control form-control-sm" value={email}
-            onChange={e => setEmail(e.target.value)} required />
+          {gate.mode === 'anonymous' ? (
+            <div className="border rounded p-2 bg-light">
+              <div className="d-flex gap-1">
+                <input type="email" className="form-control form-control-sm" placeholder="이메일 입력"
+                  value={gate.verifyEmail} onChange={e => gate.setVerifyEmail(e.target.value)} />
+                <button type="button" className="btn btn-sm btn-outline-primary" onClick={gate.sendVerify}
+                  disabled={gate.verifyLoading}>
+                  {gate.verifyLoading ? '발송 중...' : '이메일 인증'}
+                </button>
+              </div>
+              {gate.verifyMsg && <div className="small text-muted mt-1">{gate.verifyMsg}</div>}
+            </div>
+          ) : (
+            <input type="email" className="form-control form-control-sm" value={gate.email} readOnly
+              onChange={e => gate.setEmail(e.target.value)} required />
+          )}
         </div>
         <div className="mb-2">
           <label className="small fw-bold">제목</label>
@@ -103,7 +109,7 @@ export default function LegalWrite() {
           <input type="password" className="form-control form-control-sm" value={password}
             onChange={e => setPassword(e.target.value)} placeholder="글 확인시 필요" />
         </div>
-        <button type="submit" className="btn btn-success w-100" disabled={sending}>
+        <button type="submit" className="btn btn-success w-100" disabled={sending || !gate.verified}>
           {sending ? '등록 중...' : '등록'}
         </button>
         <button type="button" className="btn btn-sm btn-outline-secondary w-100 mt-2"

@@ -131,6 +131,21 @@ def call_ai_judge(title, content, is_comment=False):
     data['score'] = max(-50, min(50, int(data.get('score', 0))))
     return data
 
+def moderate_comment(text):
+    if not text or not text.strip():
+        return False, '내용을 입력해주세요.'
+    try:
+        blocked = ['시발', '씨발', '개새끼', '병신', '제길', 'ㅅㅂ', 'sibal', 'fuck', 'shit']
+        lower = text.lower()
+        for w in blocked:
+            if w in lower:
+                return False, '부적절한 표현이 포함되어 있습니다. 다시 작성해주세요.'
+        if len(text.strip()) > 2000:
+            return False, '내용이 너무 깁니다 (2000자 이내).'
+        return True, ''
+    except Exception:
+        return True, ''
+
 def call_ai_debate(post, admin_opinion, suggested_score):
     system = "당신은 자치 지킴이 AI입니다. 정중한 답변과 최종 점수를 합의하여 JSON을 출력하세요."
     user = f"관리자: '{admin_opinion}' / 요청점수: {suggested_score}\nJSON: {{{{'ai_reply': '답변', 'final_ai_score': 점수}}}}"

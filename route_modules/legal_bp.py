@@ -1,6 +1,5 @@
-import os
 from flask import Blueprint, render_template, request, redirect, url_for, jsonify, session, current_app, send_file
-from models import db, LegalPost, User, Message, LawyerSchedule, LegalAppointment
+from models import db, LegalPost, User, Message, LawyerSchedule, LegalAppointment, TongBotSchedule, BlockedEmail
 
 legal_bp = Blueprint('legal', __name__)
 
@@ -69,7 +68,7 @@ def legal_issue_comment(post_id):
     post = LegalPost.query.get_or_404(post_id)
     comments = post.comments or ''
     name = session.get('real_name') or session.get('username','익명')
-    comments += f'\n[{name}] {content} ({datetime.now().strftime("%m/%d %H:%M")})'
+    comments += f'\n[{name}] {content} ({datetime.now(timezone.utc).strftime("%m/%d %H:%M")})'
     post.comments = comments
     db.session.commit()
     from services.email_service import EmailService
@@ -236,30 +235,27 @@ def api_legal_create():
     content = request.form.get('content', '').strip()
     if not title or not content:
         return jsonify({'status': 'error', 'msg': '제목과 내용을 입력하세요.'})
+    uid = session.get('user_id')
     email = request.form.get('email', '').strip()
-    if not email and session.get('user_id'):
-        _u = User.query.get(session['user_id'])
+    if uid:
+        _u = User.query.get(uid)
         if _u and _u.email:
             email = _u.email
+    else:
+        if not (session.get('email_verified_for_legal') and session.get('verify_email')):
+            return jsonify({'status': 'error', 'msg': '이메일 인증을 먼저 완료해 주세요.'})
+        email = session.get('verify_email')
     post = LegalPost(
         title=title, content=content,
         author_name=request.form.get('author_name', '익명'),
         email=email,
         password=request.form.get('password', ''),
-        user_id=session.get('user_id'),
+        user_id=uid,
     )
     if request.files.get('attachment'):
-        from services.security import validate_upload, secure_save
-        file = request.files['attachment']
-        ok, msg = validate_upload(file)
-        if ok:
-            try:
-                target_dir = os.path.join(current_app.config['UPLOAD_FOLDER'], 'legal')
-                if not os.path.exists(target_dir):
-                    os.makedirs(target_dir)
-                post.file_path = secure_save(file, target_dir)
-            except Exception:
-                pass
+        from services.file_service import save_upload
+        path = save_upload(request.files['attachment'], subdir='legal')
+        post.file_path = path
     db.session.add(post)
     db.session.commit()
     return jsonify({'status': 'success', 'id': post.id})
@@ -273,7 +269,7 @@ def api_legal_comment(post_id):
     comments = post.comments or ''
     name = session.get('real_name') or session.get('username', '익명')
     from datetime import datetime, timezone
-    comments += f'\n[{name}] {content} ({datetime.now().strftime("%m/%d %H:%M")})'
+    comments += f'\n[{name}] {content} ({datetime.now(timezone.utc).strftime("%m/%d %H:%M")})'
     post.comments = comments
     db.session.commit()
     return jsonify({'status': 'success'})
@@ -296,6 +292,78 @@ def api_legal_schedules():
         for h in range(s.start_hour, s.end_hour, s.slot_hours):
             all_slots.append({"start": f"{h:02d}:00", "end": f"{h+s.slot_hours:02d}:00"})
     return jsonify({'available_dates': available_dates, 'time_slots': all_slots})
+
+
+def _schedule_time_conflict(user_id, appt_date, time_slot):
+    if not user_id:
+        return False
+    parts = (time_slot or '').split('-')
+    if len(parts) != 2:
+        return False
+    try:
+        sh, sm = (int(x) for x in parts[0].split(':'))
+        eh, em = (int(x) for x in parts[1].split(':'))
+    except ValueError:
+        return False
+    from datetime import datetime
+    slot_start = datetime(appt_date.year, appt_date.month, appt_date.day, sh, sm)
+    slot_end = datetime(appt_date.year, appt_date.month, appt_date.day, eh, em)
+    items = TongBotSchedule.query.filter(
+        TongBotSchedule.user_id == user_id,
+        db.func.date(TongBotSchedule.event_date) == appt_date
+    ).all()
+    for it in items:
+        if it.is_allday:
+            return True
+        ev_start = it.event_date.replace(tzinfo=None) if it.event_date else None
+        ev_end = (it.end_date or it.event_date).replace(tzinfo=None)
+        if ev_start and slot_start < ev_end and slot_end > ev_start:
+            return True
+    return False
+
+
+@legal_bp.route('/legal/appointment/book', methods=['POST'])
+def legal_appointment_book():
+    name = request.form.get('name', '').strip()
+    email = request.form.get('email', '').strip()
+    if not name or not email:
+        return jsonify({'status': 'error', 'msg': '이름과 이메일을 입력하세요.'})
+    if BlockedEmail.query.filter_by(email=email).first():
+        return jsonify({'status': 'error', 'msg': '이 이메일은 예약이 제한되었습니다.'})
+    phone = request.form.get('phone', '')
+    date_str = request.form.get('date', '').strip()
+    time_slot = request.form.get('time_slot', '').strip()
+    if not date_str or not time_slot:
+        return jsonify({'status': 'error', 'msg': '날짜와 시간대를 선택하세요.'})
+    from datetime import date, timedelta
+    try:
+        appt_date = date.fromisoformat(date_str)
+    except ValueError:
+        return jsonify({'status': 'error', 'msg': '날짜 형식이 올바르지 않습니다.'})
+    if appt_date <= date.today() + timedelta(days=1):
+        return jsonify({'status': 'error', 'msg': '이틀 후부터 예약 가능합니다.'})
+    counselor = User.query.filter_by(email='daerilee@gmail.com').first()
+    if counselor and _schedule_time_conflict(counselor.id, appt_date, time_slot):
+        return jsonify({'status': 'error', 'msg': '상담사의 개인 일정과 겹칩니다. 다른 시간대를 선택해 주세요.'})
+    uid = session.get('user_id')
+    location_parts = [request.form.get('location', ''), request.form.get('location_detail', '')]
+    location = ' '.join(p for p in location_parts if p)
+    content = request.form.get('content', '')
+    appt = LegalAppointment(
+        user_id=uid, name=name, email=email, phone=phone,
+        date=appt_date, time_slot=time_slot, location=location, content=content
+    )
+    db.session.add(appt)
+    db.session.commit()
+    from services.email_service import EmailService
+    admins = User.query.filter(User.role.in_(['admin', 'leader'])).all()
+    for admin in admins:
+        try:
+            EmailService.send(admin.email, f'[법률상담 예약] {request.form.get("title", "법률상담")}',
+                f'신청자: {name}\n이메일: {email}\n연락처: {phone}\n날짜: {date_str} {time_slot}\n장소: {location}\n내용: {content}')
+        except:
+            pass
+    return jsonify({'status': 'success', 'id': appt.id})
 
 @legal_bp.route('/api/legal/issues')
 def api_legal_issues():
@@ -362,7 +430,7 @@ def api_legal_issue_comment(post_id):
     from services.ai_service import moderate_comment
     moderate_comment(content)
     from datetime import datetime, timezone
-    now = datetime.now().strftime('%m/%d %H:%M')
+    now = datetime.now(timezone.utc).strftime('%m/%d %H:%M')
     name = session.get('real_name') or session.get('username', '익명')
     entry = f'[{name}] {content} ({now})'
     post.comments = (post.comments or '') + '\n' + entry

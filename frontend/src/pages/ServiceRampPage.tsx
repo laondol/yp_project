@@ -32,6 +32,13 @@ export default function ServiceRampPage() {
       .finally(() => setStatusLoading(false))
   }, [])
 
+  useEffect(() => {
+    if (user && user.id) {
+      if (!vName) setVName(user.real_name || user.username || '')
+      if (!vEmail) setVEmail(user.email || '')
+    }
+  }, [user])
+
   const toggleApply = async (section: 'ramp' | 'volunteer') => {
     if (!isLeader) return
     const open = section === 'ramp' ? !status.open : !status.volunteer_open

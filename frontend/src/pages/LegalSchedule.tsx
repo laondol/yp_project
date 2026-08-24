@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { legalApi } from '../lib/api'
+import { useAuth } from '../contexts/AuthContext'
 import type { LegalAppointment } from '../lib/types'
 import Loading from '../components/common/Loading'
 import ErrorMessage from '../components/common/ErrorMessage'
@@ -37,6 +38,14 @@ export default function LegalSchedule() {
 
   useEffect(() => { load() }, [load])
 
+  const { user } = useAuth()
+  useEffect(() => {
+    if (user && user.id) {
+      if (!name) setName(user.real_name || user.username || '')
+      if (!email) setEmail(user.email || '')
+    }
+  }, [user])
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!name || !email || !selectedDate || !selectedTime) return
@@ -66,7 +75,7 @@ export default function LegalSchedule() {
   if (error) return <ErrorMessage message={error} onRetry={load} />
 
   return (
-    <div style={{ maxWidth: 1140, margin: '0 auto' }}>
+    <div style={{ maxWidth: 700, margin: '0 auto' }}>
       <h4 className="fw-bold mb-3">방문상담 예약</h4>
 
       <div className="card border-0 shadow-sm" style={{ borderRadius: 16 }}>
