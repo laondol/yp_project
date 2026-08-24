@@ -1,14 +1,23 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { legalApi } from '../lib/api'
+import { useAuth } from '../contexts/AuthContext'
 
 export default function LegalWrite() {
   const navigate = useNavigate()
+  const { user } = useAuth()
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
   const [authorName, setAuthorName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+
+  useEffect(() => {
+    if (user) {
+      if (!email) setEmail(user.email || '')
+      if (!authorName) setAuthorName(user.real_name || '')
+    }
+  }, [user])
   const [file, setFile] = useState<File | null>(null)
   const [sending, setSending] = useState(false)
   const editorRef = useRef<HTMLDivElement>(null)

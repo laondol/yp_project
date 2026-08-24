@@ -1,6 +1,7 @@
 import os
 from flask import Blueprint, request, jsonify, render_template, session, current_app, send_file
-from models import db, Post, User, RampApplication
+from models import db, Post, User, RampApplication, RampVolunteer, SiteSetting
+from services.email_service import EmailService
 
 service_bp = Blueprint('service', __name__)
 from route_modules.user_bp import _cleanup_expired_posts
@@ -94,6 +95,9 @@ def service_ramp():
 
 @service_bp.route('/service/ramp/apply', methods=['POST'])
 def service_ramp_apply():
+    open_row = SiteSetting.query.get('ramp_apply_open')
+    if open_row is not None and open_row.value == 'false':
+        return "<script>alert('현재 경사로 설치 신청을 받지 않고 있습니다.'); history.back();</script>"
     name = request.form['name']
     email = request.form['email']
     phone = request.form['phone']
@@ -121,7 +125,7 @@ def service_ramp_apply():
         name=name, email=email, phone=phone, location=location,
         photo_path=photo_path, step_height=step_height,
         ownership=ownership, agree_removal=agree_removal,
-        agree_damage=agree_damage, signed_at=datetime.now(timezone.utc),
+        agree_damage=agree_damage, signed_at=datetime.now(),
         status='pending'
     )
     db.session.add(appt)
@@ -129,4 +133,42 @@ def service_ramp_apply():
     EmailService.send(email, "[양평마을] 경사로 설치 신청이 접수되었습니다",
         f"{name}님, 경사로 설치 신청이 접수되었습니다.\n\n접수 번호: {appt.id}번\n위치: {location}\n\n검토 후 연락드리겠습니다.\n\nhttps://unocum.kr")
     return "<script>alert('신청이 접수되었습니다. 검토 후 연락드립니다. (대기자 순번: " + str(appt.id) + "번)'); location.href='/service/ramp';</script>"
+
+
+@service_bp.route('/service/ramp/apply-status')
+def service_ramp_apply_status():
+    open_row = SiteSetting.query.get('ramp_apply_open')
+    is_open = (open_row is None) or (open_row.value != 'false')
+    waiting = RampApplication.query.filter_by(status='pending').count()
+    return jsonify({'open': is_open, 'waiting': waiting})
+
+
+@service_bp.route('/service/ramp/volunteer', methods=['POST'])
+def service_ramp_volunteer():
+    data = request.get_json(silent=True) or {}
+    name = (data.get('name') or '').strip()
+    email = (data.get('email') or '').strip()
+    phone = (data.get('phone') or '').strip()
+    if not name or not email:
+        return jsonify({'status': 'error', 'msg': '이름과 이메일을 입력해주세요.'}), 400
+    vol = RampVolunteer(name=name, email=email, phone=phone)
+    db.session.add(vol)
+    db.session.commit()
+    return jsonify({'status': 'ok'})
+
+
+@service_bp.route('/admin/ramp/apply-toggle', methods=['POST'])
+def service_ramp_apply_toggle():
+    if session.get('role') != 'leader':
+        return jsonify({'status': 'error', 'msg': '권한이 없습니다.'}), 403
+    data = request.get_json(silent=True) or {}
+    open_val = 'true' if data.get('open') else 'false'
+    row = SiteSetting.query.get('ramp_apply_open')
+    if row is None:
+        row = SiteSetting(key='ramp_apply_open', value=open_val)
+        db.session.add(row)
+    else:
+        row.value = open_val
+    db.session.commit()
+    return jsonify({'open': open_val == 'true'})
 

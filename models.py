@@ -723,6 +723,21 @@ class RampApplication(db.Model):
     status = db.Column(db.String(20), default='pending')
     created_at = db.Column(db.DateTime, default=datetime.now)
 
+
+class RampVolunteer(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(50), nullable=False)
+    email = db.Column(db.String(100), nullable=False)
+    phone = db.Column(db.String(20))
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+
+class SiteSetting(db.Model):
+    __tablename__ = 'site_setting'
+    key = db.Column(db.String(50), primary_key=True)
+    value = db.Column(db.Text)
+
+
 class AiKnowledge(db.Model):
     __tablename__ = 'ai_knowledge'
     id = db.Column(db.Integer, primary_key=True)

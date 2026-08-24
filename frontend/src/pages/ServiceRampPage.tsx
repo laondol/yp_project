@@ -1,16 +1,43 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 
 export default function ServiceRampPage() {
   const navigate = useNavigate()
   const { user } = useAuth()
+  const [open, setOpen] = useState(true)
+  const [waiting, setWaiting] = useState(0)
+  const [statusLoading, setStatusLoading] = useState(true)
+
   const [vName, setVName] = useState('')
   const [vEmail, setVEmail] = useState(user?.email || '')
   const [vPhone, setVPhone] = useState('')
   const [vError, setVError] = useState('')
   const [vLoading, setVLoading] = useState(false)
   const [vSuccess, setVSuccess] = useState(false)
+
+  const isLeader = !!user && user.role === 'leader'
+
+  useEffect(() => {
+    fetch('/service/ramp/apply-status', { credentials: 'include' })
+      .then(r => r.json())
+      .then(d => { setOpen(!!d.open); setWaiting(d.waiting || 0) })
+      .catch(() => {})
+      .finally(() => setStatusLoading(false))
+  }, [])
+
+  const toggleApply = async () => {
+    if (!isLeader) return
+    try {
+      const res = await fetch('/admin/ramp/apply-toggle', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ open: !open }),
+      })
+      const d = await res.json()
+      if (typeof d.open === 'boolean') setOpen(d.open)
+    } catch { /* noop */ }
+  }
 
   const handleVolunteer = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -41,11 +68,24 @@ export default function ServiceRampPage() {
 
       <div className="card border-0 shadow-sm mb-4" style={{ borderRadius: 16 }}>
         <div className="card-body p-4">
-          <h5 className="fw-bold mb-2">📊 현재까지 경사로 설치 현황</h5>
+          <div className="d-flex justify-content-between align-items-center mb-2">
+            <h5 className="fw-bold mb-0">📊 현재까지 경사로 설치 현황</h5>
+            {isLeader && (
+              <button
+                type="button"
+                className={'btn btn-sm ' + (open ? 'btn-outline-light text-success' : 'btn-outline-light text-danger')}
+                style={{ borderColor: open ? '#198754' : '#dc3545' }}
+                onClick={toggleApply}
+                title="클릭하여 신청 받기/안받기 전환"
+              >
+                {statusLoading ? '…' : (open ? '✅ 신청 가능' : '⛔ 신청 마감')}
+              </button>
+            )}
+          </div>
           <div className="row text-center g-2 mt-2">
             <div className="col-4">
               <div className="p-2 bg-light rounded">
-                <div className="fw-bold" style={{ color: '#198754', fontSize: 24 }}>0</div>
+                <div className="fw-bold" style={{ color: '#198754', fontSize: 24 }}>{waiting}</div>
                 <div className="small text-muted">신청 대기</div>
               </div>
             </div>
@@ -88,8 +128,47 @@ export default function ServiceRampPage() {
 
       <div className="card border-0 shadow-sm mb-4" style={{ borderRadius: 16 }}>
         <div className="card-body p-4">
-          <h5 className="fw-bold mb-2">📝 경사로 설치 신청</h5>
-          <div className="alert alert-secondary py-2 small mb-0">한달 후부터 신청 받습니다. 조금만 기다려주세요!</div>
+          <h5 className="fw-bold mb-3">📝 경사로 설치 신청</h5>
+          {!open && (
+            <div className="alert alert-secondary py-2 small mb-3">현재 경사로 설치 신청을 받지 않고 있습니다. (신청 마감)</div>
+          )}
+          <form method="POST" action="/service/ramp/apply" encType="multipart/form-data">
+            <div className="mb-2">
+              <input type="text" name="name" className="form-control" placeholder="이름" required defaultValue={user?.real_name || ''} disabled={!open} />
+            </div>
+            <div className="mb-2">
+              <input type="email" name="email" className="form-control" placeholder="이메일" required defaultValue={user?.email || ''} disabled={!open} />
+            </div>
+            <div className="mb-2">
+              <input type="tel" name="phone" className="form-control" placeholder="연락처" disabled={!open} />
+            </div>
+            <div className="mb-2">
+              <input type="text" name="location" className="form-control" placeholder="설치 희망 장소 (예: 양평군 oo면)" required disabled={!open} />
+            </div>
+            <div className="mb-2">
+              <input type="text" name="step_height" className="form-control" placeholder="계단 높이 (예: 20cm)" disabled={!open} />
+            </div>
+            <div className="mb-2">
+              <select name="ownership" className="form-select" required defaultValue="" disabled={!open}>
+                <option value="" disabled>소유 구분 선택</option>
+                <option value="본인소유">본인소유</option>
+                <option value="임대/기타">임대/기타</option>
+              </select>
+            </div>
+            <div className="mb-2">
+              <label className="form-label small mb-1">현장 사진 (선택)</label>
+              <input type="file" name="photo" className="form-control" accept="image/*" disabled={!open} />
+            </div>
+            <div className="form-check mb-2">
+              <input className="form-check-input" type="checkbox" name="agree_removal" id="agree_removal_in" disabled={!open} />
+              <label className="form-check-label small" htmlFor="agree_removal_in">설치 시 기존 구조물 철거에 동의합니다.</label>
+            </div>
+            <div className="form-check mb-2">
+              <input className="form-check-input" type="checkbox" name="agree_damage" id="agree_damage_in" disabled={!open} />
+              <label className="form-check-label small" htmlFor="agree_damage_in">시공 중 발생할 수 있는 손상에 동의합니다.</label>
+            </div>
+            <button type="submit" className="btn btn-success w-100 py-2 fw-bold" disabled={!open}>경사로 설치 신청하기</button>
+          </form>
         </div>
       </div>
 

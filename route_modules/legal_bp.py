@@ -1,3 +1,4 @@
+import os
 from flask import Blueprint, render_template, request, redirect, url_for, jsonify, session, current_app, send_file
 from models import db, LegalPost, User, Message, LawyerSchedule, LegalAppointment
 
@@ -68,7 +69,7 @@ def legal_issue_comment(post_id):
     post = LegalPost.query.get_or_404(post_id)
     comments = post.comments or ''
     name = session.get('real_name') or session.get('username','익명')
-    comments += f'\n[{name}] {content} ({datetime.now(timezone.utc).strftime("%m/%d %H:%M")})'
+    comments += f'\n[{name}] {content} ({datetime.now().strftime("%m/%d %H:%M")})'
     post.comments = comments
     db.session.commit()
     from services.email_service import EmailService
@@ -235,17 +236,30 @@ def api_legal_create():
     content = request.form.get('content', '').strip()
     if not title or not content:
         return jsonify({'status': 'error', 'msg': '제목과 내용을 입력하세요.'})
+    email = request.form.get('email', '').strip()
+    if not email and session.get('user_id'):
+        _u = User.query.get(session['user_id'])
+        if _u and _u.email:
+            email = _u.email
     post = LegalPost(
         title=title, content=content,
         author_name=request.form.get('author_name', '익명'),
-        email=request.form.get('email', ''),
+        email=email,
         password=request.form.get('password', ''),
         user_id=session.get('user_id'),
     )
     if request.files.get('attachment'):
-        from services.file_service import save_upload
-        path = save_upload(request.files['attachment'], subdir='legal')
-        post.file_path = path
+        from services.security import validate_upload, secure_save
+        file = request.files['attachment']
+        ok, msg = validate_upload(file)
+        if ok:
+            try:
+                target_dir = os.path.join(current_app.config['UPLOAD_FOLDER'], 'legal')
+                if not os.path.exists(target_dir):
+                    os.makedirs(target_dir)
+                post.file_path = secure_save(file, target_dir)
+            except Exception:
+                pass
     db.session.add(post)
     db.session.commit()
     return jsonify({'status': 'success', 'id': post.id})
@@ -259,7 +273,7 @@ def api_legal_comment(post_id):
     comments = post.comments or ''
     name = session.get('real_name') or session.get('username', '익명')
     from datetime import datetime, timezone
-    comments += f'\n[{name}] {content} ({datetime.now(timezone.utc).strftime("%m/%d %H:%M")})'
+    comments += f'\n[{name}] {content} ({datetime.now().strftime("%m/%d %H:%M")})'
     post.comments = comments
     db.session.commit()
     return jsonify({'status': 'success'})
@@ -348,7 +362,7 @@ def api_legal_issue_comment(post_id):
     from services.ai_service import moderate_comment
     moderate_comment(content)
     from datetime import datetime, timezone
-    now = datetime.now(timezone.utc).strftime('%m/%d %H:%M')
+    now = datetime.now().strftime('%m/%d %H:%M')
     name = session.get('real_name') or session.get('username', '익명')
     entry = f'[{name}] {content} ({now})'
     post.comments = (post.comments or '') + '\n' + entry
