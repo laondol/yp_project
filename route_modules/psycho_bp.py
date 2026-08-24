@@ -1,6 +1,6 @@
 from flask import Blueprint, render_template, request, redirect, url_for, jsonify, session, current_app, send_file
 from werkzeug.security import generate_password_hash, check_password_hash
-from route_modules.common import has_page_access
+from route_modules.common import has_page_access, is_privileged_viewer, mask_name, mask_title, mask_post_item, masked_email
 from models import db, PsychoPost, PsychoAppointment, PsychoDoctorSchedule, PsychoGoogleCalendarConfig, TongBotSchedule, User, Message
 
 psycho_bp = Blueprint('psycho', __name__)
@@ -277,12 +277,23 @@ def api_psycho_posts():
 @psycho_bp.route('/api/psycho/post/<int:post_id>')
 def api_psycho_post(post_id):
     post = PsychoPost.query.get_or_404(post_id)
+    if not is_privileged_viewer(post.user_id, 'psycho'):
+        return jsonify({
+            'id': post.id, 'title': mask_title(post.title, keep=0.4), 'content': '',
+            'author_name': post.author_name, 'email': masked_email(post.email),
+            'is_public': post.is_public, 'answer': '', 'fee': post.fee,
+            'travel_allowance': post.travel_allowance, 'ai_score': post.ai_score,
+            'ai_reason': '',
+            'created_at': post.created_at.isoformat() if post.created_at else None,
+            'answered_at': post.answered_at.isoformat() if post.answered_at else None,
+            'can_view_content': False,
+        })
     return jsonify({
         'id': post.id, 'title': post.title, 'content': post.content,
-        'author_name': post.author_name, 'answer': post.answer,
-        'status': post.status, 'is_public': post.is_public,
-        'fee': post.fee, 'travel_allowance': post.travel_allowance,
-        'ai_score': post.ai_score, 'ai_reason': post.ai_reason,
+        'author_name': post.author_name, 'email': post.email,
+        'is_public': post.is_public, 'answer': post.answer, 'fee': post.fee,
+        'travel_allowance': post.travel_allowance, 'ai_score': post.ai_score,
+        'ai_reason': post.ai_reason,
         'created_at': post.created_at.isoformat() if post.created_at else None,
         'answered_at': post.answered_at.isoformat() if post.answered_at else None,
     })

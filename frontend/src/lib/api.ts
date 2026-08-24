@@ -57,7 +57,7 @@ export const authApi = {
   me: () => api.get<import('./types').MeResponse>('/api/me'),
   login: (username: string, password: string) =>
     api.post<{ status: string; msg?: string }>('/login', { username, password }),
-  logout: () => api.post<{ status: string }>('/logout'),
+  logout: () => api.post<{ status: string }>('/api/auth/logout'),
 };
 
 export const userApi = {

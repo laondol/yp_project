@@ -378,7 +378,7 @@ def login():
         return jsonify({"status":"error","msg":"로그인 정보가 올바르지 않습니다."}), 401
     return _serve_spa()
 
-@auth_bp.route('/logout')
+@auth_bp.route('/logout', methods=['GET', 'POST'])
 def logout():
     uid = session.get('user_id')
     if uid:
@@ -387,6 +387,8 @@ def logout():
             user.last_logout = datetime.now(timezone.utc)
             db.session.commit()
     session.clear()
+    if request.method == 'POST' or request.is_json or request.headers.get('X-Requested-With'):
+        return jsonify({'status': 'success'})
     return redirect(url_for('page.intro'))
 
 # --- [OAuth2 소셜 로그인] Google / Kakao / Naver ---

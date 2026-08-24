@@ -5,6 +5,7 @@ from sqlalchemy import or_
 from models import db, User, Post, Message, NewsArticle, ShareReport, AiKnowledge, VillageAlert, AiKnowledge, VillageAlert
 page_bp = Blueprint('page', __name__)
 from route_modules.user_bp import _cleanup_expired_posts
+from route_modules.common import is_privileged_viewer, mask_name, mask_title, mask_post_item, is_ramp_post
 
 def _serve_spa():
     path = os.path.join(current_app.root_path, 'frontend', 'dist', 'index.html')
@@ -263,6 +264,7 @@ def api_intro():
 def api_all_proposals():
     from datetime import timedelta
     now = datetime.now()
+    def _naive(dt): return dt.replace(tzinfo=None) if dt and dt.tzinfo else dt
     posts = Post.query.order_by(Post.created_at.desc()).all()
     result = []
     uid = session.get('user_id')
@@ -274,13 +276,13 @@ def api_all_proposals():
             visible = True
         elif p.is_forced_approved:
             visible = True
-        elif p.total_score > -50 and (p.created_at and now - p.created_at >= timedelta(hours=48)):
+        elif p.total_score > -50 and (p.created_at and now - _naive(p.created_at) >= timedelta(hours=48)):
             visible = True
         elif p.total_score > 0:
             visible = True
         if not visible:
             continue
-        result.append({
+        item = {
             'id': p.id, 'title': p.title, 'content': p.content[:150] if p.content else '',
             'file_path': p.file_path, 'author_name': p.author_name, 'user_id': p.user_id,
             'like_count': p.like_count, 'dislike_count': p.dislike_count,
@@ -289,22 +291,31 @@ def api_all_proposals():
             'total_score': p.total_score,
             'is_forced_approved': p.is_forced_approved,
             'created_at': p.created_at.isoformat() if p.created_at else None,
-        })
+        }
+        if is_ramp_post(p):
+            item = mask_post_item(item, author_uid=p.user_id, page_key='ramp')
+        result.append(item)
     return jsonify(result)
 
 @page_bp.route('/api/page/index-posts')
 def api_index_posts():
     from datetime import timedelta
-    now = datetime.now()
-    posts = Post.query.filter(Post.total_score > -50, ((Post.created_at <= now - timedelta(hours=48)) | (Post.is_forced_approved == True))).order_by(Post.created_at.desc()).all()
-    return jsonify([{
-        'id': p.id, 'title': p.title, 'content': p.content[:150] if p.content else '',
-        'file_path': p.file_path, 'author_name': p.author_name, 'user_id': p.user_id,
-        'like_count': p.like_count, 'dislike_count': p.dislike_count,
-        'ai_score': p.ai_score, 'total_score': p.total_score,
-        'is_forced_approved': p.is_forced_approved,
-        'created_at': p.created_at.isoformat() if p.created_at else None,
-    } for p in posts])
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=48)
+    posts = Post.query.filter(Post.total_score > -50, ((Post.created_at <= cutoff) | (Post.is_forced_approved == True))).order_by(Post.created_at.desc()).all()
+    items = []
+    for p in posts:
+        item = {
+            'id': p.id, 'title': p.title, 'content': p.content[:150] if p.content else '',
+            'file_path': p.file_path, 'author_name': p.author_name, 'user_id': p.user_id,
+            'like_count': p.like_count, 'dislike_count': p.dislike_count,
+            'ai_score': p.ai_score, 'total_score': p.total_score,
+            'is_forced_approved': p.is_forced_approved,
+            'created_at': p.created_at.isoformat() if p.created_at else None,
+        }
+        if is_ramp_post(p):
+            item = mask_post_item(item, author_uid=p.user_id, page_key='ramp')
+        items.append(item)
+    return jsonify(items)
 
 @page_bp.route('/api/page/charter')
 def api_charter():

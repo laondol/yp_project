@@ -49,10 +49,14 @@ export default function LegalList() {
                   <tr key={p.id}>
                     <td>{p.id}</td>
                     <td>
-                      <span className="text-decoration-none" style={{ cursor: 'pointer', color: 'var(--bs-body-color)' }}
-                        onClick={() => navigate(`/legal/${p.id}`)}>
-                        {p.title}
-                      </span>
+                      {p.can_view_content !== false ? (
+                        <span className="text-decoration-none" style={{ cursor: 'pointer', color: 'var(--bs-body-color)' }}
+                          onClick={() => navigate(`/legal/${p.id}`)}>
+                          {p.title}
+                        </span>
+                      ) : (
+                        <span className="text-muted">{p.title}</span>
+                      )}
                     </td>
                     <td>{p.author_name || '익명'}</td>
                     <td>

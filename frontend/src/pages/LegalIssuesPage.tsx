@@ -37,7 +37,7 @@ export default function LegalIssuesPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
-  const isAdmin = user?.role === 'admin' || user?.role === 'leader'
+  const isLegalManager = user?.email === 'daerilee@gmail.com'
   const [showNewsModal, setShowNewsModal] = useState(false)
   const [importUrl, setImportUrl] = useState('')
   const [importing, setImporting] = useState(false)
@@ -68,7 +68,7 @@ export default function LegalIssuesPage() {
   }, [])
 
   useEffect(() => { load() }, [load])
-  useEffect(() => { if (showNewsModal && isAdmin) loadAdminNews() }, [showNewsModal, isAdmin, loadAdminNews])
+  useEffect(() => { if (showNewsModal && isLegalManager) loadAdminNews() }, [showNewsModal, isLegalManager, loadAdminNews])
 
   const handleImportUrl = async () => {
     if (!importUrl.trim()) return
@@ -143,14 +143,16 @@ export default function LegalIssuesPage() {
       <div className="d-flex justify-content-between align-items-center mb-3">
         <h4 className="fw-bold mb-0">노동이슈</h4>
         <div className="d-flex gap-2">
-          {isAdmin && (
+          {isLegalManager && (
             <button className="btn btn-sm btn-outline-info" onClick={() => { setShowNewsModal(true); loadAdminNews() }}>
               AI 추천뉴스
             </button>
           )}
-          <button className="btn btn-sm btn-success" onClick={() => navigate('/legal/issues/write')}>
-            글쓰기
-          </button>
+          {isLegalManager && (
+            <button className="btn btn-sm btn-success" onClick={() => navigate('/legal/issues/write')}>
+              글쓰기
+            </button>
+          )}
         </div>
       </div>
 

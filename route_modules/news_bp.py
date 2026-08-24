@@ -6,7 +6,7 @@ from sqlalchemy import or_
 from models import db, NewsArticle, NewsComment, NewsRecommendation, NewsVote, Post, User, Message, LaborNewsArticle
 from services.ai_service import call_ai_judge
 from services.point_service import add_points
-from route_modules.common import author_email_for as _author_email
+from route_modules.common import author_email_for as _author_email, is_legal_manager
 
 news_bp = Blueprint('news', __name__)
 
@@ -698,7 +698,7 @@ def admin_news_recommendation_reject(rec_id):
 
 @news_bp.route('/api/admin/labor-news')
 def api_admin_labor_news():
-    if session.get('role') not in ['admin', 'leader']:
+    if not is_legal_manager():
         return jsonify({"error": "권한 없음"}), 403
     page = int(request.args.get('page', 1))
     per_page = 20
@@ -714,7 +714,7 @@ def api_admin_labor_news():
 
 @news_bp.route('/api/admin/labor-news/<int:news_id>')
 def api_admin_labor_news_detail(news_id):
-    if session.get('role') not in ['admin', 'leader']:
+    if not is_legal_manager():
         return jsonify({"error": "권한 없음"}), 403
     a = LaborNewsArticle.query.get_or_404(news_id)
     return jsonify({
@@ -726,7 +726,7 @@ def api_admin_labor_news_detail(news_id):
 
 @news_bp.route('/admin/labor-news/ai-suggest', methods=['POST'])
 def admin_labor_news_ai_suggest():
-    if session.get('role') not in ['admin', 'leader']:
+    if not is_legal_manager():
         return jsonify({"status": "error", "msg": "권한 없음"}), 403
     tab = request.form.get('tab', 'kr_yp')
     try:
@@ -793,7 +793,7 @@ def admin_labor_news_ai_suggest():
 
 @news_bp.route('/admin/labor-news/import-url', methods=['POST'])
 def admin_labor_news_import_url():
-    if session.get('role') not in ['admin', 'leader']:
+    if not is_legal_manager():
         return jsonify({"status": "error", "msg": "권한 없음"}), 403
     url = request.form.get('url', '').strip()
     if not url:
@@ -861,7 +861,7 @@ def admin_labor_news_import_url():
 
 @news_bp.route('/admin/labor-news/toggle/<int:news_id>')
 def admin_labor_news_toggle(news_id):
-    if session.get('role') not in ['admin', 'leader']:
+    if not is_legal_manager():
         return jsonify({"status": "error", "msg": "권한 없음"}), 403
     article = LaborNewsArticle.query.get_or_404(news_id)
     article.is_selected = not article.is_selected
@@ -871,7 +871,7 @@ def admin_labor_news_toggle(news_id):
 
 @news_bp.route('/admin/labor-news/delete/<int:news_id>', methods=['POST'])
 def admin_labor_news_delete(news_id):
-    if session.get('role') not in ['admin', 'leader']:
+    if not is_legal_manager():
         return jsonify({"status": "error", "msg": "권한 없음"}), 403
     article = LaborNewsArticle.query.get_or_404(news_id)
     db.session.delete(article)
@@ -880,7 +880,7 @@ def admin_labor_news_delete(news_id):
 
 @news_bp.route('/admin/labor-news/edit/<int:news_id>', methods=['GET', 'POST'])
 def admin_labor_news_edit(news_id):
-    if session.get('role') not in ['admin', 'leader']:
+    if not is_legal_manager():
         return "권한 없음", 403
     article = LaborNewsArticle.query.get_or_404(news_id)
     if request.method == 'POST':
@@ -899,7 +899,7 @@ def admin_labor_news_edit(news_id):
 
 @news_bp.route('/admin/labor-news/create', methods=['GET', 'POST'])
 def admin_labor_news_create():
-    if session.get('role') not in ['admin', 'leader']:
+    if not is_legal_manager():
         return "권한 없음", 403
     if request.method == 'POST':
         title = request.form.get('title', '').strip()
