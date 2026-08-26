@@ -1,7 +1,7 @@
 import os
 from flask import Blueprint, render_template, request, redirect, url_for, jsonify, session, current_app, send_file
 from werkzeug.security import generate_password_hash, check_password_hash
-from route_modules.common import has_page_access, is_privileged_viewer, mask_name, mask_title, mask_post_item, masked_email, LEADER_EMAIL
+from route_modules.common import has_page_access, is_privileged_viewer, mask_name, mask_title, mask_post_item, masked_email
 from models import db, PsychoPost, PsychoAppointment, PsychoDoctorSchedule, PsychoGoogleCalendarConfig, TongBotSchedule, User, Message
 
 psycho_bp = Blueprint('psycho', __name__)
@@ -24,93 +24,6 @@ def _delete_upload(rel_path):
             os.remove(p)
     except Exception:
         pass
-def _system_sender_id():
-    su = User.query.filter(User.role.in_(['admin', 'leader'])).first() or User.query.first()
-    return su.id if su else 1
-
-
-def _notify_psycho_new_post(post):
-    from services.email_service import EmailService
-    manager = User.query.filter_by(email=LEADER_EMAIL).first()
-    view_link = f"{request.host_url}psycho/{post.id}"
-    edit_link = f"{request.host_url}psycho/{post.id}/edit"
-    view_link_rel = f"/psycho/{post.id}"
-    edit_link_rel = f"/psycho/{post.id}/edit"
-    body = f"새 심리상담 글 등록\n제목: {post.title}\n작성자: {post.author_name}\n이메일: {post.email}\n내용: {(post.content or '')[:500]}"
-    if manager:
-        try:
-            EmailService.send(manager.email, f'[심리상담 글 등록] {post.title}', body)
-        except Exception:
-            pass
-        try:
-            db.session.add(Message(
-                sender_id=post.user_id or _system_sender_id(),
-                sender_name=post.author_name or '익명',
-                receiver_id=manager.id,
-                subject=f'[심리상담 글 등록] {post.title}',
-                content=body + f"\n\n관리자 확인 링크: {view_link_rel}", letter_type='private'))
-            db.session.commit()
-        except Exception:
-            pass
-    if post.user_id:
-        try:
-            db.session.add(Message(
-                sender_id=manager.id if manager else _system_sender_id(),
-                sender_name=manager.real_name if (manager and manager.real_name) else '양평마을',
-                receiver_id=post.user_id,
-                subject='[심리상담] 글 접수되었습니다',
-                content=f"{post.author_name}님, 심리상담 글이 접수되었습니다.\n제목: {post.title}\n수정 링크: {edit_link_rel}",
-                letter_type='private'))
-            db.session.commit()
-        except Exception:
-            pass
-    else:
-        try:
-            EmailService.send(post.email, '[심리상담] 글 접수되었습니다',
-                f"{post.author_name}님, 심리상담 글이 접수되었습니다.\n제목: {post.title}\n확인 링크: {view_link}")
-        except Exception:
-            pass
-
-
-def _notify_psycho_appointment(appt, name, email, phone, date_str, time_slot, location, content):
-    from services.email_service import EmailService
-    manager = User.query.filter_by(email=LEADER_EMAIL).first()
-    view_link = f"{request.host_url}psycho/schedule"
-    view_link_rel = f"/psycho/schedule"
-    body = f"새 심리상담 예약\n신청자: {name}\n이메일: {email}\n연락처: {phone}\n날짜: {date_str} {time_slot}\n장소: {location}\n내용: {content}"
-    if manager:
-        try:
-            EmailService.send(manager.email, f'[심리상담 예약] {name}', body)
-        except Exception:
-            pass
-        try:
-            db.session.add(Message(
-                sender_id=appt.user_id or _system_sender_id(),
-                sender_name=name or '익명',
-                receiver_id=manager.id,
-                subject=f'[심리상담 예약] {name}',
-                content=body + f"\n\n관리자 확인 링크: {view_link_rel}", letter_type='private'))
-            db.session.commit()
-        except Exception:
-            pass
-    if appt.user_id:
-        try:
-            db.session.add(Message(
-                sender_id=manager.id if manager else _system_sender_id(),
-                sender_name=manager.real_name if (manager and manager.real_name) else '양평마을',
-                receiver_id=appt.user_id,
-                subject='[심리상담 예약] 접수되었습니다',
-                content=f'{name}님, 심리상담 예약이 접수되었습니다.\n날짜: {date_str} {time_slot}\n예약 확인 링크: {view_link_rel}',
-                letter_type='private'))
-            db.session.commit()
-        except Exception:
-            pass
-    else:
-        try:
-            EmailService.send(email, '[심리상담 예약] 접수되었습니다',
-                f'{name}님, 심리상담 예약이 접수되었습니다.\n날짜: {date_str} {time_slot}\n확인 링크: {view_link}')
-        except Exception:
-            pass
 
 @psycho_bp.route('/psycho/list')
 def psycho_list():
@@ -452,7 +365,6 @@ def api_psycho_create():
             current_app.logger.warning(f'psycho create attachment save failed: {_e}')
     db.session.add(post)
     db.session.commit()
-    _notify_psycho_new_post(post)
     return jsonify({'status': 'success', 'id': post.id})
 
 @psycho_bp.route('/api/psycho/post/<int:post_id>/comment', methods=['POST'])
@@ -552,7 +464,14 @@ def psycho_appointment_book():
     )
     db.session.add(appt)
     db.session.commit()
-    _notify_psycho_appointment(appt, name, email, phone, date_str, time_slot, location, content)
+    from services.email_service import EmailService
+    admins = User.query.filter(User.role.in_(['admin','leader'])).all()
+    for admin in admins:
+        try:
+            EmailService.send(admin.email, f'[심리상담 예약] {request.form.get("title", "심리상담")}',
+                f'신청자: {name}\n이메일: {email}\n연락처: {phone}\n날짜: {date_str} {time_slot}\n장소: {location}\n내용: {content}')
+        except:
+            pass
     return jsonify({'status': 'success', 'id': appt.id})
 
 
