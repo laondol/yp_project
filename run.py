@@ -284,7 +284,7 @@ if __name__ == '__main__':
 # generic auto-add missing model columns (for DBs initialized via db.create_all)
 with app.app_context():
     try:
-        from sqlalchemy import inspect as _sa_insp2
+        from sqlalchemy import inspect as _sa_insp2, text as _sa_text
         _insp2 = _sa_insp2(db.engine)
         _tables2 = set(_insp2.get_table_names())
         for _model in db.metadata.tables.values():
