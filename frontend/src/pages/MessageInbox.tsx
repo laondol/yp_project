@@ -11,6 +11,17 @@ interface MessageItem {
   created_at?: string
 }
 
+function linkify(text?: string): string {
+  if (!text) return ''
+  const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  let safe = esc(text)
+  safe = safe.replace(
+    /(https?:\/\/[^\s<]+)|(\/(?:legal|message|share|psycho|village|note|post|user|admin)[^\s<]*)/g,
+    (m) => `<a href="${m}" target="_blank" rel="noreferrer">${m}</a>`,
+  )
+  return safe
+}
+
 export default function MessageInbox() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -79,7 +90,7 @@ export default function MessageInbox() {
               <div className="small text-muted mb-1">
                 {tab === 'received' ? m.sender_name : `→ ${m.receiver_name}`}
               </div>
-              <div className="mt-2 p-2 bg-light rounded" style={{ overflowWrap: 'anywhere' }} dangerouslySetInnerHTML={{ __html: m.content || '' }} />
+              <div className="mt-2 p-2 bg-light rounded" style={{ overflowWrap: 'anywhere' }} dangerouslySetInnerHTML={{ __html: linkify(m.content) }} />
               {!m.is_read && tab === 'received' && (
                 <div className="text-end mt-1">
                   <button className="btn btn-sm btn-outline-success" onClick={() => markRead(m.id)}>읽음</button>

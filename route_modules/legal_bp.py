@@ -1,3 +1,4 @@
+import os
 from flask import Blueprint, render_template, request, redirect, url_for, jsonify, session, current_app, send_file
 from models import db, LegalPost, User, Message, LawyerSchedule, LegalAppointment, TongBotSchedule, BlockedEmail
 from route_modules.common import is_privileged_viewer, mask_name, mask_title, mask_post_item, masked_email, is_legal_manager, LEGAL_MANAGER_EMAIL
@@ -488,12 +489,24 @@ def _system_sender_id():
     su = User.query.filter(User.role.in_(['admin', 'leader'])).first() or User.query.first()
     return su.id if su else 1
 
+def _delete_upload(rel_path):
+    if not rel_path:
+        return
+    try:
+        p = os.path.join(current_app.root_path, rel_path.lstrip('/'))
+        if os.path.exists(p):
+            os.remove(p)
+    except Exception:
+        pass
+
 
 def _notify_legal_new_post(post):
     from services.email_service import EmailService
     manager = User.query.filter_by(email=LEGAL_MANAGER_EMAIL).first()
     view_link = f"{request.host_url}legal/{post.id}"
     edit_link = f"{request.host_url}legal/edit/{post.id}"
+    view_link_rel = f"/legal/{post.id}"
+    edit_link_rel = f"/legal/edit/{post.id}"
     body = f"새 법률상담 글 등록\n제목: {post.title}\n작성자: {post.author_name}\n이메일: {post.email}\n내용: {(post.content or '')[:500]}"
     if manager:
         try:
@@ -506,7 +519,7 @@ def _notify_legal_new_post(post):
                 sender_name=post.author_name or '익명',
                 receiver_id=manager.id,
                 subject=f'[법률상담 글 등록] {post.title}',
-                content=body + f"\n\n관리자 확인 링크: {view_link}", letter_type='private'))
+                content=body + f"\n\n관리자 확인 링크: {view_link_rel}", letter_type='private'))
             db.session.commit()
         except Exception:
             pass
@@ -517,7 +530,7 @@ def _notify_legal_new_post(post):
                 sender_name=manager.real_name if (manager and manager.real_name) else '양평마을',
                 receiver_id=post.user_id,
                 subject='[법률상담] 글 접수되었습니다',
-                content=f"{post.author_name}님, 법률상담 글이 접수되었습니다.\n제목: {post.title}\n수정 링크: {edit_link}",
+                content=f"{post.author_name}님, 법률상담 글이 접수되었습니다.\n제목: {post.title}\n수정 링크: {edit_link_rel}",
                 letter_type='private'))
             db.session.commit()
         except Exception:
@@ -535,6 +548,8 @@ def _notify_legal_appointment(appt, name, email, phone, date_str, time_slot, loc
     manager = User.query.filter_by(email=LEGAL_MANAGER_EMAIL).first()
     view_link = f"{request.host_url}legal/schedule"
     edit_link = f"{request.host_url}legal/appointment/edit/{appt.id}"
+    view_link_rel = f"/legal/schedule"
+    edit_link_rel = f"/legal/appointment/edit/{appt.id}"
     body = f"새 법률상담 예약\n신청자: {name}\n이메일: {email}\n연락처: {phone}\n날짜: {date_str} {time_slot}\n장소: {location}\n내용: {content}"
     if manager:
         try:
@@ -547,7 +562,7 @@ def _notify_legal_appointment(appt, name, email, phone, date_str, time_slot, loc
                 sender_name=name or '익명',
                 receiver_id=manager.id,
                 subject=f'[법률상담 예약] {name}',
-                content=body + f"\n\n관리자 확인 링크: {view_link}", letter_type='private'))
+                content=body + f"\n\n관리자 확인 링크: {view_link_rel}", letter_type='private'))
             db.session.commit()
         except Exception:
             pass
@@ -558,7 +573,7 @@ def _notify_legal_appointment(appt, name, email, phone, date_str, time_slot, loc
                 sender_name=manager.real_name if (manager and manager.real_name) else '양평마을',
                 receiver_id=appt.user_id,
                 subject='[법률상담 예약] 접수되었습니다',
-                content=f'{name}님, 법률상담 예약이 접수되었습니다.\n날짜: {date_str} {time_slot}\n수정 링크: {edit_link}',
+                content=f'{name}님, 법률상담 예약이 접수되었습니다.\n날짜: {date_str} {time_slot}\n수정 링크: {edit_link_rel}',
                 letter_type='private'))
             db.session.commit()
         except Exception:
@@ -585,9 +600,22 @@ def legal_post_edit(post_id):
         post.title = request.form.get('title', post.title)
         post.content = request.form.get('content', post.content)
         post.author_name = request.form.get('author_name', post.author_name)
+        if request.form.get('remove_attachment') in ('1', 'true', 'on', 'yes'):
+            if post.file_path:
+                _delete_upload(post.file_path)
+            post.file_path = None
+        f = request.files.get('attachment')
+        if f and f.filename:
+            try:
+                from services.file_service import save_upload
+                if post.file_path:
+                    _delete_upload(post.file_path)
+                post.file_path = save_upload(f, 'legal')
+            except Exception as _e:
+                current_app.logger.warning(f'legal edit attachment save failed: {_e}')
         db.session.commit()
-        return jsonify({'status': 'success'})
-    return jsonify({'id': post.id, 'user_id': post.user_id, 'title': post.title, 'content': post.content, 'author_name': post.author_name, 'status': post.status})
+        return jsonify({'status': 'success', 'file_path': post.file_path})
+    return jsonify({'id': post.id, 'user_id': post.user_id, 'title': post.title, 'content': post.content, 'author_name': post.author_name, 'status': post.status, 'file_path': post.file_path})
 
 
 @legal_bp.route('/legal/post/<int:post_id>/confirm', methods=['POST'])

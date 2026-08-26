@@ -9,6 +9,9 @@ export default function LegalPostEditPage() {
   const [authorName, setAuthorName] = useState('')
   const [content, setContent] = useState('')
   const [status, setStatus] = useState('')
+  const [filePath, setFilePath] = useState('')
+  const [file, setFile] = useState<File | null>(null)
+  const [removeAttach, setRemoveAttach] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [sending, setSending] = useState(false)
@@ -23,6 +26,7 @@ export default function LegalPostEditPage() {
       setAuthorName(p.author_name || '')
       setContent(p.content || '')
       setStatus(p.status || 'pending')
+      setFilePath(p.file_path || '')
       if (editorRef.current) editorRef.current.innerHTML = p.content || ''
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : '불러오기 실패')
@@ -47,6 +51,8 @@ export default function LegalPostEditPage() {
       fd.append('title', title.trim())
       fd.append('content', content)
       fd.append('author_name', authorName)
+      if (removeAttach) fd.append('remove_attachment', '1')
+      if (file) fd.append('attachment', file)
       const res: any = await legalApi.editPost(Number(id), fd)
       if (res.status === 'success') navigate('/legal/' + id)
       else alert(res.msg || res.error || '수정 실패')
@@ -83,6 +89,27 @@ export default function LegalPostEditPage() {
             onBlur={updateContent}
             data-placeholder="내용을 작성하세요..." />
         </div>
+
+        <div className="mb-3">
+          <label className="small fw-bold">첨부파일</label>
+          {filePath && !removeAttach ? (
+            <div className="d-flex align-items-center gap-2 mb-2">
+              <a href={filePath} target="_blank" rel="noreferrer" className="btn btn-sm btn-outline-secondary">현재 첨부파일 보기</a>
+              <button type="button" className="btn btn-sm btn-outline-danger"
+                onClick={() => { setRemoveAttach(true); setFile(null) }}>삭제</button>
+            </div>
+          ) : filePath && removeAttach ? (
+            <div className="text-danger small mb-2">첨부파일이 삭제될 예정입니다.</div>
+          ) : null}
+          {removeAttach && (
+            <button type="button" className="btn btn-sm btn-outline-secondary mb-2"
+              onClick={() => setRemoveAttach(false)}>첨부 유지</button>
+          )}
+          <input type="file" className="form-control form-control-sm" accept="image/*,.pdf,.doc,.docx,.hwp"
+            onChange={e => { setFile(e.target.files?.[0] || null); setRemoveAttach(false) }} />
+          <div className="form-text">새 파일을 선택하면 기존 첨부를 대체합니다.</div>
+        </div>
+
         <button type="submit" className="btn btn-success w-100" disabled={sending || locked}>
           {sending ? '저장 중...' : '저장'}
         </button>
