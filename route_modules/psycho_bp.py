@@ -1,3 +1,4 @@
+import os
 from flask import Blueprint, render_template, request, redirect, url_for, jsonify, session, current_app, send_file
 from werkzeug.security import generate_password_hash, check_password_hash
 from route_modules.common import has_page_access, is_privileged_viewer, mask_name, mask_title, mask_post_item, masked_email
@@ -13,6 +14,16 @@ def _serve_spa():
         return send_file(path)
     from flask import render_template
     return render_template('intro.html')
+
+def _delete_upload(rel_path):
+    if not rel_path:
+        return
+    try:
+        p = os.path.join(current_app.root_path, rel_path.lstrip('/'))
+        if os.path.exists(p):
+            os.remove(p)
+    except Exception:
+        pass
 
 @psycho_bp.route('/psycho/list')
 def psycho_list():
@@ -113,8 +124,21 @@ def psycho_post_edit(post_id):
             post.status = 'flagged' if post.ai_score < -20 else 'pending'
         except:
             pass
+        if request.form.get('remove_attachment') in ('1', 'true', 'on', 'yes'):
+            if post.file_path:
+                _delete_upload(post.file_path)
+            post.file_path = None
+        f = request.files.get('attachment')
+        if f and f.filename:
+            try:
+                from services.file_service import save_upload
+                if post.file_path:
+                    _delete_upload(post.file_path)
+                post.file_path = save_upload(f, 'psycho')
+            except Exception as _e:
+                current_app.logger.warning(f'psycho edit attachment save failed: {_e}')
         db.session.commit()
-        return redirect(url_for('psycho_post', post_id=post.id))
+        return redirect(url_for('psycho.psycho_post', post_id=post.id))
     return _serve_spa()
 
 @psycho_bp.route('/psycho/admin')
@@ -294,6 +318,7 @@ def api_psycho_post(post_id):
         'is_public': post.is_public, 'answer': post.answer, 'fee': post.fee,
         'travel_allowance': post.travel_allowance, 'ai_score': post.ai_score,
         'ai_reason': post.ai_reason,
+        'file_path': post.file_path,
         'created_at': post.created_at.isoformat() if post.created_at else None,
         'answered_at': post.answered_at.isoformat() if post.answered_at else None,
     })
@@ -331,6 +356,13 @@ def api_psycho_create():
         password=request.form.get('password', ''),
         user_id=uid,
     )
+    f = request.files.get('attachment')
+    if f and f.filename:
+        try:
+            from services.file_service import save_upload
+            post.file_path = save_upload(f, 'psycho')
+        except Exception as _e:
+            current_app.logger.warning(f'psycho create attachment save failed: {_e}')
     db.session.add(post)
     db.session.commit()
     return jsonify({'status': 'success', 'id': post.id})

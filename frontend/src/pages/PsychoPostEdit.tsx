@@ -8,6 +8,7 @@ interface PostData {
   content: string
   author_name?: string
   status?: string
+  file_path?: string
 }
 
 export default function PsychoPostEdit() {
@@ -18,6 +19,9 @@ export default function PsychoPostEdit() {
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
   const [status, setStatus] = useState('')
+  const [filePath, setFilePath] = useState('')
+  const [file, setFile] = useState<File | null>(null)
+  const [removeAttach, setRemoveAttach] = useState(false)
 
   useEffect(() => {
     if (!id) return
@@ -29,6 +33,7 @@ export default function PsychoPostEdit() {
         setTitle(data.title || '')
         setContent(data.content || '')
         setStatus(data.status || '')
+        setFilePath(data.file_path || '')
       } catch { alert('데이터를 불러오는데 실패했습니다.') }
       finally { setLoading(false) }
     }
@@ -43,6 +48,8 @@ export default function PsychoPostEdit() {
       const fd = new FormData()
       fd.append('title', title.trim())
       fd.append('content', content)
+      if (removeAttach) fd.append('remove_attachment', '1')
+      if (file) fd.append('attachment', file)
       const res = await fetch(`/psycho/post/${id}/edit`, { method: 'POST', body: fd })
       if (res.ok || res.redirected) {
         navigate(`/psycho/${id}`)
@@ -67,6 +74,27 @@ export default function PsychoPostEdit() {
           <label className="small fw-bold">내용</label>
           <textarea className="form-control" rows={8} value={content} onChange={e => setContent(e.target.value)} required />
         </div>
+
+        <div className="mb-3">
+          <label className="small fw-bold">첨부파일</label>
+          {filePath && !removeAttach ? (
+            <div className="d-flex align-items-center gap-2 mb-2">
+              <a href={filePath} target="_blank" rel="noreferrer" className="btn btn-sm btn-outline-secondary">현재 첨부파일 보기</a>
+              <button type="button" className="btn btn-sm btn-outline-danger"
+                onClick={() => { setRemoveAttach(true); setFile(null) }}>삭제</button>
+            </div>
+          ) : filePath && removeAttach ? (
+            <div className="text-danger small mb-2">첨부파일이 삭제될 예정입니다.</div>
+          ) : null}
+          {removeAttach && (
+            <button type="button" className="btn btn-sm btn-outline-secondary mb-2"
+              onClick={() => setRemoveAttach(false)}>첨부 유지</button>
+          )}
+          <input type="file" className="form-control form-control-sm" accept="image/*,.pdf,.doc,.docx,.hwp"
+            onChange={e => { setFile(e.target.files?.[0] || null); setRemoveAttach(false) }} />
+          <div className="form-text">새 파일을 선택하면 기존 첨부를 대체합니다.</div>
+        </div>
+
         {status === 'flagged' && (
           <div className="alert alert-warning small mb-2">AI가 부적절한 내용을 감지했습니다. 수정 후 다시 검토됩니다.</div>
         )}

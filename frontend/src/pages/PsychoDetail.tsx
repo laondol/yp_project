@@ -55,6 +55,12 @@ export default function PsychoDetail() {
           <hr />
           <div className="mb-4" style={{ lineHeight: 1.8 }}>{post.content}</div>
 
+          {(post as any).file_path && (
+            <div className="mb-3">
+              <a href={(post as any).file_path} target="_blank" rel="noreferrer" className="btn btn-sm btn-outline-secondary">첨부파일 다운로드</a>
+            </div>
+          )}
+
           {post.answer ? (
             <div className="bg-success bg-opacity-10 p-3 rounded" style={{ borderLeft: '4px solid #198754' }}>
               <h6 className="fw-bold text-success">심리상담사 답변</h6>

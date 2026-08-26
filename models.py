@@ -653,6 +653,8 @@ class PsychoPost(db.Model):
     status = db.Column(db.String(20), default='pending')
     flagged_decision_at = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, default=datetime.now)
+    file_path = db.Column(db.String(500), nullable=True)
+    viewed_at = db.Column(db.DateTime, nullable=True)
 
 class PsychoAppointment(db.Model):
     id = db.Column(db.Integer, primary_key=True)
