@@ -154,6 +154,13 @@ export const legalApi = {
     const fd = new FormData(); fd.append('answer', answer)
     return api.upload<{ status: string }>(`/legal/admin/answer/edit/${id}`, fd)
   },
+
+  editPost: (id: number, formData: FormData) => api.upload<{ status: string }>(`/legal/post/${id}/edit`, formData),
+  editAppointment: (id: number, formData: FormData) => api.upload<{ status: string }>(`/legal/appointment/${id}/edit`, formData),
+  getAppointmentEdit: (id: number) => api.get<any>(`/legal/appointment/${id}/edit`),
+  confirmPost: (id: number) => api.post<{ status: string }>(`/legal/post/${id}/confirm`, {}),
+  approveAppointment: (id: number) => api.post<{ status: string }>(`/legal/appointment/${id}/approve`, {}),
+  allAppointments: () => api.get<any[]>('/api/legal/appointments/all'),
 };
 
 export const psychoApi = {

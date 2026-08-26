@@ -8,8 +8,11 @@ import ErrorMessage from '../components/common/ErrorMessage'
 
 export default function LegalSchedule() {
   const navigate = useNavigate()
+  const { user } = useAuth()
+  const isLegalManager = user?.email === 'daerilee@gmail.com'
   const [schedules, setSchedules] = useState<{ available_dates: string[]; time_slots: { start: string; end: string }[] } | null>(null)
   const [myAppointments, setMyAppointments] = useState<LegalAppointment[]>([])
+  const [allAppointments, setAllAppointments] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [name, setName] = useState('')
@@ -21,6 +24,7 @@ export default function LegalSchedule() {
   const [selectedTime, setSelectedTime] = useState('')
   const [content, setContent] = useState('')
   const [sending, setSending] = useState(false)
+  const [busyId, setBusyId] = useState<number | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true); setError('')
@@ -31,20 +35,24 @@ export default function LegalSchedule() {
       ])
       setSchedules(s)
       setMyAppointments(Array.isArray(a) ? a : [])
+      if (isLegalManager) {
+        const all = await legalApi.allAppointments().catch(() => [])
+        setAllAppointments(Array.isArray(all) ? all : [])
+      }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : '불러오기 실패')
     } finally { setLoading(false) }
-  }, [])
+  }, [isLegalManager])
 
   useEffect(() => { load() }, [load])
 
-  const { user } = useAuth()
+  const { user: me } = useAuth()
   useEffect(() => {
-    if (user && user.id) {
-      if (!name) setName(user.real_name || user.username || '')
-      if (!email) setEmail(user.email || '')
+    if (me && me.id) {
+      if (!name) setName(me.real_name || (me as any).username || '')
+      if (!email) setEmail(me.email || '')
     }
-  }, [user])
+  }, [me])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -69,6 +77,17 @@ export default function LegalSchedule() {
       }
     } catch { alert('예약 중 오류 발생') }
     finally { setSending(false) }
+  }
+
+  const handleApprove = async (apptId: number) => {
+    if (!confirm('이 예약을 확정(승인)하시겠습니까? 승인 후 작성자는 수정할 수 없습니다.')) return
+    setBusyId(apptId)
+    try {
+      const res: any = await legalApi.approveAppointment(apptId)
+      if (res.status === 'success') { alert('확정되었습니다.'); load() }
+      else alert(res.msg || res.error || '처리 실패')
+    } catch (err: any) { alert(err?.message || '처리 중 오류') }
+    finally { setBusyId(null) }
   }
 
   if (loading) return <Loading />
@@ -164,6 +183,30 @@ export default function LegalSchedule() {
                 </span>
               </div>
               <div className="text-muted">{a.date} {a.time_slot} | {a.location || '미정'}</div>
+              {a.status !== 'approved' && (
+                <button className="btn btn-sm btn-outline-primary mt-1" onClick={() => navigate('/legal/appointment/edit/' + a.id)}>수정</button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {isLegalManager && allAppointments.length > 0 && (
+        <div className="card border-0 shadow-sm p-4 mt-4" style={{ borderRadius: 16 }}>
+          <h5 className="fw-bold mb-3">전체 예약 관리</h5>
+          {allAppointments.map(a => (
+            <div key={a.id} className="p-2 mb-2 border rounded small">
+              <div className="d-flex justify-content-between">
+                <strong>{a.name} ({a.email})</strong>
+                <span className={`badge bg-${a.status === 'approved' ? 'success' : a.status === 'pending' ? 'warning' : 'secondary'}`}>
+                  {{ pending: '대기', approved: '승인', rejected: '거절' }[a.status as string] || a.status}
+                </span>
+              </div>
+              <div className="text-muted">{a.date} {a.time_slot} | {a.location || '미정'}</div>
+              {a.content && <div className="mt-1">{a.content}</div>}
+              {a.status !== 'approved' && (
+                <button className="btn btn-sm btn-outline-primary mt-1" disabled={busyId === a.id} onClick={() => handleApprove(a.id)}>승인</button>
+              )}
             </div>
           ))}
         </div>

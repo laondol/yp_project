@@ -16,6 +16,7 @@ export default function LegalDetail() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [comment, setComment] = useState('')
+  const [busy, setBusy] = useState(false)
 
   const load = useCallback(async () => {
     if (!id) return
@@ -38,11 +39,25 @@ export default function LegalDetail() {
     } catch { alert('답글 등록 실패') }
   }
 
+  const handleConfirm = async () => {
+    if (!id) return
+    if (!confirm('관리자 확인(승인) 처리하시겠습니까? 승인 후 작성자는 수정할 수 없습니다.')) return
+    setBusy(true)
+    try {
+      const res: any = await legalApi.confirmPost(Number(id))
+      if (res.status === 'success') { alert('확인 완료되었습니다.'); load() }
+      else alert(res.msg || res.error || '처리 실패')
+    } catch (err: any) { alert(err?.message || '처리 중 오류') }
+    finally { setBusy(false) }
+  }
+
   if (loading) return <Loading />
   if (error) return <ErrorMessage message={error} onRetry={load} />
   if (!post) return <ErrorMessage message="게시글을 찾을 수 없습니다." />
 
   const canView = post.can_view_content !== false
+  const isAuthor = !!user && (user as any).id === (post as any).user_id
+  const locked = post.status === 'approved'
   const comments = ((post as any).comments || '').split('\n').filter(Boolean)
 
   return (
@@ -61,6 +76,7 @@ export default function LegalDetail() {
               {post.author_name || '익명'} | {post.created_at ? formatKST(post.created_at) : ''}
               {post.is_public && <span className="badge bg-info ms-2">공개</span>}
               {post.status === 'flagged' && <span className="badge bg-warning ms-1">검토필요</span>}
+              {locked && <span className="badge bg-secondary ms-1">확인완료</span>}
             </div>
             <hr />
             <div className="mb-4" style={{ lineHeight: 1.8 }}>{post.content}</div>
@@ -91,13 +107,20 @@ export default function LegalDetail() {
               <div className="mt-3">
                 <textarea className="form-control form-control-sm mb-2" rows={2}
                   placeholder="답글을 작성하세요..." value={comment} onChange={e => setComment(e.target.value)} />
-                <button className="btn btn-sm btn-success" onClick={handleComment} disabled={!comment.trim()}>등록</button>
+                <button className="btn btn-sm btn-success me-2" onClick={handleComment} disabled={!comment.trim()}>등록</button>
+                {!locked && (
+                  <button className="btn btn-sm btn-outline-primary" onClick={handleConfirm} disabled={busy}>확인 완료(승인)</button>
+                )}
               </div>
             )}
           </div>
         </div>
       )}
-      <div className="text-center mt-3">
+
+      <div className="text-center mt-3 d-flex gap-2 justify-content-center">
+        {isAuthor && !locked && (
+          <button className="btn btn-sm btn-outline-primary" onClick={() => navigate('/legal/edit/' + id)}>수정</button>
+        )}
         <button className="btn btn-sm btn-outline-secondary" onClick={() => navigate('/legal')}>← 목록</button>
       </div>
     </div>

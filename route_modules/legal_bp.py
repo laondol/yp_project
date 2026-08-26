@@ -232,7 +232,7 @@ def api_legal_post(post_id):
             'can_view_content': False,
         })
     return jsonify({
-        'id': post.id, 'title': post.title, 'content': post.content,
+        'id': post.id, 'user_id': post.user_id, 'title': post.title, 'content': post.content,
         'author_name': post.author_name, 'answer': post.answer,
         'comments': post.comments, 'status': post.status,
         'file_path': post.file_path,
@@ -250,6 +250,18 @@ def api_legal_appointments():
         'id': a.id, 'name': a.name, 'date': a.date.isoformat() if a.date else None,
         'time_slot': a.time_slot, 'status': a.status, 'location': a.location,
     } for a in appts])
+
+@legal_bp.route('/api/legal/appointments/all')
+def api_legal_appointments_all():
+    if not is_legal_manager():
+        return jsonify({'error': 'forbidden'}), 403
+    appts = LegalAppointment.query.order_by(LegalAppointment.date.desc()).limit(100).all()
+    return jsonify([{
+        'id': a.id, 'name': a.name, 'email': a.email, 'phone': a.phone,
+        'date': a.date.isoformat() if a.date else None, 'time_slot': a.time_slot,
+        'location': a.location, 'status': a.status, 'content': a.content,
+    } for a in appts])
+
 
 @legal_bp.route('/api/legal/create', methods=['POST'])
 def api_legal_create():
@@ -427,7 +439,7 @@ def api_legal_issue(post_id):
             'created_at': post.created_at.isoformat() if post.created_at else None,
         })
     return jsonify({
-        'id': post.id, 'title': post.title, 'content': post.content,
+        'id': post.id, 'user_id': post.user_id, 'title': post.title, 'content': post.content,
         'author_name': post.author_name, 'email': masked_email(post.email),
         'comments': comments,
         'created_at': post.created_at.isoformat() if post.created_at else None,
@@ -480,7 +492,8 @@ def _system_sender_id():
 def _notify_legal_new_post(post):
     from services.email_service import EmailService
     manager = User.query.filter_by(email=LEGAL_MANAGER_EMAIL).first()
-    link = f"{request.host_url}legal/post/{post.id}/edit"
+    view_link = f"{request.host_url}legal/{post.id}"
+    edit_link = f"{request.host_url}legal/edit/{post.id}"
     body = f"새 법률상담 글 등록\n제목: {post.title}\n작성자: {post.author_name}\n이메일: {post.email}\n내용: {(post.content or '')[:500]}"
     if manager:
         try:
@@ -493,7 +506,7 @@ def _notify_legal_new_post(post):
                 sender_name=post.author_name or '익명',
                 receiver_id=manager.id,
                 subject=f'[법률상담 글 등록] {post.title}',
-                content=body + f"\n\n관리자 확인 링크: {link}", letter_type='private'))
+                content=body + f"\n\n관리자 확인 링크: {view_link}", letter_type='private'))
             db.session.commit()
         except Exception:
             pass
@@ -504,7 +517,7 @@ def _notify_legal_new_post(post):
                 sender_name=manager.real_name if (manager and manager.real_name) else '양평마을',
                 receiver_id=post.user_id,
                 subject='[법률상담] 글 접수되었습니다',
-                content=f"{post.author_name}님, 법률상담 글이 접수되었습니다.\n제목: {post.title}\n수정 링크: {link}",
+                content=f"{post.author_name}님, 법률상담 글이 접수되었습니다.\n제목: {post.title}\n수정 링크: {edit_link}",
                 letter_type='private'))
             db.session.commit()
         except Exception:
@@ -520,7 +533,8 @@ def _notify_legal_new_post(post):
 def _notify_legal_appointment(appt, name, email, phone, date_str, time_slot, location, content):
     from services.email_service import EmailService
     manager = User.query.filter_by(email=LEGAL_MANAGER_EMAIL).first()
-    link = f"{request.host_url}legal/appointment/{appt.id}/edit"
+    view_link = f"{request.host_url}legal/schedule"
+    edit_link = f"{request.host_url}legal/appointment/edit/{appt.id}"
     body = f"새 법률상담 예약\n신청자: {name}\n이메일: {email}\n연락처: {phone}\n날짜: {date_str} {time_slot}\n장소: {location}\n내용: {content}"
     if manager:
         try:
@@ -533,7 +547,7 @@ def _notify_legal_appointment(appt, name, email, phone, date_str, time_slot, loc
                 sender_name=name or '익명',
                 receiver_id=manager.id,
                 subject=f'[법률상담 예약] {name}',
-                content=body + f"\n\n관리자 확인 링크: {link}", letter_type='private'))
+                content=body + f"\n\n관리자 확인 링크: {view_link}", letter_type='private'))
             db.session.commit()
         except Exception:
             pass
@@ -544,7 +558,7 @@ def _notify_legal_appointment(appt, name, email, phone, date_str, time_slot, loc
                 sender_name=manager.real_name if (manager and manager.real_name) else '양평마을',
                 receiver_id=appt.user_id,
                 subject='[법률상담 예약] 접수되었습니다',
-                content=f'{name}님, 법률상담 예약이 접수되었습니다.\n날짜: {date_str} {time_slot}\n수정 링크: {link}',
+                content=f'{name}님, 법률상담 예약이 접수되었습니다.\n날짜: {date_str} {time_slot}\n수정 링크: {edit_link}',
                 letter_type='private'))
             db.session.commit()
         except Exception:
@@ -573,7 +587,7 @@ def legal_post_edit(post_id):
         post.author_name = request.form.get('author_name', post.author_name)
         db.session.commit()
         return jsonify({'status': 'success'})
-    return jsonify({'id': post.id, 'title': post.title, 'content': post.content, 'author_name': post.author_name, 'status': post.status})
+    return jsonify({'id': post.id, 'user_id': post.user_id, 'title': post.title, 'content': post.content, 'author_name': post.author_name, 'status': post.status})
 
 
 @legal_bp.route('/legal/post/<int:post_id>/confirm', methods=['POST'])
@@ -613,7 +627,7 @@ def legal_appointment_edit(appt_id):
         db.session.commit()
         return jsonify({'status': 'success'})
     return jsonify({
-        'id': appt.id, 'name': appt.name, 'email': appt.email, 'phone': appt.phone,
+        'id': appt.id, 'user_id': appt.user_id, 'name': appt.name, 'email': appt.email, 'phone': appt.phone,
         'date': appt.date.isoformat() if appt.date else None, 'time_slot': appt.time_slot,
         'location': appt.location, 'content': appt.content, 'status': appt.status,
     })
