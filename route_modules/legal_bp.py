@@ -200,7 +200,7 @@ def legal_schedule():
 def api_legal_posts():
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 20, type=int)
-    posts = LegalPost.query.filter(LegalPost.password != '').order_by(LegalPost.created_at.desc()).paginate(page=page, per_page=per_page, error_out=False)
+    posts = LegalPost.query.order_by(LegalPost.created_at.desc()).paginate(page=page, per_page=per_page, error_out=False)
     items = []
     for p in posts.items:
         d = {
