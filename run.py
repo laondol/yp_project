@@ -280,3 +280,32 @@ def security_headers(resp):
 if __name__ == '__main__':
     print("[함께사는양평] 통합 관제 서버가 켜졌습니다. http://127.0.0.1:5000")
     app.run(host='0.0.0.0', port=5000, debug=True)
+
+# generic auto-add missing model columns (for DBs initialized via db.create_all)
+with app.app_context():
+    try:
+        from sqlalchemy import inspect as _sa_insp2
+        _insp2 = _sa_insp2(db.engine)
+        _tables2 = set(_insp2.get_table_names())
+        for _model in db.metadata.tables.values():
+            _t = _model.name
+            if _t not in _tables2:
+                continue
+            _existing2 = {c['name'] for c in _insp2.get_columns(_t)}
+            for _col in _model.columns:
+                if _col.name in _existing2:
+                    continue
+                try:
+                    _ctype = _col.type.compile(dialect=db.engine.dialect)
+                except Exception:
+                    _ctype = 'TEXT'
+                _alter = 'ALTER TABLE %s ADD COLUMN %s %s' % (_t, _col.name, _ctype)
+                try:
+                    with db.engine.connect() as _c:
+                        _c.execute(_sa_text(_alter))
+                        _c.commit()
+                    print('[auto-add] %s.%s added' % (_t, _col.name))
+                except Exception as _ae:
+                    print('[auto-add] %s.%s failed: %s' % (_t, _col.name, _ae))
+    except Exception as _e:
+        print('[SKIP] generic auto-add: %s' % _e)
