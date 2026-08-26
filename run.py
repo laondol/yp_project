@@ -265,6 +265,17 @@ def robots_txt():
 def sitemap_xml():
     return send_from_directory('static', 'sitemap.xml', mimetype='application/xml')
 
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def spa_fallback(path):
+    # SPA 클라이언트 라우트 직접접속/새로고침 지원 (API·정적자산은 개별 라우트가 우선)
+    if path.startswith('api/'):
+        return 'Not Found', 404
+    _idx = os.path.join(current_app.root_path, 'frontend', 'dist', 'index.html')
+    if os.path.exists(_idx):
+        return send_file(_idx)
+    return 'Not Found', 404
+
 @app.after_request
 def security_headers(resp):
     resp.headers['X-Content-Type-Options'] = 'nosniff'
