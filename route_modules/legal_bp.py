@@ -1,6 +1,6 @@
 from flask import Blueprint, render_template, request, redirect, url_for, jsonify, session, current_app, send_file
 from models import db, LegalPost, User, Message, LawyerSchedule, LegalAppointment, TongBotSchedule, BlockedEmail
-from route_modules.common import is_privileged_viewer, mask_name, mask_title, mask_post_item, masked_email, is_legal_manager
+from route_modules.common import is_privileged_viewer, mask_name, mask_title, mask_post_item, masked_email, is_legal_manager, LEGAL_MANAGER_EMAIL
 
 legal_bp = Blueprint('legal', __name__)
 
@@ -208,6 +208,7 @@ def api_legal_posts():
             'status': p.status, 'is_public': p.is_public,
             'answer': p.answer, 'created_at': p.created_at.isoformat() if p.created_at else None,
             'answered_at': p.answered_at.isoformat() if p.answered_at else None,
+            'has_attachment': bool(p.file_path),
         }
         if not is_privileged_viewer(p.user_id, 'legal'):
             d['title'] = mask_title(p.title, keep=0.4)
@@ -224,6 +225,7 @@ def api_legal_post(post_id):
             'id': post.id, 'title': mask_title(post.title, keep=0.4), 'content': '',
             'author_name': post.author_name, 'email': masked_email(post.email),
             'answer': '', 'comments': '', 'status': post.status,
+        'has_attachment': bool(post.file_path),
             'is_public': post.is_public, 'fee': post.fee,
             'created_at': post.created_at.isoformat() if post.created_at else None,
             'answered_at': post.answered_at.isoformat() if post.answered_at else None,
@@ -233,6 +235,7 @@ def api_legal_post(post_id):
         'id': post.id, 'title': post.title, 'content': post.content,
         'author_name': post.author_name, 'answer': post.answer,
         'comments': post.comments, 'status': post.status,
+        'file_path': post.file_path,
         'is_public': post.is_public, 'fee': post.fee,
         'created_at': post.created_at.isoformat() if post.created_at else None,
         'answered_at': post.answered_at.isoformat() if post.answered_at else None,
@@ -272,11 +275,16 @@ def api_legal_create():
         user_id=uid,
     )
     if request.files.get('attachment'):
-        from services.file_service import save_upload
-        path = save_upload(request.files['attachment'], subdir='legal')
-        post.file_path = path
+        try:
+            from services.file_service import save_upload
+            path = save_upload(request.files['attachment'], subdir='legal')
+            if path:
+                post.file_path = path
+        except Exception as _e:
+            current_app.logger.warning(f'legal attachment save failed: {_e}')
     db.session.add(post)
     db.session.commit()
+    _notify_legal_new_post(post)
     return jsonify({'status': 'success', 'id': post.id})
 
 @legal_bp.route('/api/legal/post/<int:post_id>/comment', methods=['POST'])
@@ -376,14 +384,7 @@ def legal_appointment_book():
     )
     db.session.add(appt)
     db.session.commit()
-    from services.email_service import EmailService
-    admins = User.query.filter(User.role.in_(['admin', 'leader'])).all()
-    for admin in admins:
-        try:
-            EmailService.send(admin.email, f'[법률상담 예약] {request.form.get("title", "법률상담")}',
-                f'신청자: {name}\n이메일: {email}\n연락처: {phone}\n날짜: {date_str} {time_slot}\n장소: {location}\n내용: {content}')
-        except:
-            pass
+    _notify_legal_appointment(appt, name, email, phone, date_str, time_slot, location, content)
     return jsonify({'status': 'success', 'id': appt.id})
 
 @legal_bp.route('/api/legal/issues')
@@ -468,3 +469,164 @@ def api_legal_issue_comment(post_id):
     return jsonify({'status': 'success'})
 
 # --- [심리상담소] ---
+
+
+
+def _system_sender_id():
+    su = User.query.filter(User.role.in_(['admin', 'leader'])).first() or User.query.first()
+    return su.id if su else 1
+
+
+def _notify_legal_new_post(post):
+    from services.email_service import EmailService
+    manager = User.query.filter_by(email=LEGAL_MANAGER_EMAIL).first()
+    link = f"{request.host_url}legal/post/{post.id}/edit"
+    body = f"새 법률상담 글 등록\n제목: {post.title}\n작성자: {post.author_name}\n이메일: {post.email}\n내용: {(post.content or '')[:500]}"
+    if manager:
+        try:
+            EmailService.send(manager.email, f'[법률상담 글 등록] {post.title}', body)
+        except Exception:
+            pass
+        try:
+            db.session.add(Message(
+                sender_id=post.user_id or _system_sender_id(),
+                sender_name=post.author_name or '익명',
+                receiver_id=manager.id,
+                subject=f'[법률상담 글 등록] {post.title}',
+                content=body + f"\n\n관리자 확인 링크: {link}", letter_type='private'))
+            db.session.commit()
+        except Exception:
+            pass
+    if post.user_id:
+        try:
+            db.session.add(Message(
+                sender_id=manager.id if manager else _system_sender_id(),
+                sender_name=manager.real_name if (manager and manager.real_name) else '양평마을',
+                receiver_id=post.user_id,
+                subject='[법률상담] 글 접수되었습니다',
+                content=f"{post.author_name}님, 법률상담 글이 접수되었습니다.\n제목: {post.title}\n수정 링크: {link}",
+                letter_type='private'))
+            db.session.commit()
+        except Exception:
+            pass
+    else:
+        try:
+            EmailService.send(post.email, '[법률상담] 글 접수되었습니다',
+                f"{post.author_name}님, 법률상담 글이 접수되었습니다.\n제목: {post.title}\n확인 링크: {link}")
+        except Exception:
+            pass
+
+
+def _notify_legal_appointment(appt, name, email, phone, date_str, time_slot, location, content):
+    from services.email_service import EmailService
+    manager = User.query.filter_by(email=LEGAL_MANAGER_EMAIL).first()
+    link = f"{request.host_url}legal/appointment/{appt.id}/edit"
+    body = f"새 법률상담 예약\n신청자: {name}\n이메일: {email}\n연락처: {phone}\n날짜: {date_str} {time_slot}\n장소: {location}\n내용: {content}"
+    if manager:
+        try:
+            EmailService.send(manager.email, f'[법률상담 예약] {name}', body)
+        except Exception:
+            pass
+        try:
+            db.session.add(Message(
+                sender_id=appt.user_id or _system_sender_id(),
+                sender_name=name or '익명',
+                receiver_id=manager.id,
+                subject=f'[법률상담 예약] {name}',
+                content=body + f"\n\n관리자 확인 링크: {link}", letter_type='private'))
+            db.session.commit()
+        except Exception:
+            pass
+    if appt.user_id:
+        try:
+            db.session.add(Message(
+                sender_id=manager.id if manager else _system_sender_id(),
+                sender_name=manager.real_name if (manager and manager.real_name) else '양평마을',
+                receiver_id=appt.user_id,
+                subject='[법률상담 예약] 접수되었습니다',
+                content=f'{name}님, 법률상담 예약이 접수되었습니다.\n날짜: {date_str} {time_slot}\n수정 링크: {link}',
+                letter_type='private'))
+            db.session.commit()
+        except Exception:
+            pass
+    else:
+        try:
+            EmailService.send(email, '[법률상담 예약] 접수되었습니다',
+                f'{name}님, 법률상담 예약이 접수되었습니다.\n날짜: {date_str} {time_slot}\n확인 링크: {link}')
+        except Exception:
+            pass
+
+
+@legal_bp.route('/legal/post/<int:post_id>/edit', methods=['GET', 'POST'])
+def legal_post_edit(post_id):
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({'status': 'error', 'msg': '로그인이 필요합니다.'}), 401
+    post = LegalPost.query.get_or_404(post_id)
+    if post.user_id != uid:
+        return jsonify({'status': 'error', 'msg': '권한이 없습니다.'}), 403
+    if post.status == 'approved':
+        return jsonify({'status': 'error', 'msg': '관리자 확인 후에는 수정할 수 없습니다.'}), 403
+    if request.method == 'POST':
+        post.title = request.form.get('title', post.title)
+        post.content = request.form.get('content', post.content)
+        post.author_name = request.form.get('author_name', post.author_name)
+        db.session.commit()
+        return jsonify({'status': 'success'})
+    return jsonify({'id': post.id, 'title': post.title, 'content': post.content, 'author_name': post.author_name, 'status': post.status})
+
+
+@legal_bp.route('/legal/post/<int:post_id>/confirm', methods=['POST'])
+def legal_post_confirm(post_id):
+    if not is_legal_manager():
+        return jsonify({'status': 'error', 'msg': '권한이 없습니다.'}), 403
+    post = LegalPost.query.get_or_404(post_id)
+    post.status = 'approved'
+    db.session.commit()
+    return jsonify({'status': 'success'})
+
+
+@legal_bp.route('/legal/appointment/<int:appt_id>/edit', methods=['GET', 'POST'])
+def legal_appointment_edit(appt_id):
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({'status': 'error', 'msg': '로그인이 필요합니다.'}), 401
+    appt = LegalAppointment.query.get_or_404(appt_id)
+    if appt.user_id != uid:
+        return jsonify({'status': 'error', 'msg': '권한이 없습니다.'}), 403
+    if appt.status == 'approved':
+        return jsonify({'status': 'error', 'msg': '확정된 예약은 수정할 수 없습니다.'}), 403
+    if request.method == 'POST':
+        from datetime import date as _date
+        appt.name = request.form.get('name', appt.name)
+        appt.email = request.form.get('email', appt.email)
+        appt.phone = request.form.get('phone', appt.phone)
+        _d = request.form.get('date')
+        if _d:
+            try:
+                appt.date = _date.fromisoformat(_d)
+            except ValueError:
+                pass
+        appt.time_slot = request.form.get('time_slot', appt.time_slot)
+        appt.location = request.form.get('location', appt.location)
+        appt.content = request.form.get('content', appt.content)
+        db.session.commit()
+        return jsonify({'status': 'success'})
+    return jsonify({
+        'id': appt.id, 'name': appt.name, 'email': appt.email, 'phone': appt.phone,
+        'date': appt.date.isoformat() if appt.date else None, 'time_slot': appt.time_slot,
+        'location': appt.location, 'content': appt.content, 'status': appt.status,
+    })
+
+
+@legal_bp.route('/legal/appointment/<int:appt_id>/approve', methods=['POST'])
+def legal_appointment_approve(appt_id):
+    from datetime import datetime, timezone
+    if not is_legal_manager():
+        return jsonify({'status': 'error', 'msg': '권한이 없습니다.'}), 403
+    appt = LegalAppointment.query.get_or_404(appt_id)
+    appt.status = 'approved'
+    appt.approved_at = datetime.now(timezone.utc)
+    appt.approved_by = session.get('user_id')
+    db.session.commit()
+    return jsonify({'status': 'success'})
