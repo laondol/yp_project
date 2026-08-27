@@ -9,6 +9,7 @@ export default function PsychoWrite() {
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
   const [password, setPassword] = useState('')
+  const [file, setFile] = useState<File | null>(null)
   const [sending, setSending] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -23,6 +24,7 @@ export default function PsychoWrite() {
       fd.append('author_name', gate.name)
       fd.append('email', gate.email)
       if (password) fd.append('password', password)
+      if (file) fd.append('attachment', file)
       const res = await psychoApi.create(fd)
       if (res.status === 'success') {
         navigate('/psycho')
@@ -77,6 +79,11 @@ export default function PsychoWrite() {
             </div>
           </div>
           <div className="alert alert-warning py-2 mb-3 small">상담 내용 및 방식에 따라 상담비가 발생할 수 있습니다. 답변 시 안내해 드립니다.</div>
+          <div className="mb-3">
+            <label className="form-label small fw-bold">파일 첨부</label>
+            <input type="file" className="form-control form-control-sm" accept="image/*,.pdf,.doc,.docx,.hwp"
+              onChange={e => setFile(e.target.files?.[0] || null)} />
+          </div>
           <button type="submit" className="btn btn-success w-100 py-2 fw-bold" disabled={sending || !gate.verified}>
             {sending ? '등록 중...' : '등록하기'}
           </button>

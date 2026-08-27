@@ -16,10 +16,20 @@ function linkify(text?: string): string {
   const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   let safe = esc(text)
   safe = safe.replace(
-    /(https?:\/\/[^\s<]+)|(\/(?:legal|message|share|psycho|village|note|post|user|admin)[^\s<]*)/g,
+    /(https?:\/\/[^\s<]+)|(\/(?:legal|message|share|psycho|village|note|post|user|admin|files)[^\s<]*)/g,
     (m) => `<a href="${m}" target="_blank" rel="noreferrer">${m}</a>`,
   )
   return safe
+}
+
+function looksLikeHtml(text?: string): boolean {
+  if (!text) return false
+  return /<\/?[a-z][\s\S]*>/i.test(text)
+}
+
+function letterHtml(content?: string): string {
+  if (!content) return ''
+  return looksLikeHtml(content) ? content : linkify(content)
 }
 
 export default function MessageInbox() {
@@ -47,6 +57,16 @@ export default function MessageInbox() {
       await fetch(`/message/read/${id}`, { method: 'POST' })
       load()
     } catch { /* ignore */ }
+  }
+
+  const handleDelete = async (id: number) => {
+    if (!window.confirm('이 편지를 삭제할까요?')) return
+    try {
+      const r = await fetch(`/api/message/delete/${id}`, { method: 'POST' })
+      const d = await r.json()
+      if (d.status === 'success') load()
+      else alert(d.msg || '삭제 실패')
+    } catch { alert('오류가 발생했습니다.') }
   }
 
   if (loading) return <Loading />
@@ -85,12 +105,17 @@ export default function MessageInbox() {
                   {!m.is_read && tab === 'received' && <span className="badge bg-success ms-1">NEW</span>}
                   {m.is_public && <span className="badge bg-warning text-dark ms-1">공개</span>}
                 </div>
-                <small className="text-muted">{m.created_at ? formatKST(m.created_at) : ''}</small>
+                <div className="d-flex align-items-center gap-2">
+                  <small className="text-muted">{m.created_at ? formatKST(m.created_at) : ''}</small>
+                  <button type="button" className="btn btn-sm btn-link text-danger p-0" title="삭제"
+                    onClick={() => handleDelete(m.id)}>🗑</button>
+                </div>
               </div>
               <div className="small text-muted mb-1">
                 {tab === 'received' ? m.sender_name : `→ ${m.receiver_name}`}
               </div>
-              <div className="mt-2 p-2 bg-light rounded" style={{ overflowWrap: 'anywhere' }} dangerouslySetInnerHTML={{ __html: linkify(m.content) }} />
+              <div className="mt-2 p-2 bg-light rounded letter-body" style={{ overflowWrap: 'anywhere', lineHeight: 1.8 }}
+                dangerouslySetInnerHTML={{ __html: letterHtml(m.content) }} />
               {!m.is_read && tab === 'received' && (
                 <div className="text-end mt-1">
                   <button className="btn btn-sm btn-outline-success" onClick={() => markRead(m.id)}>읽음</button>

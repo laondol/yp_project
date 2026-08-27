@@ -1,7 +1,7 @@
 import os
 from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'))
-from flask import Flask, send_from_directory
+from flask import Flask, send_file, send_from_directory
 from flask_migrate import Migrate
 from config import Config
 from models import db, User
@@ -271,7 +271,7 @@ def spa_fallback(path):
     # SPA 클라이언트 라우트 직접접속/새로고침 지원 (API·정적자산은 개별 라우트가 우선)
     if path.startswith('api/'):
         return 'Not Found', 404
-    _idx = os.path.join(current_app.root_path, 'frontend', 'dist', 'index.html')
+    _idx = os.path.join(app.root_path, 'frontend', 'dist', 'index.html')
     if os.path.exists(_idx):
         return send_file(_idx)
     return 'Not Found', 404

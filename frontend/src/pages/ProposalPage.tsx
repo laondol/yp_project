@@ -58,9 +58,9 @@ export default function ProposalPage() {
     <div>
       <div className="text-center py-5 mb-5" style={{ background: 'linear-gradient(135deg, #e8f5e9 0%, #ffffff 100%)', borderRadius: 35, padding: '100px 20px !important' }}>
         <span className="badge bg-success-subtle text-success px-3 py-2 rounded-pill fw-bold mb-3">YANGPYEONG COMMUNITY PLATFORM</span>
-        <h1 className="display-3 fw-bold mb-3" style={{ letterSpacing: -2 }}>이웃이 제안하고,<br />공동체가 실현하는 <span className="text-success">양평 자치</span></h1>
+        <h1 className="display-3 fw-bold mb-3" style={{ letterSpacing: -2 }}>내가 제안하고,<br />이웃과 함께 만들어가는 지속가능한  <span className="text-success">행복 양평 </span></h1>
         <p className="lead text-secondary mb-4 mx-auto" style={{ maxWidth: 650, lineHeight: 1.6 }}>
-          우리는 관(官)의 도움 없이 주민들이 직접 제안하고 상벌점 닢을 쌓으며, 동네의 작은 문턱부터 거대한 프로젝트까지 스스로 해결하는 청정 민간 공간입니다.
+          나와 내 이웃이 행복해 지는 양평 꿈꾸고 있으신가요. 그 꿈을 이웃과 함께 현실에서 만들기 위해 함꼐 하겠습니다.    
         </p>
         <div className="d-flex justify-content-center gap-3 flex-wrap">
           <Link to="/main" className="btn btn-success btn-lg px-5 py-3 fw-bold shadow">주민 광장 입장</Link>

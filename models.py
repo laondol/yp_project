@@ -597,6 +597,7 @@ class LegalPost(db.Model):
     status = db.Column(db.String(20), default='pending')
     labor_approved = db.Column(db.Boolean, default=False)
     file_path = db.Column(db.String(500))
+    link = db.Column(db.String(500))
     viewed_at = db.Column(db.DateTime)
     flagged_decision_at = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, default=datetime.now)

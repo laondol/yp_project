@@ -85,7 +85,7 @@ const ContentEditor = forwardRef<ContentEditorHandle, ContentEditorProps>(functi
   const drawSnapRef = useRef<ImageData | null>(null)
 
   useEffect(() => {
-    if (editorRef.current && initialContent && !editorRef.current.innerHTML) {
+    if (editorRef.current && initialContent) {
       editorRef.current.innerHTML = initialContent
     }
   }, [initialContent])
@@ -784,7 +784,7 @@ const ContentEditor = forwardRef<ContentEditorHandle, ContentEditorProps>(functi
         if (r.ok && res.url) {
           const name = res.name || f.name
           insertAtCursor(
-            `<div style="margin:6px 0"><a href="${res.url}" target="_blank" rel="noopener noreferrer" download ` +
+            `<div style="margin:6px 0"><a href="${res.url}" rel="noopener noreferrer" download="${name}" ` +
             `style="display:inline-block;padding:6px 10px;border:1px solid #dee2e6;border-radius:8px;background:#f8f9fa;color:#198754;text-decoration:none;font-size:0.9rem;">📎 ${name}</a></div>`
           )
         } else {

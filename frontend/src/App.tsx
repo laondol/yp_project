@@ -19,7 +19,6 @@ import LegalList from './pages/LegalList'
 import LegalDetail from './pages/LegalDetail'
 import LegalWrite from './pages/LegalWrite'
 import LegalSchedule from './pages/LegalSchedule'
-import LegalPostEditPage from './pages/LegalPostEditPage'
 import LegalAppointmentEditPage from './pages/LegalAppointmentEditPage'
 import PsychoList from './pages/PsychoList'
 import PsychoDetail from './pages/PsychoDetail'
@@ -207,10 +206,10 @@ export default function App() {
             <Route path="/legal/issues/:postId" element={<ProtectedRoute><LegalIssueDetailPage /></ProtectedRoute>} />
             <Route path="/legal/issues" element={<ProtectedRoute><LegalIssuesPage /></ProtectedRoute>} />
             <Route path="/legal" element={<ProtectedRoute><LegalList /></ProtectedRoute>} />
-            <Route path="/legal/:id" element={<ProtectedRoute><LegalDetail /></ProtectedRoute>} />
             <Route path="/legal/write" element={<ProtectedRoute><LegalWrite /></ProtectedRoute>} />
             <Route path="/legal/schedule" element={<ProtectedRoute><LegalSchedule /></ProtectedRoute>} />
-            <Route path="/legal/edit/:id" element={<ProtectedRoute><LegalPostEditPage /></ProtectedRoute>} />
+            <Route path="/legal/edit/:id" element={<ProtectedRoute><LegalWrite /></ProtectedRoute>} />
+            <Route path="/legal/:id" element={<ProtectedRoute><LegalDetail /></ProtectedRoute>} />
             <Route path="/legal/appointment/edit/:id" element={<ProtectedRoute><LegalAppointmentEditPage /></ProtectedRoute>} />
             <Route path="/psycho/admin/appointments" element={<ProtectedRoute><PsychoAdminAppointmentsPage /></ProtectedRoute>} />
             <Route path="/psycho/admin" element={<ProtectedRoute><PsychoAdminPage /></ProtectedRoute>} />

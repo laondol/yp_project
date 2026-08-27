@@ -334,7 +334,7 @@ def serve_general_file(filename):
     full = _os.path.join(upload_dir, filename)
     if not _os.path.isfile(full):
         return jsonify({'error': 'not found'}), 404
-    resp = send_file(full, as_attachment=True)
+    resp = send_file(full, as_attachment=True, download_name=filename)
     resp.headers['X-Content-Type-Options'] = 'nosniff'
     return resp
 
@@ -507,6 +507,24 @@ def read_message(msg_id):
     if request.method == 'POST':
         return jsonify({'status': 'success'})
     return redirect(url_for('.message_inbox'))
+
+
+@message_bp.route('/api/message/delete/<int:msg_id>', methods=['POST'])
+def api_message_delete(msg_id):
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({'status': 'error', 'msg': '로그인이 필요합니다.'}), 401
+    msg = Message.query.get_or_404(msg_id)
+    # 삭제 권한: 보낸 사람 본인 또는 받은 사람 본인
+    if msg.sender_id != uid and msg.receiver_id != uid:
+        return jsonify({'status': 'error', 'msg': '권한 없음'}), 403
+    try:
+        db.session.delete(msg)
+        db.session.commit()
+        return jsonify({'status': 'success'})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'status': 'error', 'msg': str(e)}), 500
 
 
 @message_bp.route('/friends/list')

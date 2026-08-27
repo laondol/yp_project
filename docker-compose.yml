@@ -6,7 +6,7 @@ services:
       - .:/yp_project
     working_dir: /yp_project
     ports:
-      - "127.0.0.1:8080:5000"
+      - "127.0.0.1:5000:5000"
     env_file: .env
     environment:
       - RAG_URL=http://yp_rag:8001
@@ -61,31 +61,6 @@ services:
       flask_app:
         condition: service_started
     restart: always
-
-  react_frontend:
-    image: node:20-alpine
-    container_name: yp_react
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-    working_dir: /app
-    command: >
-      sh -c "npm install &&
-             npm run dev -- --host"
-    environment:
-      - VITE_API_TARGET=http://yp_flask:5000
-    ports:
-      - "127.0.0.1:5173:5173"
-    depends_on:
-      flask_app:
-        condition: service_started
-    restart: always
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:5173/"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
 
   postgres:
     image: postgis/postgis:16-3.5-alpine

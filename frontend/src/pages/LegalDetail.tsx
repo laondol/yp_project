@@ -79,7 +79,7 @@ export default function LegalDetail() {
               {locked && <span className="badge bg-secondary ms-1">확인완료</span>}
             </div>
             <hr />
-            <div className="mb-4" style={{ lineHeight: 1.8 }}>{post.content}</div>
+            <div className="mb-4" style={{ lineHeight: 1.8 }} dangerouslySetInnerHTML={{ __html: post.content || '' }} />
 
             {(post as any).file_path && (
               <div className="mb-3">
@@ -87,10 +87,16 @@ export default function LegalDetail() {
               </div>
             )}
 
+            {(post as any).link && (
+              <div className="mb-3">
+                <a href={(post as any).link} target="_blank" rel="noreferrer" className="btn btn-sm btn-outline-info">관련 링크 열기</a>
+              </div>
+            )}
+
             {post.answer && (
               <div className="bg-success bg-opacity-10 p-3 rounded" style={{ borderLeft: '4px solid #198754' }}>
                 <h6 className="fw-bold text-success">노무사 이훈 답변</h6>
-                <div style={{ lineHeight: 1.8 }}>{post.answer}</div>
+                <div style={{ lineHeight: 1.8 }} dangerouslySetInnerHTML={{ __html: post.answer || '' }} />
                 {(post as any).fee && <div className="mt-2"><strong>상담비</strong> : {(post as any).fee.toLocaleString()}원</div>}
                 <small className="text-muted">답변일: {post.answered_at ? formatKST(post.answered_at) : ''}</small>
               </div>

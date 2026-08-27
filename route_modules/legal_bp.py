@@ -197,6 +197,15 @@ def legal_schedule():
 
 # --- API endpoints ---
 
+def _is_legal_author(post):
+    uid = session.get('user_id')
+    if uid and post.user_id is not None and uid == post.user_id:
+        return True
+    em = (session.get('email') or '').strip().lower()
+    if em and post.email and em == post.email.strip().lower():
+        return True
+    return False
+
 @legal_bp.route('/api/legal/posts')
 def api_legal_posts():
     page = request.args.get('page', 1, type=int)
@@ -210,10 +219,12 @@ def api_legal_posts():
             'answer': p.answer, 'created_at': p.created_at.isoformat() if p.created_at else None,
             'answered_at': p.answered_at.isoformat() if p.answered_at else None,
             'has_attachment': bool(p.file_path),
+            'link': p.link,
         }
-        if not is_privileged_viewer(p.user_id, 'legal'):
+        if not (_is_legal_author(p) or is_privileged_viewer(p.user_id, 'legal')):
             d['title'] = mask_title(p.title, keep=0.4)
             d['answer'] = ''
+            d['link'] = ''
             d['can_view_content'] = False
         items.append(d)
     return jsonify(items)
@@ -221,7 +232,7 @@ def api_legal_posts():
 @legal_bp.route('/api/legal/post/<int:post_id>')
 def api_legal_post(post_id):
     post = LegalPost.query.get_or_404(post_id)
-    if not is_privileged_viewer(post.user_id, 'legal'):
+    if not (_is_legal_author(post) or is_privileged_viewer(post.user_id, 'legal')):
         return jsonify({
             'id': post.id, 'title': mask_title(post.title, keep=0.4), 'content': '',
             'author_name': post.author_name, 'email': masked_email(post.email),
@@ -237,6 +248,7 @@ def api_legal_post(post_id):
         'author_name': post.author_name, 'answer': post.answer,
         'comments': post.comments, 'status': post.status,
         'file_path': post.file_path,
+        'link': post.link,
         'is_public': post.is_public, 'fee': post.fee,
         'created_at': post.created_at.isoformat() if post.created_at else None,
         'answered_at': post.answered_at.isoformat() if post.answered_at else None,
@@ -287,6 +299,7 @@ def api_legal_create():
         password=request.form.get('password', ''),
         user_id=uid,
     )
+    post.link = request.form.get('link', '').strip()
     if request.files.get('attachment'):
         try:
             from services.file_service import save_upload
@@ -432,7 +445,7 @@ def api_legal_issue(post_id):
             if line:
                 comments.append({'text': line})
     is_labor = (post.password == '' and post.labor_approved)
-    if not is_labor and not is_privileged_viewer(post.user_id, 'legal'):
+    if not is_labor and not (_is_legal_author(post) or is_privileged_viewer(post.user_id, 'legal')):
         return jsonify({
             'id': post.id, 'title': mask_title(post.title, keep=0.4), 'content': '',
             'author_name': post.author_name, 'email': masked_email(post.email),
@@ -522,7 +535,7 @@ def _notify_legal_new_post(post):
                 content=body + f"\n\n관리자 확인 링크: {view_link_rel}", letter_type='private'))
             db.session.commit()
         except Exception:
-            pass
+            db.session.rollback()
     if post.user_id:
         try:
             db.session.add(Message(
@@ -534,7 +547,7 @@ def _notify_legal_new_post(post):
                 letter_type='private'))
             db.session.commit()
         except Exception:
-            pass
+            db.session.rollback()
     else:
         try:
             EmailService.send(post.email, '[법률상담] 글 접수되었습니다',
@@ -600,6 +613,7 @@ def legal_post_edit(post_id):
         post.title = request.form.get('title', post.title)
         post.content = request.form.get('content', post.content)
         post.author_name = request.form.get('author_name', post.author_name)
+        post.link = request.form.get('link', post.link)
         if request.form.get('remove_attachment') in ('1', 'true', 'on', 'yes'):
             if post.file_path:
                 _delete_upload(post.file_path)

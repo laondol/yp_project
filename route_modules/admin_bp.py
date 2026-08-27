@@ -1,5 +1,9 @@
+import os
+import re
 from flask import Blueprint, render_template, request, redirect, url_for, jsonify, session, current_app, send_file
-from models import db, User, Post, Comment, PointHistory, AiKnowledge, NewsArticle
+from models import db, User, Post, Comment, PointHistory, AiKnowledge, NewsArticle, \
+    LegalPost, PsychoPost, ShareReport, VillageBroadcast, Message, Note, VillagePage, \
+    VillagePlace, EpubBook, EpubPage, EpubMedia
 
 admin_bp = Blueprint('admin', __name__)
 
@@ -293,6 +297,84 @@ def admin_debate(post_id):
     return jsonify({"status": "success"})
 
 # --- [지킴이 전용] 이웃 관리 및 고지서 즉시 영구 파기 ---
+_URL_RE = re.compile(r'(?:/files/|/static/uploads/)[^\s"\'>]+')
+
+
+def _resolve_user_file(p):
+    """저장된 경로(URL)를 실제 파일 절대경로로 변환 (업로드 루트 내부만)."""
+    if not p:
+        return None
+    p = p.strip()
+    if p.startswith('/files/'):
+        return os.path.join(
+            current_app.config['UPLOAD_FOLDER'], 'general_files', os.path.basename(p))
+    if p.startswith('/static/'):
+        return os.path.join(current_app.root_path, p.lstrip('/'))
+    return None
+
+
+def _safe_delete_user_file(path):
+    if not path:
+        return False
+    try:
+        base = os.path.abspath(current_app.config['UPLOAD_FOLDER'])
+        abs_path = os.path.abspath(path)
+        if abs_path != base and not abs_path.startswith(base + os.sep):
+            current_app.logger.warning('[USER-DELETE] 차단된 경로: %s', path)
+            return False
+        if os.path.isfile(abs_path):
+            os.remove(abs_path)
+            return True
+    except Exception as e:
+        current_app.logger.warning('[USER-DELETE] 파일 삭제 실패 %s: %s', path, e)
+    return False
+
+
+def _delete_user_files(uid):
+    """회원 삭제 시 해당 회원이 업로드한 실제 파일을 디스크에서도 삭제."""
+    paths = set()
+    add = lambda p: (_resolve_user_file(p) and paths.add(_resolve_user_file(p)))
+    def add_text(t):
+        if not t:
+            return
+        for m in _URL_RE.findall(t):
+            add(m)
+    for lp in LegalPost.query.filter_by(user_id=uid).all():
+        add(lp.file_path); add_text(lp.content); add_text(lp.answer)
+    for pp in PsychoPost.query.filter_by(user_id=uid).all():
+        add(pp.file_path); add_text(pp.content); add_text(pp.answer)
+    for sr in ShareReport.query.filter_by(user_id=uid).all():
+        add(sr.image_path); add(sr.drawing_path); add(sr.video_path)
+        add_text(sr.extra_images); add_text(sr.content); add_text(sr.description)
+    for vb in VillageBroadcast.query.filter_by(sender_id=uid).all():
+        add(vb.attachment); add_text(vb.content)
+    for msg in Message.query.filter_by(sender_id=uid).all():
+        add(msg.attachment); add_text(msg.content)
+    for post in Post.query.filter_by(user_id=uid).all():
+        add(post.file_path); add_text(post.content)
+    for note in Note.query.filter_by(user_id=uid).all():
+        add_text(note.content)
+    for vp in VillagePage.query.filter_by(created_by=uid).all():
+        add_text(vp.content)
+    for vpl in VillagePlace.query.filter_by(submitted_by=uid).all():
+        add_text(vpl.media)
+    for art in NewsArticle.query.filter_by(created_by=uid).all():
+        add(art.image_path); add_text(art.content)
+    for book in EpubBook.query.filter_by(user_id=uid).all():
+        for page in EpubPage.query.filter_by(book_id=book.id).all():
+            for media in EpubMedia.query.filter_by(page_id=page.id).all():
+                add(media.file_path)
+    u = User.query.get(uid)
+    if u:
+        add(getattr(u, 'bill_image_path', None))
+    deleted = 0
+    for p in paths:
+        if _safe_delete_user_file(p):
+            deleted += 1
+    current_app.logger.info('[USER-DELETE] uid=%s 파일 %d/%d 삭제 완료', uid, deleted, len(paths))
+    return deleted
+
+
 @admin_bp.route('/admin/users/delete/<int:user_id>', methods=['POST'])
 def admin_delete_user(user_id):
     if session.get('role') != 'leader':
@@ -301,6 +383,11 @@ def admin_delete_user(user_id):
     if user.role == 'admin':
         return jsonify({"status":"error","msg":"관리자는 삭제할 수 없습니다"})
     name = user.email or user.username
+    # 회원 소유 실제 파일 먼저 디스크에서 삭제 (DB 레코드 삭제 전에 경로 수집)
+    try:
+        _delete_user_files(user_id)
+    except Exception as e:
+        current_app.logger.warning('[USER-DELETE] 파일 정리 중 오류: %s', e)
     from sqlalchemy import text
     uid = user_id
     fk_deletes = [

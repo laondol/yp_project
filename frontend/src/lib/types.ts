@@ -72,6 +72,7 @@ export interface LegalPost {
   id: number; title: string; content: string; author_name?: string;
   answer?: string; status?: string; is_public?: boolean;
   created_at?: string; answered_at?: string; can_view_content?: boolean;
+  link?: string;
 }
 export interface LegalAppointment {
   id: number; name: string; email: string; phone?: string;
