@@ -269,6 +269,16 @@ def bot_chat():
     
     # 메모 자연어 처리는 Motif AI(_ai_reply)가 <memo> 태그로 기록하고, 아래에서 자동 저장한다.
     raw_reply = _ai_reply(bot, user, msg)
+    # 음성/연속듣기 명령 태그 파싱 후 답변 텍스트에서 제거
+    voice_cmd = None
+    listen_cmd = None
+    _vm = re.search(r'<voice_(on|off)>', raw_reply)
+    _lm = re.search(r'<listen_(on|off)>', raw_reply)
+    if _vm:
+        voice_cmd = _vm.group(1)
+    if _lm:
+        listen_cmd = _lm.group(1)
+    raw_reply = re.sub(r'<voice_(?:on|off)>|<listen_(?:on|off)>', '', raw_reply).strip()
     # AI가 <memo>태그로 기록한 내용 → 자동 메모 저장
     memo_match = re.search(r'<memo>(.*?)</memo>', raw_reply, re.DOTALL)
     memo_saved = None
@@ -425,7 +435,7 @@ def bot_chat():
         if any(k in reply for k in ['열어드릴 수 없', '열 수 없', '기능이 없', '지원하지 않', '제공할 수 없', '없습니다', '할 수 없']):
             reply = "원하시는 페이지를 아래 '페이지 열기' 버튼으로 바로 열어드릴게요! 👇"
 
-    return jsonify({"reply": reply, "bot_name": bot.bot_name, "talent": talent, "mood": bot.mood, "level": bot.level, "counselor": counselor_msg, "schedule": schedule_info, "shopping": shopping_info, "pages": page_links})
+    return jsonify({"reply": reply, "bot_name": bot.bot_name, "talent": talent, "mood": bot.mood, "level": bot.level, "counselor": counselor_msg, "schedule": schedule_info, "shopping": shopping_info, "pages": page_links, "voice_cmd": voice_cmd, "listen_cmd": listen_cmd})
 
 @tongbot_bp.route('/api/bot/history')
 def bot_history():
@@ -1172,6 +1182,14 @@ def _ai_reply(bot, user, user_msg):
         이 버튼을 누르면 해당 페이지가 바로 열립니다. 따라서 "직접 열어드릴 수 없습니다/그런 기능이 없습니다"라고 절대 말하지 마세요.
         대신 "아래 '페이지 열기' 버튼으로 바로 열어드릴게요"라고 안내하세요. 지원 페이지: 일정, 메모, 편의시설, 뉴스, 공유마당, 우리마을, 채팅.
 
+        [음성 기능 (지원됨)]
+        통벗은 음성으로 말할 수 있고(🔊 자동음성), 회원은 🎤 마이크로 말할 수 있으며 연속 듣기(말하면 자동 전송)도 지원됩니다.
+        회원이 "말해줘/소리내서 말해줘/말하기 켜줘/음성으로 들려줘/읽어줘"라고 하면 긍정적으로 답한 뒤 답변 맨 끝에 <voice_on> 태그를 붙이세요.
+        음성을 끄라고 하면 답변 맨 끝에 <voice_off> 태그를 붙이세요.
+        회원이 "계속 듣고 있어/연속으로 말할게/마이크 계속 켜줘/자동으로 보내줘"라고 하면 답변 맨 끝에 <listen_on> 태그를 붙이세요.
+        연속 듣기를 끄라고 하면 답변 맨 끝에 <listen_off> 태그를 붙이세요.
+        이 태그들은 화면에 표시되지 않고 자동으로 기능을 켜고 끕니다. 음성 기능이 없다고 절대 말하지 마세요.
+
         [플랫폼 안내 - 플랫폼 기능 질문시에만 참고]
         {PLATFORM_GUIDE}
 
@@ -1196,10 +1214,20 @@ def _ai_reply(bot, user, user_msg):
             else:
                 reply_clean = reply.strip()
             reply_clean = re.sub(r'<memo>.*?</memo>', '', reply_clean, flags=re.DOTALL).strip()
+            # 음성 명령 태그 추출 후 지식 저장 전에 제거 (메모리 오염 방지)
+            voice_blk = ''
+            vm = re.search(r'<voice_(?:on|off)>', reply)
+            lm = re.search(r'<listen_(?:on|off)>', reply)
+            if vm:
+                voice_blk += '\n' + vm.group(0)
+            if lm:
+                voice_blk += '\n' + lm.group(0)
+            reply_clean = re.sub(r'<voice_(?:on|off)>|<listen_(?:on|off)>', '', reply_clean).strip()
             _save_knowledge(bot, user_msg, reply_clean)
             out = reply_clean
             if memo_blk:
                 out = out + '\n' + memo_blk
+            out = out + voice_blk
             return f"{_m['emoji']} {out}"
     except Exception:
         import traceback

@@ -52,17 +52,23 @@ declare global {
   }
 }
 
-function speak(text: string, lang = 'ko-KR') {
-  if (!('speechSynthesis' in window)) return
-  window.speechSynthesis.cancel()
+function speak(text: string, lang = 'ko-KR', onEnd?: () => void) {
+  const synth = window.speechSynthesis
+  if (!synth) return
+  synth.cancel()
   const utter = new SpeechSynthesisUtterance(text.replace(/[^\w\s가-힣ㄱ-ㅎㅏ-ㅣ.,!?~]/g, ''))
   utter.lang = lang
   utter.rate = 1
   utter.pitch = 1
-  const voices = window.speechSynthesis.getVoices()
+  const voices = synth.getVoices()
   const ko = voices.find(v => v.lang.startsWith('ko'))
   if (ko) utter.voice = ko
-  window.speechSynthesis.speak(utter)
+  if (onEnd) {
+    utter.onend = onEnd
+    utter.onerror = onEnd
+  }
+  // Chrome: cancel() 직후 speak()하면 무시되는 버그 → 약간의 딜레이 필요
+  setTimeout(() => synth.speak(utter), 150)
 }
 
 export default function TongBotChatPage() {
@@ -83,11 +89,32 @@ export default function TongBotChatPage() {
     try { return localStorage.getItem('tongbot_auto_tts') === 'true' } catch { return false }
   })
   const [speakingIdx, setSpeakingIdx] = useState<number | null>(null)
+  const [continuous, setContinuous] = useState(() => {
+    try { return localStorage.getItem('tongbot_listen_continuous') === 'true' } catch { return false }
+  })
   const recognitionRef = useRef<any>(null)
+  const continuousRef = useRef(continuous)
+  const sendChatRef = useRef<(msg?: string) => void>(() => {})
+  const sendingRef = useRef(false)
+  const lastTranscriptRef = useRef('')
+  const silenceTimerRef = useRef<number | null>(null)
 
   useEffect(() => {
     try { localStorage.setItem('tongbot_auto_tts', String(autoTts)) } catch {}
   }, [autoTts])
+
+  // 3초 침묵 시 자동 전송 타이머
+  const armSilenceTimer = () => {
+    if (silenceTimerRef.current) window.clearTimeout(silenceTimerRef.current)
+    silenceTimerRef.current = window.setTimeout(() => {
+      silenceTimerRef.current = null
+      const t = lastTranscriptRef.current.trim()
+      if (t && !sendingRef.current) {
+        lastTranscriptRef.current = ''
+        sendChatRef.current(t)
+      }
+    }, 3000)
+  }
 
   useEffect(() => {
     fetch('/api/me', { credentials: 'include' }).then(r => r.json()).then(d => {
@@ -117,22 +144,18 @@ export default function TongBotChatPage() {
     if (!sending) inputRef.current?.focus()
   }, [sending])
 
-  // STT 시작/중지
-  const toggleListening = useCallback(() => {
-    if (isListening) {
-      recognitionRef.current?.stop()
-      setIsListening(false)
-      return
-    }
+  // STT 시작
+  const startRecognition = useCallback((isContinuous: boolean) => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
     if (!SpeechRecognition) {
-      alert('이 브라우저는 음성 인식을 지원하지 않습니다.\nChrome 브라우저를 사용해 주세요.')
+      alert('이 브라우저는 음성 인식을 지원하지 않습니다.\nChrome/Edge 브라우저를 사용해 주세요.')
       return
     }
+    try { recognitionRef.current?.stop() } catch {}
     const recognition = new SpeechRecognition()
     recognition.lang = 'ko-KR'
     recognition.interimResults = true
-    recognition.continuous = false
+    recognition.continuous = isContinuous
     recognition.maxAlternatives = 1
 
     recognition.onresult = (event: SpeechRecognitionEvent) => {
@@ -140,50 +163,95 @@ export default function TongBotChatPage() {
       for (let i = event.resultIndex; i < event.results.length; i++) {
         transcript += event.results[i][0].transcript
       }
+      lastTranscriptRef.current = transcript
       setInput(transcript)
-      if (event.results[event.resultIndex].isFinal) {
-        setIsListening(false)
-        // 자동 전송
-        setTimeout(() => {
-          const msg = transcript.trim()
-          if (msg) {
-            setInput(msg)
-          }
-        }, 100)
+      armSilenceTimer()
+    }
+    recognition.onerror = (e: any) => {
+      setIsListening(false)
+      if (e?.error === 'not-allowed' || e?.error === 'service-not-allowed') {
+        continuousRef.current = false
+        setContinuous(false)
       }
     }
-    recognition.onerror = () => setIsListening(false)
-    recognition.onend = () => setIsListening(false)
+    recognition.onend = () => {
+      setIsListening(false)
+      if (continuousRef.current) {
+        setTimeout(() => {
+          if (!continuousRef.current) return
+          try { recognitionRef.current?.start(); setIsListening(true) } catch {}
+        }, 400)
+      }
+    }
 
     recognitionRef.current = recognition
     recognition.start()
     setIsListening(true)
-  }, [isListening])
+  }, [])
+
+  // 🎤 한 번 듣기 토글
+  const toggleListening = useCallback(() => {
+    if (isListening) {
+      if (continuousRef.current) {
+        continuousRef.current = false
+        setContinuous(false)
+        try { localStorage.setItem('tongbot_listen_continuous', 'false') } catch {}
+      }
+      if (silenceTimerRef.current) { window.clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null }
+      recognitionRef.current?.stop()
+      setIsListening(false)
+      return
+    }
+    startRecognition(false)
+  }, [isListening, startRecognition])
+
+  // 🎙️ 연속 말하기 모드 토글
+  const setContinuousMode = useCallback((on: boolean) => {
+    continuousRef.current = on
+    setContinuous(on)
+    try { localStorage.setItem('tongbot_listen_continuous', String(on)) } catch {}
+    if (on) {
+      lastTranscriptRef.current = ''
+      startRecognition(true)
+    } else {
+      if (silenceTimerRef.current) { window.clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null }
+      recognitionRef.current?.stop()
+      setIsListening(false)
+    }
+  }, [startRecognition])
+
+  // 페이지 로드 시 연속 모드 자동 재개
+  useEffect(() => {
+    if (continuousRef.current) {
+      startRecognition(true)
+    }
+    return () => {
+      try { recognitionRef.current?.stop() } catch {}
+      if (silenceTimerRef.current) window.clearTimeout(silenceTimerRef.current)
+    }
+  }, [startRecognition])
 
   // TTS 재생
   const handleSpeak = useCallback((text: string, idx: number) => {
-    if (speakingIdx === idx) {
-      window.speechSynthesis?.cancel()
+    const synth = window.speechSynthesis
+    if (!synth) return
+    if (speakingIdx === idx || synth.speaking) {
+      synth.cancel()
       setSpeakingIdx(null)
       return
     }
     setSpeakingIdx(idx)
-    speak(text)
-    // 재생 완료 시 초기화
-    const check = setInterval(() => {
-      if (!window.speechSynthesis?.speaking) {
-        setSpeakingIdx(null)
-        clearInterval(check)
-      }
-    }, 200)
+    speak(text, 'ko-KR', () => setSpeakingIdx(null))
   }, [speakingIdx])
 
-  const sendChat = () => {
-    const msg = input.trim()
-    if (!msg || sending) return
+  const sendChat = (override?: string) => {
+    const msg = (typeof override === 'string' ? override : input).trim()
+    if (!msg || sendingRef.current) return
+    sendingRef.current = true
     setSending(true)
     setMessages(prev => [...prev, { role: 'user', text: msg, name: '나' }])
     setInput('')
+    lastTranscriptRef.current = ''
     fetch('/api/bot/chat', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message: msg }),
@@ -199,16 +267,23 @@ export default function TongBotChatPage() {
         msgs.push({ role: 'bot', text: '🔗 아래 페이지를 바로 열어드릴게요.', name: '통벗', pages: d.pages })
       }
       setMessages(prev => [...prev, ...msgs])
+      // 통벗 음성 명령 적용 (말하기 켜줘/꺼줘, 연속 듣기 켜줘/꺼줘)
+      if (d.voice_cmd === 'on') setAutoTts(true)
+      if (d.voice_cmd === 'off') setAutoTts(false)
+      if (d.listen_cmd === 'on' && !continuousRef.current) setContinuousMode(true)
+      if (d.listen_cmd === 'off' && continuousRef.current) setContinuousMode(false)
       // 자동 TTS
-      if (autoTts && reply) {
+      if ((autoTts || d.voice_cmd === 'on') && reply) {
         setTimeout(() => speak(reply), 300)
       }
     }).catch(() => setMessages(prev => [...prev, { role: 'bot', text: '응답 실패', name: 'AI' }]))
       .finally(() => {
+        sendingRef.current = false
         setSending(false)
         inputRef.current?.focus()
       })
   }
+  sendChatRef.current = sendChat
 
   const loadHistory = () => {
     if (showHistory) { setShowHistory(false); return }
@@ -313,6 +388,14 @@ export default function TongBotChatPage() {
       {/* Input */}
       <div className="p-3 border-top d-flex gap-2 bg-white align-items-center" style={{ flexShrink: 0 }}>
         <button
+          className={`btn ${continuous ? 'btn-success' : 'btn-outline-secondary'} d-flex align-items-center justify-content-center`}
+          onClick={() => setContinuousMode(!continuous)}
+          title={continuous ? '연속 말하기 중지' : '연속 말하기 (3초 침묵 시 자동 전송)'}
+          style={{ width: 42, height: 42, borderRadius: '50%', flexShrink: 0, fontSize: '1.05rem' }}
+        >
+          🎙️
+        </button>
+        <button
           className={`btn ${isListening ? 'btn-danger' : 'btn-outline-secondary'} d-flex align-items-center justify-content-center`}
           onClick={toggleListening}
           title={isListening ? '음성 입력 중지' : '음성 입력'}
@@ -320,11 +403,11 @@ export default function TongBotChatPage() {
         >
           {isListening ? '⏹' : '🎤'}
         </button>
-        <input ref={inputRef} className="form-control" placeholder={isListening ? '듣는 중...' : '메시지를 입력하세요...'}
+        <input ref={inputRef} className="form-control" placeholder={isListening ? (continuous ? '연속 듣는 중... 3초 침묵 시 자동 전송' : '듣는 중...') : '메시지를 입력하세요...'}
           value={input} onChange={e => setInput(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat() }}}
           disabled={sending} />
-        <button className="btn btn-success px-4" onClick={sendChat} disabled={sending || !input.trim()}>전송</button>
+        <button className="btn btn-success px-4" onClick={() => sendChat()} disabled={sending || !input.trim()}>전송</button>
         <button className="btn btn-outline-secondary" onClick={loadHistory} title="대화 기록">📜</button>
       </div>
 
