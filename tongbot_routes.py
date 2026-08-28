@@ -250,7 +250,9 @@ def bot_chat():
                 # 최근 일정 중 첫 번째를 공유
                 s = recent_schedules[0]
                 date_str = s.event_date.strftime('%m월 %d일 %H:%M') if s.event_date else ''
-                content = f'<div style="padding:10px;"><strong>📅 {s.title}</strong><br>🕐 {date_str}{s.location ? f"<br>📍 {s.location}" : ""}{s.description ? f"<br><br>{s.description}" : ""}</div>'
+                loc_html = f'<br>📍 {s.location}' if s.location else ''
+                desc_html = f'<br><br>{s.description}' if s.description else ''
+                content = f'<div style="padding:10px;"><strong>📅 {s.title}</strong><br>🕐 {date_str}{loc_html}{desc_html}</div>'
                 msg_obj = Message(
                     sender_id=uid, sender_name=user.username, receiver_id=receiver.id,
                     subject=f'📅 일정 공유: {s.title}', content=content, sender_role='member'
