@@ -67,7 +67,7 @@ def api_user_dashboard():
                 tip_prompt = f"'{bot.bot_name if bot.bot_name else '통벗'}'은(는) '{uid}'님의 AI 도우미입니다. 오늘의 일정 {sched_count}개, 안 읽은 편지 {unread_count}통이 있습니다. 회원님께 해줄 수 있는 짧고 따뜻한 조언이나 격려 한마디를 2문장 이내로 해주세요."
                 r = requests.post(f"{base_url}/chat/completions",
                     headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-                    json={"model": "motif-12.7b-reasoning", "messages": [{"role": "user", "content": tip_prompt}], "max_tokens": 150},
+                    json={"model": "motif-12.7b", "messages": [{"role": "user", "content": tip_prompt}], "max_tokens": 150},
                     timeout=10)
                 if r.status_code == 200:
                     ai_tip = r.json()['choices'][0]['message']['content'][:200]

@@ -26,7 +26,7 @@ def _motif_json(prompt, key, system=''):
     """Motif 호출 후 첫 JSON 배열/객체 반환. 실패 시 None"""
     import re as _re
     try:
-        resp = requests.post('https://api-cbt.morphfactory.io/v1/chat/completions',
+        resp = requests.post('https://chat.motiftech.io/openapi/v1/chat/completions',
             headers={'Authorization': f'Bearer {key}', 'Content-Type': 'application/json'},
             json={'model': 'motif-12.7b',
                   'messages': [{'role': 'system', 'content': system} for system in ([system] if system else [])] +
@@ -226,6 +226,45 @@ def bot_chat():
     if bot and not bot.is_active:
         return jsonify({"error": "통벗이 회수되어 사용할 수 없습니다. 관리자에게 문의하세요."}), 403
     user = User.query.get(uid)
+    
+    # 일정 공유 의도 감지
+    share_schedule_match = re.search(r'일정\s*(공유|보내|편지|전송).*?(\S+)(?:에게|한테|께)', msg)
+    if share_schedule_match or any(kw in msg for kw in ['일정 공유', '일정 보내', '일정 편지']):
+        # 최근 일정 가져오기
+        recent_schedules = TongBotSchedule.query.filter_by(user_id=uid).order_by(TongBotSchedule.event_date.desc()).limit(5).all()
+        if not recent_schedules:
+            return jsonify({"reply": "📅 아직 등록된 일정이 없습니다. 먼저 일정을 등록해 주세요.", "schedule": None})
+        
+        # 수신자 이름 추출
+        receiver_name = ''
+        if share_schedule_match:
+            receiver_name = share_schedule_match.group(2)
+        
+        if receiver_name:
+            # 수신자 검색
+            receiver = User.query.filter(User.username == receiver_name).first()
+            if not receiver:
+                receiver = User.query.filter(User.real_name == receiver_name).first()
+            
+            if receiver:
+                # 최근 일정 중 첫 번째를 공유
+                s = recent_schedules[0]
+                date_str = s.event_date.strftime('%m월 %d일 %H:%M') if s.event_date else ''
+                content = f'<div style="padding:10px;"><strong>📅 {s.title}</strong><br>🕐 {date_str}{s.location ? f"<br>📍 {s.location}" : ""}{s.description ? f"<br><br>{s.description}" : ""}</div>'
+                msg_obj = Message(
+                    sender_id=uid, sender_name=user.username, receiver_id=receiver.id,
+                    subject=f'📅 일정 공유: {s.title}', content=content, sender_role='member'
+                )
+                db.session.add(msg_obj)
+                db.session.commit()
+                return jsonify({"reply": f"✅ '{s.title}' 일정을 {receiver.username}님에게 편지로 보냈습니다!", "schedule": None})
+            else:
+                return jsonify({"reply": f"❌ '{receiver_name}'님을 찾을 수 없습니다. 이름을 다시 확인해 주세요.", "schedule": None})
+        else:
+            # 수신자 미지정 시 안내
+            schedule_list = '\n'.join([f"• {s.title} ({s.event_date.strftime('%m/%d %H:%M') if s.event_date else ''})" for s in recent_schedules[:5]])
+            return jsonify({"reply": f"📅 최근 일정 목록:\n{schedule_list}\n\n💡 '일정 공유 [일정제목] [이름]에게' 형식으로 입력해 주세요.\n예: '일정 공유 점심약속 철수에게'", "schedule": None})
+    
     # 메모 자연어 처리는 Motif AI(_ai_reply)가 <memo> 태그로 기록하고, 아래에서 자동 저장한다.
     raw_reply = _ai_reply(bot, user, msg)
     # AI가 <memo>태그로 기록한 내용 → 자동 메모 저장
@@ -349,7 +388,7 @@ def bot_chat():
 }}
 오늘: {now.strftime('%Y-%m-%d %H:%M')} ({['월','화','수','목','금','토','일'][now.weekday()]}요일)
 사용자: {msg}"""
-                r = requests.post('https://api-cbt.morphfactory.io/v1/chat/completions',
+                r = requests.post('https://chat.motiftech.io/openapi/v1/chat/completions',
                     headers={'Authorization': f'Bearer {motif_key}', 'Content-Type': 'application/json'},
                     json={'model': 'motif-12.7b', 'messages': [{'role': 'user', 'content': reminder_prompt}], 'temperature': 0.1, 'max_tokens': 300}, timeout=10)
                 if r.status_code == 200:
@@ -1045,7 +1084,7 @@ def _ai_reply(bot, user, user_msg):
         # provider별 base_url 매핑
         provider_urls = {
             'motif': 'https://chat.motiftech.io/openapi/v1',
-            'motif_beta': 'https://api-cbt.morphfactory.io/v1',
+            'motif_beta': 'https://chat.motiftech.io/openapi/v1',
             'groq': 'https://api.groq.com/openai/v1',
             'openai': 'https://api.openai.com/v1',
         }
@@ -1056,7 +1095,7 @@ def _ai_reply(bot, user, user_msg):
         # provider별 기본 모델名 매핑
         provider_models = {
             'motif': 'motif-12.7b',
-            'motif_beta': 'motif/motif-3',
+            'motif_beta': 'motif-12.7b',
             'groq': 'llama-3.3-70b-versatile',
             'openai': 'gpt-4o-mini',
         }
@@ -1206,7 +1245,7 @@ def _discover_talent(bot, user):
 10단어 이내로 간결하게 답변하세요.
 
 대화기록: {bot.memory or '없음'}"""
-        r = requests.post("https://api-cbt.morphfactory.io/v1/chat/completions",
+        r = requests.post("https://chat.motiftech.io/openapi/v1/chat/completions",
             headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
             json={"model": "motif-12.7b", "messages": [{"role": "user", "content": prompt}], "max_tokens": 50},
             timeout=15)
@@ -1310,7 +1349,7 @@ def bot_review(draft_id):
 [게시추천]: (공유마당/꿈꾸기/소식/법률상담/심리상담 중 하나)
 [교정본]:
 (교정된 글 전체)"""
-        r = requests.post("https://api-cbt.morphfactory.io/v1/chat/completions",
+        r = requests.post("https://chat.motiftech.io/openapi/v1/chat/completions",
             headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
             json={"model": "motif-12.7b", "messages": [{"role": "user", "content": prompt}], "max_tokens": 800},
             timeout=30)
@@ -1536,7 +1575,7 @@ def bot_schedule_ai_internal(uid, msg, user, bot=None):
         if not motif_key:
             return {"reply": "AI 서비스가 현재 이용 불가능합니다.", "action": "chat"}
 
-        resp = requests.post('https://api-cbt.morphfactory.io/v1/chat/completions',
+        resp = requests.post('https://chat.motiftech.io/openapi/v1/chat/completions',
             headers={'Authorization': f'Bearer {motif_key}', 'Content-Type': 'application/json'},
             json={
                 'model': 'motif-12.7b',
@@ -2791,7 +2830,7 @@ def bot_trip_plan():
 Output ONLY the date in YYYY-MM-DD format, nothing else.
 Text: {msg}"""
     try:
-        dr = requests.post('https://api-cbt.morphfactory.io/v1/chat/completions',
+        dr = requests.post('https://chat.motiftech.io/openapi/v1/chat/completions',
             headers={'Authorization':f'Bearer {motif_key}','Content-Type':'application/json'},
             json={'model':'motif-12.7b','messages':[{'role':'user','content':date_prompt}],'temperature':0,'max_tokens':20}, timeout=10)
         event_date_str = dr.json()['choices'][0]['message']['content'].strip()
@@ -2815,7 +2854,7 @@ Rules:
 - Output ONLY JSON array, no explanation
 - Include ALL stops mentioned"""
     try:
-        resp = requests.post('https://api-cbt.morphfactory.io/v1/chat/completions',
+        resp = requests.post('https://chat.motiftech.io/openapi/v1/chat/completions',
             headers={'Authorization':f'Bearer {motif_key}','Content-Type':'application/json'},
             json={'model':'motif-12.7b','messages':[
                 {'role':'system','content':system_prompt},
@@ -2981,7 +3020,7 @@ def _moderate_chat(room_id):
         prompt = f"""당신은 채팅 중재자입니다. 다음 대화를 보고 분위기를 판단하세요.
 긍정적이면 칭찬, 부정적이면 부드럽게 조율하는 한 문장을 쓰세요.
 대화: {recent}"""
-        r = requests.post("https://api-cbt.morphfactory.io/v1/chat/completions",
+        r = requests.post("https://chat.motiftech.io/openapi/v1/chat/completions",
             headers={"Authorization": f"Bearer {key}"}, json={"model":"motif-12.7b","messages":[{"role":"user","content":prompt}],"max_tokens":100}, timeout=15)
         if r.status_code == 200:
             reply = r.json()["choices"][0]["message"]["content"]

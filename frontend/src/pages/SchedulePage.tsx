@@ -33,6 +33,10 @@ export default function SchedulePage() {
   const [editRoute, setEditRoute] = useState<any>(null)
   const [savingRoute, setSavingRoute] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [shareSchedule, setShareSchedule] = useState<ScheduleItem | null>(null)
+  const [shareUsers, setShareUsers] = useState<{id:number;username:string;real_name?:string}[]>([])
+  const [shareSelectedIds, setShareSelectedIds] = useState<number[]>([])
+  const [shareSending, setShareSending] = useState(false)
   const formRef = useRef<HTMLDivElement>(null)
 
   const [formTitle, setFormTitle] = useState('')
@@ -201,6 +205,36 @@ export default function SchedulePage() {
       fetch('/api/bot/schedule/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) })
         .then(r => r.json()).then(() => load())
     }
+  }
+
+  const openShare = async (s: ScheduleItem) => {
+    setShareSchedule(s)
+    setShareSelectedIds([])
+    try {
+      const data = await fetch('/api/message/users').then(r => r.json())
+      setShareUsers(data)
+    } catch { setShareUsers([]) }
+  }
+
+  const handleShare = async () => {
+    if (!shareSchedule || shareSelectedIds.length === 0) return
+    setShareSending(true)
+    try {
+      const dateStr = shareSchedule.event_date ? formatKST(shareSchedule.event_date, { month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''
+      const content = `<div style="padding:10px;"><strong>📅 ${shareSchedule.title}</strong><br>🕐 ${dateStr}${shareSchedule.location ? `<br>📍 ${shareSchedule.location}` : ''}${shareSchedule.description ? `<br><br>${shareSchedule.description}` : ''}</div>`
+      const fd = new FormData()
+      fd.append('receiver_ids', shareSelectedIds.join(','))
+      fd.append('subject', `📅 일정 공유: ${shareSchedule.title}`)
+      fd.append('content', content)
+      const res = await fetch('/api/message/send', { method: 'POST', body: fd }).then(r => r.json())
+      if (res.status === 'success') {
+        alert(`${shareSelectedIds.length}명에게 일정을 공유했습니다!`)
+        setShareSchedule(null)
+      } else {
+        alert(res.msg || '전송 실패')
+      }
+    } catch { alert('오류가 발생했습니다.') }
+    finally { setShareSending(false) }
   }
 
   if (loading) return <Loading />
@@ -595,6 +629,7 @@ export default function SchedulePage() {
                               </button>
                             )}
                             <button className="btn btn-sm btn-outline-secondary py-0 px-1" onClick={() => openEdit(s)}>✏️</button>
+                            <button className="btn btn-sm btn-outline-success py-0 px-1" onClick={() => openShare(s)} title="편지로 공유">✉️</button>
                             <button className="btn btn-sm btn-outline-danger py-0 px-1" onClick={() => deleteClick(s.id)}>🗑️</button>
                           </div>
                         </div>
@@ -821,6 +856,50 @@ export default function SchedulePage() {
                 finally { setSavingRoute(false) }
               }}>{savingRoute ? '저장 중...' : '저장'}</button>
               <button className="btn btn-sm btn-outline-secondary" onClick={() => setEditRoute(null)}>취소</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 일정 공유 모달 */}
+      {shareSchedule && (
+        <div className="modal fade show d-block" tabIndex={-1} style={{ background: 'rgba(0,0,0,0.5)' }}>
+          <div className="modal-dialog modal-dialog-centered">
+            <div className="modal-content" style={{ borderRadius: 16 }}>
+              <div className="modal-header border-0 pb-0">
+                <h6 className="fw-bold">✉️ 일정 편지로 공유</h6>
+                <button className="btn-close" onClick={() => setShareSchedule(null)} />
+              </div>
+              <div className="modal-body">
+                <div className="bg-light rounded p-2 mb-3 small">
+                  <strong>📅 {shareSchedule.title}</strong><br />
+                  🕐 {shareSchedule.event_date ? formatKST(shareSchedule.event_date, { month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}
+                  {shareSchedule.location && <><br />📍 {shareSchedule.location}</>}
+                </div>
+                <div className="mb-2">
+                  <label className="form-label small fw-bold">보낼 사람 선택</label>
+                  <div className="border rounded p-2" style={{ maxHeight: 200, overflowY: 'auto' }}>
+                    {shareUsers.length === 0 && <div className="text-muted small">친구가 없습니다.</div>}
+                    {shareUsers.map(u => (
+                      <div key={u.id} className="form-check">
+                        <input className="form-check-input" type="checkbox" id={`share-${u.id}`}
+                          checked={shareSelectedIds.includes(u.id)}
+                          onChange={() => setShareSelectedIds(prev => prev.includes(u.id) ? prev.filter(x => x !== u.id) : [...prev, u.id])} />
+                        <label className="form-check-label small" htmlFor={`share-${u.id}`}>
+                          {u.username}{u.real_name ? ` (${u.real_name})` : ''}
+                        </label>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="small text-muted">편지 발송 시 벗 1명당 10蹄가 차감됩니다.</div>
+              </div>
+              <div className="modal-footer border-0 pt-0">
+                <button className="btn btn-sm btn-outline-secondary" onClick={() => setShareSchedule(null)}>취소</button>
+                <button className="btn btn-sm btn-success" onClick={handleShare} disabled={shareSending || shareSelectedIds.length === 0}>
+                  {shareSending ? '전송 중...' : `보내기 (${shareSelectedIds.length > 0 ? shareSelectedIds.length * 10 : 10}蹄)`}
+                </button>
+              </div>
             </div>
           </div>
         </div>
