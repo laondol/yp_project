@@ -71,6 +71,25 @@ function speak(text: string, lang = 'ko-KR', onEnd?: () => void) {
   setTimeout(() => synth.speak(utter), 150)
 }
 
+// 마이크 시작/종료 신호음
+function playBeep(freq = 880, duration = 120) {
+  try {
+    const AC = window.AudioContext || (window as any).webkitAudioContext
+    if (!AC) return
+    const ctx = new AC()
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+    osc.connect(gain); gain.connect(ctx.destination)
+    osc.type = 'sine'
+    osc.frequency.value = freq
+    gain.gain.setValueAtTime(0.08, ctx.currentTime)
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration / 1000)
+    osc.start()
+    osc.stop(ctx.currentTime + duration / 1000)
+    osc.onended = () => ctx.close()
+  } catch {}
+}
+
 export default function TongBotChatPage() {
   const navigate = useNavigate()
   const [bot, setBot] = useState<BotInfo | null>(null)
@@ -98,6 +117,7 @@ export default function TongBotChatPage() {
   const sendingRef = useRef(false)
   const lastTranscriptRef = useRef('')
   const silenceTimerRef = useRef<number | null>(null)
+  const ttsSpeakingRef = useRef(false)
 
   useEffect(() => {
     try { localStorage.setItem('tongbot_auto_tts', String(autoTts)) } catch {}
@@ -114,6 +134,24 @@ export default function TongBotChatPage() {
         sendChatRef.current(t)
       }
     }, 3000)
+  }
+
+  // 통벗 말하는 동안 마이크 중지 (에코 루프 방지: 봇 목소리를 마이크가 듣는 것 차단)
+  const suspendMicForTts = () => {
+    ttsSpeakingRef.current = true
+    if (silenceTimerRef.current) { window.clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null }
+    try { recognitionRef.current?.stop() } catch {}
+  }
+
+  // 통벗 말 끝나면 연속 듣기 재개
+  const resumeMicIfContinuous = () => {
+    ttsSpeakingRef.current = false
+    if (continuousRef.current) {
+      setTimeout(() => {
+        if (!continuousRef.current || ttsSpeakingRef.current) return
+        try { recognitionRef.current?.start(); setIsListening(true) } catch {}
+      }, 300)
+    }
   }
 
   useEffect(() => {
@@ -176,9 +214,9 @@ export default function TongBotChatPage() {
     }
     recognition.onend = () => {
       setIsListening(false)
-      if (continuousRef.current) {
+      if (continuousRef.current && !ttsSpeakingRef.current) {
         setTimeout(() => {
-          if (!continuousRef.current) return
+          if (!continuousRef.current || ttsSpeakingRef.current) return
           try { recognitionRef.current?.start(); setIsListening(true) } catch {}
         }, 400)
       }
@@ -200,8 +238,10 @@ export default function TongBotChatPage() {
       if (silenceTimerRef.current) { window.clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null }
       recognitionRef.current?.stop()
       setIsListening(false)
+      playBeep(520)
       return
     }
+    playBeep(880)
     startRecognition(false)
   }, [isListening, startRecognition])
 
@@ -212,11 +252,13 @@ export default function TongBotChatPage() {
     try { localStorage.setItem('tongbot_listen_continuous', String(on)) } catch {}
     if (on) {
       lastTranscriptRef.current = ''
+      playBeep(880)
       startRecognition(true)
     } else {
       if (silenceTimerRef.current) { window.clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null }
       recognitionRef.current?.stop()
       setIsListening(false)
+      playBeep(520)
     }
   }, [startRecognition])
 
@@ -238,10 +280,15 @@ export default function TongBotChatPage() {
     if (speakingIdx === idx || synth.speaking) {
       synth.cancel()
       setSpeakingIdx(null)
+      resumeMicIfContinuous()
       return
     }
     setSpeakingIdx(idx)
-    speak(text, 'ko-KR', () => setSpeakingIdx(null))
+    suspendMicForTts()
+    speak(text, 'ko-KR', () => {
+      setSpeakingIdx(null)
+      resumeMicIfContinuous()
+    })
   }, [speakingIdx])
 
   const sendChat = (override?: string) => {
@@ -272,9 +319,10 @@ export default function TongBotChatPage() {
       if (d.voice_cmd === 'off') setAutoTts(false)
       if (d.listen_cmd === 'on' && !continuousRef.current) setContinuousMode(true)
       if (d.listen_cmd === 'off' && continuousRef.current) setContinuousMode(false)
-      // 자동 TTS
+      // 자동 TTS (통벗 말하는 동안 마이크 중지 → 말 끝나면 재개)
       if ((autoTts || d.voice_cmd === 'on') && reply) {
-        setTimeout(() => speak(reply), 300)
+        suspendMicForTts()
+        setTimeout(() => speak(reply, 'ko-KR', resumeMicIfContinuous), 300)
       }
     }).catch(() => setMessages(prev => [...prev, { role: 'bot', text: '응답 실패', name: 'AI' }]))
       .finally(() => {
