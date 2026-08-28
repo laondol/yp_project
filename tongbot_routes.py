@@ -1201,8 +1201,12 @@ def _ai_reply(bot, user, user_msg):
             if memo_blk:
                 out = out + '\n' + memo_blk
             return f"{_m['emoji']} {out}"
-    except:
-        pass
+    except Exception:
+        import traceback
+        try:
+            current_app.logger.error(f'통벗 AI 오류 [{bot.bot_name}]: {traceback.format_exc()}')
+        except Exception:
+            pass
     return f"{_m['emoji']} {user.username}님, 항상 응원하고 있어요. 무엇을 도와드릴까요?"
 
 def _get_shared_knowledge(msg):
