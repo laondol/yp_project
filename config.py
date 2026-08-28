@@ -28,7 +28,7 @@ class Config:
     GG_PUBLTOLT_API_KEY = os.getenv('GG_PUBLTOLT_API_KEY', '')
     EX_CONSTRUCTION_API_KEY = os.getenv('EX_CONSTRUCTION_API_KEY', '')
     MOTIF_API_KEY = os.getenv('MOTIF_API_KEY', '')             # ← 추가
-    MOTIF_BASE_URL = os.getenv('MOTIF_BASE_URL', 'https://chat.motiftech.io/openapi/v1')  # ← 추가
+    MOTIF_BASE_URL = os.getenv('MOTIF_BASE_URL', 'https://api-cbt.morphfactory.io/v1')
     OPENWEATHER_API_KEY = os.getenv('OPENWEATHER_API_KEY', '')
 
     # 외부 FTP 저장소 (일반 파일 첨부: /api/upload/file → FTP, 다운로드는 Flask가 중계)

@@ -978,6 +978,7 @@ function BotSettingsPanel({ data, load, onClose }: { data: any; load: () => void
         <label className="form-label small fw-bold">LLM 제공자</label>
         <select className="form-select form-select-sm" value={llmProvider} onChange={e => setLlmProvider(e.target.value)}>
           <option value="motif">MOTIF (기본)</option>
+          <option value="motif_beta">MOTIF 베타 (morphfactory)</option>
           <option value="groq">Groq</option>
           <option value="openai">OpenAI</option>
         </select>
@@ -995,6 +996,14 @@ function BotSettingsPanel({ data, load, onClose }: { data: any; load: () => void
           </button>
         </div>
         <small className="text-muted d-block mt-1">비워두면 기본 키가 사용됩니다.</small>
+      </div>
+
+      {/* Base URL */}
+      <div className="mb-2">
+        <label className="form-label small fw-bold">Base URL (선택)</label>
+        <input className="form-control form-control-sm" type="text" 
+          placeholder="기본: https://chat.motiftech.io/openapi/v1" />
+        <small className="text-muted d-block mt-1">커스텀 API 서버 사용 시 입력하세요.</small>
       </div>
 
       <div className="d-flex gap-2 mt-3">
