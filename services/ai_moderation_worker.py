@@ -3,7 +3,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from run import app
 from models import db, ShareReport, User, Message
-from services.ai_service import moderate_image, _groq_json
+from services.ai_service import moderate_image, _motif_json
 from datetime import datetime, timedelta
 
 INTERVAL = 2
@@ -33,7 +33,7 @@ def _classify_text(report):
         title = report.title or ''
         desc = report.description or ''
         prompt = "양평군 공유 글을 분류하세요.\n제목:" + title + "\n내용:" + desc + "\nJSON: {\"category\": \"풍경/장소/맛집/가게/음식/건물/시설/사건/기타\"}"
-        data = _groq_json("양평군 공유 분류 AI", prompt)
+        data = _motif_json("양평군 공유 분류 AI", prompt)
         if isinstance(data, str):
             data = json.loads(data)
         return data.get('category', report.ai_category or '기타')

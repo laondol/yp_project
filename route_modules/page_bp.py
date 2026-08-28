@@ -60,7 +60,7 @@ def ai_chat_send():
         knowledges = AiKnowledge.query.order_by(AiKnowledge.id.desc()).limit(30).all()
         if knowledges:
             kb_text = '\n[최고책임자가 가르친 정보]\n' + '\n'.join([f'Q: {k.question}\nA: {k.answer}' for k in knowledges])
-        client = OpenAI(base_url="https://api.groq.com/openai/v1", api_key=current_app.config.get('GROQ_API_KEY',''))
+        client = OpenAI(base_url="https://chat.motiftech.io/openapi/v1", api_key=current_app.config.get('MOTIF_API_KEY',''))
         system_prompt = f"""너는 함께사는양평의 '양평AI'야. 네 존재 목적은 회원과 비회원이 함께사는양평 플랫폼을 편리하게 이용하도록 돕는 거야.
 {context}
 {kb_text}
@@ -81,7 +81,7 @@ def ai_chat_send():
 절대 금지: 지어내기, 정치·종교 논쟁, 개인정보 수집
 말투: ~요, ~입니다 체. 이모지 적당히. 한국어."""
         resp = client.chat.completions.create(
-            model="llama-3.1-8b-instant",
+            model="motif-12.7b",
             messages=[
                 {"role":"system","content":system_prompt},
                 {"role":"user","content":msg}

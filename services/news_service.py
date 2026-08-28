@@ -2,24 +2,42 @@ import json, re
 from datetime import datetime
 from openai import OpenAI
 
-GROQ_MODEL = "llama-3.3-70b-versatile"
+MOTIF_MODEL = "motif-12.7b"
 
-def _groq_text(system, user, format_json=False, timeout=120):
+def _motif_text(system, user, format_json=False, timeout=120):
     try:
         from flask import current_app
-        key = current_app.config.get("GROQ_API_KEY", "")
-        client = OpenAI(api_key=key, base_url="https://api.groq.com/openai/v1")
-        kwargs = {"model": GROQ_MODEL, "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user}
-        ], "timeout": timeout}
+        key = current_app.config.get("MOTIF_API_KEY", "")
+        client = OpenAI(api_key=key, base_url="https://chat.motiftech.io/openapi/v1")
+        kwargs = {
+            "model": MOTIF_MODEL,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user}
+            ],
+            "timeout": timeout,
+        }
         if format_json:
             kwargs["response_format"] = {"type": "json_object"}
         resp = client.chat.completions.create(**kwargs)
-        content = resp.choices[0].message.content
-        return json.loads(content) if format_json else content
+        content = resp.choices[0].message.content or ""
+        if format_json:
+            t = content.strip()
+            if t.startswith("```"):
+                t = t.split("\n", 1)[1] if "\n" in t else t[3:]
+                if t.endswith("```"):
+                    t = t[:-3]
+                t = t.strip()
+                if t.startswith("json"):
+                    t = t[4:].strip()
+            while "<think>" in t and "</think>" in t:
+                s = t.find("<think>"); e = t.find("</think>") + len("</think>"); t = (t[:s] + t[e:]).strip()
+            return json.loads(t)
+        while "<think>" in content and "</think>" in content:
+            s = content.find("<think>"); e = content.find("</think>") + len("</think>"); content = (content[:s] + content[e:]).strip()
+        return content
     except Exception as e:
-        print(f"[NewsService] Groq 오류: {e}")
+        print(f"[NewsService] Motif 오류: {e}")
         return {} if format_json else None
 
 def ai_search_news(news_type='world', trending_context='', labor_only=False):
@@ -81,7 +99,7 @@ Yangpyeong residents should know about:
 Output in JSON array format:
 {{"news": [{{"title": "English search keyword for news lookup (e.g. 'EU AI regulation 2026', 'global food price crisis')", "summary": "한국어 3줄 요약 (Korean)", "reason": "양평군민 생활과 연결되는 이유를 한국어로 구체적으로 (Korean)", "category": "세계뉴스/환경뉴스/건강정보/복지정보/농업정보/관광소식 중 하나"}}]}}
 CRITICAL: NEVER make up fake news or fake URLs. title must be a real English search keyword. summary and reason in Korean."""
-    result = _groq_text(system, prompt, format_json=True)
+    result = _motif_text(system, prompt, format_json=True)
     if not result:
         return []
     try:
@@ -99,7 +117,7 @@ def ai_translate_and_format(title, content, source_lang="en"):
 }}
 원본 제목: {title}
 원본 내용: {content[:3000]}"""
-    return _groq_text(system, prompt, format_json=True)
+    return _motif_text(system, prompt, format_json=True)
 
 def ai_summarize_url(text):
     system = "당신은 기사 요약 전문가입니다. 한국어로 답변하세요. '본문바로가기','블로그','카테고리','검색','메뉴','이웃추가','공유하기','URL복사','신고하기','폰트크기' 등 블로그 UI/네비게이션 텍스트는 전부 무시하고, 오직 기사의 핵심 본문 내용만 요약하세요."
@@ -111,7 +129,7 @@ def ai_summarize_url(text):
   "is_useful": true/false
 }}
 내용: {text[:3000]}"""
-    return _groq_text(system, prompt, format_json=True)
+    return _motif_text(system, prompt, format_json=True)
 
 def clean_cjk_text(title, summary='', content=''):
     """한자/일본어를 한국어로 변환. 불가피하면 괄호에 한국어 발음 추가."""
@@ -129,7 +147,7 @@ def clean_cjk_text(title, summary='', content=''):
 
 JSON 형식:
 {{"title": "수정된 제목", "summary": "수정된 요약", "content": "수정된 본문"}}"""
-    result = _groq_text(system, prompt, format_json=True)
+    result = _motif_text(system, prompt, format_json=True)
     if not result:
         return title, summary, content
     return (

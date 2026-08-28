@@ -1,7 +1,7 @@
 import os
 from flask import Blueprint, render_template, request, redirect, url_for, jsonify, session, current_app, send_file
 from models import db, LegalPost, User, Message, LawyerSchedule, LegalAppointment, TongBotSchedule, BlockedEmail
-from route_modules.common import is_privileged_viewer, mask_name, mask_title, mask_post_item, masked_email, is_legal_manager, LEGAL_MANAGER_EMAIL
+from route_modules.common import is_privileged_viewer, mask_name, mask_title, mask_post_item, masked_email, is_legal_manager, LEADER_EMAIL
 
 legal_bp = Blueprint('legal', __name__)
 
@@ -35,9 +35,9 @@ def legal_issues_write():
             keyword = request.form.get('keyword', title)
             try:
                 from openai import OpenAI
-                client = OpenAI(base_url="https://api.groq.com/openai/v1", api_key=current_app.config.get('GROQ_API_KEY',''))
+                client = OpenAI(base_url="https://api.motif.com/openai/v1", api_key=current_app.config.get('MOTIF_API_KEY',''))
                 resp = client.chat.completions.create(
-                    model="llama-3.1-8b-instant",
+                    model="motif-12.7b",
                     messages=[{"role":"system","content":"한국의 최신 노동 관련 이슈에 대해 500자 내외로 정리해줘. 마크다운 없이 일반 텍스트로."},
                               {"role":"user","content":keyword}],
                     temperature=0.5, max_tokens=600
@@ -74,7 +74,7 @@ def legal_issue_comment(post_id):
     post.comments = comments
     db.session.commit()
     from services.email_service import EmailService
-    EmailService.send('daerilee@gmail.com', f'[노동이슈 댓글] {post.title}',
+    EmailService.send(_mgr.email, f'[노동이슈 댓글] {post.title}',
         f'작성자: {name}\n내용: {content}\n게시글: {post.title}')
     return redirect(url_for('legal_issue_detail', post_id=post_id))
 
@@ -84,103 +84,129 @@ def legal_issues_admin():
         return "권한 없음", 403
     posts = LegalPost.query.filter(LegalPost.password == '').order_by(LegalPost.created_at.desc()).limit(50).all()
     return _serve_spa()
-
 @legal_bp.route('/legal/issues/ai-suggest', methods=['POST'])
 def legal_issues_ai_suggest():
     if not is_legal_manager():
-        return jsonify({"error":"권한 없음"}), 403
-    count = 0
+        return jsonify({"status":"error","msg":"권한 없음"}), 403
+    source = request.form.get('source', '고용노동부')
+    SOURCES = {
+        "고용노동부": "site:moel.go.kr 노동법 임금 부당해고 산업재해",
+        "중앙노동위원회": "site:clrc.go.kr 노동 분쟁 조정",
+        "한국노동연구원": "site:kli.re.kr 노동 정책 연구",
+        "월간노동법률": "site:laborlaw.co.kr 노동법률 판례",
+        "다음뉴스": "site:news.daum.net 노동법 임금체불 부당해고",
+        "한겨레": "site:hani.co.kr 노동 노동자 권리",
+    }
+    query = SOURCES.get(source, SOURCES["고용노동부"])
     try:
-        import requests as req_lib
-        naver_id = current_app.config.get('NAVER_SEARCH_CLIENT_ID','')
-        naver_secret = current_app.config.get('NAVER_SEARCH_CLIENT_SECRET','')
-        if naver_id and naver_secret:
-            # 여러 키워드로 검색
-            keywords = ['노동법', '임금체불', '부당해고', '노동위원회']
-            all_items = []
-            for kw in keywords:
-                try:
-                    resp = req_lib.get('https://openapi.naver.com/v1/search/news.json',
-                        headers={'X-Naver-Client-Id':naver_id,'X-Naver-Client-Secret':naver_secret},
-                        params={'query':kw,'display':5,'sort':'date'}, timeout=10)
-                    items = resp.json().get('items',[])
-                    all_items.extend(items)
-                except:
-                    pass
-            # 중복 제거 (link 기준)
-            seen_links = set()
-            unique_items = []
-            for item in all_items:
-                link = item.get('link','')
-                if link not in seen_links:
-                    seen_links.add(link)
-                    unique_items.append(item)
-            # 최대 10개
-            for item in unique_items[:10]:
-                title = item.get('title','').replace('<b>','').replace('</b>','')
-                desc = item.get('description','').replace('<b>','').replace('</b>','')
-                link = item.get('link','')
-                content = f'{desc}\n\n<a href="{link}" target="_blank">원문보기</a>'
-                post = LegalPost(title=title, content=content, email=session.get('email',''),
-                                author_name=session.get('real_name','이훈노무사'),
-                                user_id=session.get('user_id'), password='', labor_approved=False)
-                db.session.add(post)
-                count += 1
-            db.session.commit()
-            if count == 0:
-                return jsonify({"status":"error","error":"검색 결과를 찾지 못했습니다."})
-        else:
-            # Naver API 없는 경우 AI로 대체
-            from openai import OpenAI
-            client = OpenAI(base_url="https://api.groq.com/openai/v1", api_key=current_app.config.get('GROQ_API_KEY',''))
-            resp = client.chat.completions.create(
-                model="llama-3.1-8b-instant",
-                messages=[{"role":"system","content":"한국 최신 노동 이슈 10개. JSON: [{\"title\":\"...\",\"content\":\"...\"}]"},
-                          {"role":"user","content":"노동법 임금체불 부당해고"}],
-                temperature=0.7, max_tokens=2000
-            )
-            import json as _json
-            items = _json.loads(resp.choices[0].message.content)
-            for item in items:
-                post = LegalPost(title=item['title'], content=item['content'], email=session.get('email',''),
-                                author_name=session.get('real_name','이훈노무사'),
-                                user_id=session.get('user_id'), password='', labor_approved=False)
-                db.session.add(post)
-                count += 1
-            db.session.commit()
-            if count == 0:
-                return jsonify({"status":"error","error":"AI 생성 결과를 찾지 못했습니다."})
+        from services.ai_service import _motif_json
+        system = f"당신은 {source} 전문 뉴스 큐레이터입니다. 반드시 실제 존재하는 최근 노동 뉴스만 제안하세요."
+        prompt = (
+            "다음 검색 조건으로 찾을 수 있는, 경기 양평군민이 꼭 알아야 할 최신 노동 뉴스 5건을 제안해 주세요.\n"
+            "검색 조건: " + query + "\n"
+            "각 항목은 구체적인 키워드를 포함하세요.\n"
+            "다음 JSON 배열 형식으로 출력하세요:\n"
+            '{\n  "news": [{"title": "뉴스 제목", "summary": "한국어 3줄 요약", "content": "기사 본문 (300자 내외)"}]\n}\n'
+            "중요: 절대 가짜 정보를 만들지 마세요."
+        )
+        result = _motif_json(system, prompt)
+        if not result:
+            return jsonify({"status":"error","msg":"AI 추천 실패. Motif API를 확인하세요."})
+        items = result.get("news", [])
+        news_list = []
+        for item in items:
+            title = item.get("title","")
+            if not title:
+                continue
+            news_list.append({
+                "title": f"[{source}] {title}",
+                "summary": item.get("summary",""),
+                "content": item.get("content", item.get("summary","")),
+                "source": source,
+            })
+        return jsonify({"status":"success","count":len(news_list),"items":news_list})
     except Exception as e:
-        return jsonify({"status":"error","error":f"오류: {str(e)[:80]}"})
-    return jsonify({"status":"success","count":count})
+        import traceback
+        traceback.print_exc()
+        return jsonify({"status":"error","msg":f"서버 오류: {str(e)[:100]}"}), 500
+
+@legal_bp.route('/legal/issues/ai-save', methods=['POST'])
+def legal_issues_ai_save():
+    if not is_legal_manager():
+        return jsonify({"status":"error","msg":"권한 없음"}), 403
+    data = request.get_json(silent=True) or {}
+    title = data.get("title","")
+    content_html = data.get("content","")
+    source = data.get("source","")
+    if not title:
+        return jsonify({"status":"error","msg":"제목 필요"}), 400
+    post = LegalPost(
+        title=title,
+        content=f'<p>{content_html}</p><p class="text-muted small">출처: {source}</p>',
+        email=session.get('email',''),
+        author_name=session.get('real_name','이훈노무사'),
+        user_id=session.get('user_id'),
+        password='',
+        labor_approved=False
+    )
+    db.session.add(post)
+    db.session.commit()
+    return jsonify({"status":"success","id":post.id})
 
 @legal_bp.route('/legal/issues/import-url', methods=['POST'])
 def legal_issues_import_url():
     if not is_legal_manager():
-        return jsonify({"error":"권한 없음"}), 403
+        return jsonify({"status":"error","msg":"권한 없음"}), 403
     url = request.form.get('url','').strip()
     if not url:
-        return jsonify({"error":"URL 필요"})
+        return jsonify({"status":"error","msg":"URL을 입력하세요."})
     try:
         import requests as req_lib
         from bs4 import BeautifulSoup
-        resp = req_lib.get(url, headers={'User-Agent':'Mozilla/5.0'}, timeout=10)
+        resp = req_lib.get(url, headers={'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}, timeout=15)
+        resp.encoding = 'utf-8'
         soup = BeautifulSoup(resp.text, 'html.parser')
-        title = soup.title.string if soup.title else url[:50]
-        # 본문 추출 시도
-        body = ''
-        for p in soup.find_all('p')[:10]:
-            if len(p.get_text(strip=True)) > 20:
-                body += p.get_text(strip=True) + '\n'
-        content = body[:2000] or title
+        for tag in soup(['script','style','nav','footer','header','aside','iframe','noscript','form','button']):
+            tag.decompose()
+        for pattern in ['gnb','lnb','menu','navi','sidebar','footer','header','banner','ad ','wrap_','search','comment','reply','btn_','link_']:
+            for el in soup.find_all(class_=lambda c: c and pattern in str(c).lower()):
+                el.decompose()
+            for el in soup.find_all(id=lambda i: i and pattern in str(i).lower()):
+                el.decompose()
+        main_area = soup.find('article') or soup.find('main') or soup.find('[role="main"]')
+        raw_text = main_area.get_text(separator=chr(10), strip=True) if main_area else soup.get_text(separator=chr(10), strip=True)
+        ui_keywords = ['본문 바로가기','카테고리 이동','MY메뉴','검색','공유하기','URL복사','신고하기',
+                       '메뉴 열기','메뉴 닫기','이웃추가','폰트 크기','폰트크기','블로그','카페',
+                       '메일','뉴스','지도','로그인','MY','메뉴','펼쳐보기','더보기']
+        lines_list = [l for l in raw_text.split(chr(10)) if len(l.strip()) >= 3 and not any(kw in l for kw in ui_keywords)]
+        body_text = chr(10).join(lines_list)[:3000]
     except Exception as e:
-        title, content = url[:50], f'URL 가져오기 실패: {e}'
-    post = LegalPost(title=title, content=content, email=session.get('email',''),
-                    author_name=session.get('real_name','이훈노무사'),
-                    user_id=session.get('user_id'), password='', labor_approved=False)
-    db.session.add(post)
-    db.session.commit()
-    return jsonify({"status":"success","id":post.id})
+        return jsonify({"status":"error","msg":f"페이지를 가져올 수 없습니다: {str(e)[:80]}"})
+    try:
+        from services.news_service import ai_summarize_url
+        result = ai_summarize_url(body_text[:3000])
+    except Exception:
+        result = None
+    if not result:
+        result = {"title": url[:50], "summary": "AI 요약 실패", "category": "정책정보", "is_useful": True}
+    try:
+        category = result.get('category', '정책정보')
+        post = LegalPost(
+            title=result.get('title', '가져온 기사'),
+            content=f'<p>{result.get("summary", "")}</p>' + chr(10) + f'<p><a href="{url}" target="_blank">원문보기</a></p>',
+            email=session.get('email',''),
+            author_name=session.get('real_name','이훈노무사'),
+            user_id=session.get('user_id'),
+            password='',
+            labor_approved=False
+        )
+        db.session.add(post)
+        db.session.commit()
+        return jsonify({"status":"success","id":post.id})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"status":"error","msg":f"저장 실패: {str(e)[:80]}"}), 500
 
 @legal_bp.route('/legal/issues/toggle/<int:post_id>', methods=['POST'])
 def legal_issues_toggle(post_id):
@@ -397,7 +423,7 @@ def legal_appointment_book():
         return jsonify({'status': 'error', 'msg': '날짜 형식이 올바르지 않습니다.'})
     if appt_date <= date.today() + timedelta(days=1):
         return jsonify({'status': 'error', 'msg': '이틀 후부터 예약 가능합니다.'})
-    counselor = User.query.filter_by(email='daerilee@gmail.com').first()
+    counselor = User.query.filter(User.role == 'admin', User.managed_pages.like('%legal%')).first()
     if counselor and _schedule_time_conflict(counselor.id, appt_date, time_slot):
         return jsonify({'status': 'error', 'msg': '상담사의 개인 일정과 겹칩니다. 다른 시간대를 선택해 주세요.'})
     uid = session.get('user_id')
@@ -429,6 +455,8 @@ def api_legal_issues():
         'content': n.content or '', 'source_url': n.source_url or '',
         'author_name': n.source_name or '뉴스',
         'comment_count': 0,
+        'like_count': n.like_count or 0,
+        'dislike_count': n.dislike_count or 0,
         'created_at': n.created_at.isoformat() if n.created_at else None,
         'type': 'news',
     } for n in news]
@@ -468,9 +496,9 @@ def api_legal_issues_write():
     content = data.get('content', '').strip()
     if not content:
         keyword = data.get('keyword', title)
-        from services.ai_service import call_groq
+        from services.ai_service import call_motif
         prompt = f"다음 주제에 대한 노동법률 정보를 한국어로 500자 내외로 작성해주세요: {keyword}"
-        content = call_groq(prompt) or '내용 생성 실패'
+        content = call_motif(prompt) or '내용 생성 실패'
     post = LegalPost(title=title, content=content, email=session.get('email', ''),
                    author_name=session.get('real_name') or session.get('username', '이훈노무사'),
                    user_id=session.get('user_id'), password='', labor_approved=True)
@@ -515,7 +543,7 @@ def _delete_upload(rel_path):
 
 def _notify_legal_new_post(post):
     from services.email_service import EmailService
-    manager = User.query.filter_by(email=LEGAL_MANAGER_EMAIL).first()
+    manager = User.query.filter(User.role == 'admin', User.managed_pages.like('%legal%')).first()
     view_link = f"{request.host_url}legal/{post.id}"
     edit_link = f"{request.host_url}legal/edit/{post.id}"
     view_link_rel = f"/legal/{post.id}"
@@ -533,6 +561,25 @@ def _notify_legal_new_post(post):
                 receiver_id=manager.id,
                 subject=f'[법률상담 글 등록] {post.title}',
                 content=body + f"\n\n관리자 확인 링크: {view_link_rel}", letter_type='private'))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+    leaders = User.query.filter(User.role == "leader").all()
+    for _ld in leaders:
+        if manager and _ld.id == manager.id:
+            continue
+        try:
+            EmailService.send(_ld.email, f"[법률상담 글 등록] {post.title}", body)
+        except Exception:
+            pass
+        try:
+            db.session.add(Message(
+                sender_id=post.user_id or _system_sender_id(),
+                sender_name=post.author_name or "익명",
+                receiver_id=_ld.id,
+                subject=f"[법률상담 글 등록] {post.title}",
+                content=body + "\n\n관리자 확인: " + view_link_rel,
+                letter_type="private"))
             db.session.commit()
         except Exception:
             db.session.rollback()
@@ -558,7 +605,7 @@ def _notify_legal_new_post(post):
 
 def _notify_legal_appointment(appt, name, email, phone, date_str, time_slot, location, content):
     from services.email_service import EmailService
-    manager = User.query.filter_by(email=LEGAL_MANAGER_EMAIL).first()
+    manager = User.query.filter(User.role == 'admin', User.managed_pages.like('%legal%')).first()
     view_link = f"{request.host_url}legal/schedule"
     edit_link = f"{request.host_url}legal/appointment/edit/{appt.id}"
     view_link_rel = f"/legal/schedule"
@@ -579,6 +626,25 @@ def _notify_legal_appointment(appt, name, email, phone, date_str, time_slot, loc
             db.session.commit()
         except Exception:
             pass
+    leaders = User.query.filter(User.role == "leader").all()
+    for _ld in leaders:
+        if manager and _ld.id == manager.id:
+            continue
+        try:
+            EmailService.send(_ld.email, f"[법률상담 예약] {name}", body)
+        except Exception:
+            pass
+        try:
+            db.session.add(Message(
+                sender_id=appt.user_id or _system_sender_id(),
+                sender_name=name or "익명",
+                receiver_id=_ld.id,
+                subject=f"[법률상담 예약] {name}",
+                content=body + "\n\n관리자 확인: " + view_link_rel,
+                letter_type="private"))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
     if appt.user_id:
         try:
             db.session.add(Message(
@@ -642,6 +708,56 @@ def legal_post_confirm(post_id):
     return jsonify({'status': 'success'})
 
 
+
+
+@legal_bp.route("/legal/post/<int:post_id>/answer", methods=["POST"])
+def legal_admin_answer(post_id):
+    from datetime import datetime, timezone
+    from services.email_service import EmailService
+    if not is_legal_manager():
+        return jsonify({"status": "error", "msg": "권한이 없습니다."}), 403
+    post = LegalPost.query.get_or_404(post_id)
+    post.answer = request.form.get("answer", "")
+    post.answered_at = datetime.now(timezone.utc)
+    post.status = "approved"
+    db.session.commit()
+    if post.user_id:
+        try:
+            db.session.add(Message(
+                sender_id=_system_sender_id(),
+                sender_name="양평마을",
+                receiver_id=post.user_id,
+                subject="[법률상담] 답변이 등록되었습니다",
+                content=f"{post.title}에 대한 답변이 등록되었습니다.\n\n{request.host_url}legal/{post.id}",
+                letter_type="private"))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+    if post.email:
+        try:
+            EmailService.send(post.email, "[법률상담] 답변이 등록되었습니다",
+                f"{post.title}에 대한 답변이 등록되었습니다.\n\n{request.host_url}legal/{post.id}")
+        except Exception:
+            pass
+    admins = User.query.filter(User.role.in_(["admin", "leader"])).all()
+    for admin in admins:
+        try:
+            EmailService.send(admin.email, f"[법률상담 답변] {post.title}",
+                f"{session.get(chr(39)+chr(39),chr(39))}님이 답변을 등록했습니다.\n\n{request.host_url}legal/admin")
+        except:
+            pass
+        try:
+            db.session.add(Message(
+                sender_id=_system_sender_id(),
+                sender_name="양평마을",
+                receiver_id=admin.id,
+                subject=f"[법률상담 답변] {post.title}",
+                content=f"{session.get(chr(39)+chr(39),chr(39))}님이 답변을 등록했습니다.\n\n{request.host_url}legal/admin",
+                letter_type="private"))
+            db.session.commit()
+        except:
+            db.session.rollback()
+    return jsonify({"status": "success"})
 @legal_bp.route('/legal/appointment/<int:appt_id>/edit', methods=['GET', 'POST'])
 def legal_appointment_edit(appt_id):
     uid = session.get('user_id')
@@ -685,4 +801,23 @@ def legal_appointment_approve(appt_id):
     appt.approved_at = datetime.now(timezone.utc)
     appt.approved_by = session.get('user_id')
     db.session.commit()
+    from services.email_service import EmailService
+    if appt.user_id:
+        try:
+            db.session.add(Message(
+                sender_id=_system_sender_id(),
+                sender_name="양평마을",
+                receiver_id=appt.user_id,
+                subject="[법률상담] 예약이 승인되었습니다",
+                content="법률상담 예약이 승인되었습니다.\n\n일시: " + str(appt.date) + " " + str(appt.time_slot) + "\n\n" + request.host_url + "legal/schedule",
+                letter_type="private"))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+    if appt.email:
+        try:
+            EmailService.send(appt.email, "[법률상담] 예약이 승인되었습니다",
+                "법률상담 예약이 승인되었습니다.\n\n일시: " + str(appt.date) + " " + str(appt.time_slot) + "\n\n" + request.host_url + "legal/schedule")
+        except Exception:
+            pass
     return jsonify({'status': 'success'})

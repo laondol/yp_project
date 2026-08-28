@@ -22,13 +22,13 @@ def _normalize_mode(mode):
     if any(k in m for k in ['지하철', '전철', '지하', 'subway', 'metro']): return '🚄 지하철'
     return '🚌 버스'
 
-def _groq_json(prompt, key, system=''):
-    """Groq 호출 후 첫 JSON 배열/객체 반환. 실패 시 None"""
+def _motif_json(prompt, key, system=''):
+    """Motif 호출 후 첫 JSON 배열/객체 반환. 실패 시 None"""
     import re as _re
     try:
-        resp = requests.post('https://api.groq.com/openai/v1/chat/completions',
+        resp = requests.post('https://chat.motiftech.io/openapi/v1/chat/completions',
             headers={'Authorization': f'Bearer {key}', 'Content-Type': 'application/json'},
-            json={'model': 'llama-3.1-8b-instant',
+            json={'model': 'motif-12.7b',
                   'messages': [{'role': 'system', 'content': system} for system in ([system] if system else [])] +
                               [{'role': 'user', 'content': prompt}],
                   'temperature': 0.1, 'max_tokens': 2000}, timeout=20)
@@ -43,8 +43,8 @@ def _groq_json(prompt, key, system=''):
 
 def _parse_memo_to_steps(memo, title, origin_hint, dest_hint):
     """AI로 자연어 메모를 steps 배열로 파싱. 실패 시 None"""
-    groq_key = current_app.config.get('GROQ_API_KEY', os.getenv('GROQ_API_KEY', ''))
-    if not groq_key:
+    motif_key = current_app.config.get('MOTIF_API_KEY', os.getenv('MOTIF_API_KEY', ''))
+    if not motif_key:
         return None
     system = ("당신은 이동 경로를 분석하는 도우미입니다. 사용자가 적은 이동 메모에서 이동수단별 구간을 추출합니다. "
               "출력은 반드시 JSON 배열이어야 하며, 배열 항목은 {\"mode\":\"도보|버스|지하철|기차|택시|자전거\","
@@ -57,7 +57,7 @@ def _parse_memo_to_steps(memo, title, origin_hint, dest_hint):
         f"출발지 힌트: {origin_hint or ''}, 도착지 힌트: {dest_hint or ''}\n"
         "위 내용에서 이동 구간을 순서대로 JSON 배열로 추출하세요. 이동 수단·장소·소요시간을 보다 정확히."
     )
-    return _groq_json(prompt, groq_key, system)
+    return _motif_json(prompt, motif_key, system)
 
 
 def _memo_narrative(steps, dest_name):
@@ -331,8 +331,8 @@ def bot_chat():
     # 알림 의도 감지 (알려줘·알림·울려줘·벨·진동 등)
     if not schedule_info and any(kw in msg for kw in ['알려줘','알림','울려줘','벨','진동','리마인드','remind']):
         try:
-            groq_key = current_app.config.get('GROQ_API_KEY', os.getenv('GROQ_API_KEY', ''))
-            if groq_key:
+            motif_key = current_app.config.get('MOTIF_API_KEY', os.getenv('MOTIF_API_KEY', ''))
+            if motif_key:
                 now = datetime.now()
                 reminder_prompt = f"""사용자의 알림 요청을 분석하여 아래 JSON만 출력하세요:
 {{
@@ -347,9 +347,9 @@ def bot_chat():
 }}
 오늘: {now.strftime('%Y-%m-%d %H:%M')} ({['월','화','수','목','금','토','일'][now.weekday()]}요일)
 사용자: {msg}"""
-                r = requests.post('https://api.groq.com/openai/v1/chat/completions',
-                    headers={'Authorization': f'Bearer {groq_key}', 'Content-Type': 'application/json'},
-                    json={'model': 'llama-3.1-8b-instant', 'messages': [{'role': 'user', 'content': reminder_prompt}], 'temperature': 0.1, 'max_tokens': 300}, timeout=10)
+                r = requests.post('https://chat.motiftech.io/openapi/v1/chat/completions',
+                    headers={'Authorization': f'Bearer {motif_key}', 'Content-Type': 'application/json'},
+                    json={'model': 'motif-12.7b', 'messages': [{'role': 'user', 'content': reminder_prompt}], 'temperature': 0.1, 'max_tokens': 300}, timeout=10)
                 if r.status_code == 200:
                     import json as _json
                     rd = _json.loads(r.json()['choices'][0]['message']['content'])
@@ -1168,16 +1168,16 @@ def _discover_talent(bot, user):
     try:
         from config import Config
         import requests
-        key = getattr(Config, 'GROQ_API_KEY', '')
+        key = getattr(Config, 'MOTIF_API_KEY', '')
         if not key:
             return _keyword_talent(bot)
         prompt = f"""다음 대화를 바탕으로 회원 '{user.username}'님의 숨은 재능이나 관심사를 발견하세요.
 10단어 이내로 간결하게 답변하세요.
 
 대화기록: {bot.memory or '없음'}"""
-        r = requests.post("https://api.groq.com/openai/v1/chat/completions",
+        r = requests.post("https://chat.motiftech.io/openapi/v1/chat/completions",
             headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-            json={"model": "llama-3.1-8b-instant", "messages": [{"role": "user", "content": prompt}], "max_tokens": 50},
+            json={"model": "motif-12.7b", "messages": [{"role": "user", "content": prompt}], "max_tokens": 50},
             timeout=15)
         if r.status_code == 200:
             return r.json()["choices"][0]["message"]["content"].strip()
@@ -1265,7 +1265,7 @@ def bot_review(draft_id):
     try:
         from config import Config
         import requests
-        key = getattr(Config, 'GROQ_API_KEY', '')
+        key = getattr(Config, 'MOTIF_API_KEY', '')
         prompt = f"""당신은 교정 도우미입니다. 회원이 작성한 글을 검토하고 다음을 제안하세요:
 1. 맞춤법/문법 교정
 2. 어디에 게시하면 좋을지 (공유마당/꿈꾸기/소식/법률상담/심리상담 중 선택)
@@ -1279,9 +1279,9 @@ def bot_review(draft_id):
 [게시추천]: (공유마당/꿈꾸기/소식/법률상담/심리상담 중 하나)
 [교정본]:
 (교정된 글 전체)"""
-        r = requests.post("https://api.groq.com/openai/v1/chat/completions",
+        r = requests.post("https://chat.motiftech.io/openapi/v1/chat/completions",
             headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-            json={"model": "llama-3.1-8b-instant", "messages": [{"role": "user", "content": prompt}], "max_tokens": 800},
+            json={"model": "motif-12.7b", "messages": [{"role": "user", "content": prompt}], "max_tokens": 800},
             timeout=30)
         review = ""
         suggestion = ""
@@ -1501,14 +1501,14 @@ def bot_schedule_ai_internal(uid, msg, user, bot=None):
 - find_free 시 duration_min 기본값 60"""
 
     try:
-        groq_key = current_app.config.get('GROQ_API_KEY', os.getenv('GROQ_API_KEY', ''))
-        if not groq_key:
+        motif_key = current_app.config.get('MOTIF_API_KEY', os.getenv('MOTIF_API_KEY', ''))
+        if not motif_key:
             return {"reply": "AI 서비스가 현재 이용 불가능합니다.", "action": "chat"}
 
-        resp = requests.post('https://api.groq.com/openai/v1/chat/completions',
-            headers={'Authorization': f'Bearer {groq_key}', 'Content-Type': 'application/json'},
+        resp = requests.post('https://chat.motiftech.io/openapi/v1/chat/completions',
+            headers={'Authorization': f'Bearer {motif_key}', 'Content-Type': 'application/json'},
             json={
-                'model': 'llama-3.1-8b-instant',
+                'model': 'motif-12.7b',
                 'messages': [
                     {'role': 'system', 'content': system_prompt},
                     {'role': 'user', 'content': msg}
@@ -2751,8 +2751,8 @@ def bot_trip_plan():
     office_lng = user.office_longitude
     work_start = user.work_start_time or '09:00'
 
-    groq_key = current_app.config.get('GROQ_API_KEY', os.getenv('GROQ_API_KEY',''))
-    if not groq_key: return jsonify({"error":"AI 서비스 불가"})
+    motif_key = current_app.config.get('MOTIF_API_KEY', os.getenv('MOTIF_API_KEY',''))
+    if not motif_key: return jsonify({"error":"AI 서비스 불가"})
 
     # Step 1: Parse date first
     today = datetime.now()
@@ -2760,9 +2760,9 @@ def bot_trip_plan():
 Output ONLY the date in YYYY-MM-DD format, nothing else.
 Text: {msg}"""
     try:
-        dr = requests.post('https://api.groq.com/openai/v1/chat/completions',
-            headers={'Authorization':f'Bearer {groq_key}','Content-Type':'application/json'},
-            json={'model':'llama-3.1-8b-instant','messages':[{'role':'user','content':date_prompt}],'temperature':0,'max_tokens':20}, timeout=10)
+        dr = requests.post('https://chat.motiftech.io/openapi/v1/chat/completions',
+            headers={'Authorization':f'Bearer {motif_key}','Content-Type':'application/json'},
+            json={'model':'motif-12.7b','messages':[{'role':'user','content':date_prompt}],'temperature':0,'max_tokens':20}, timeout=10)
         event_date_str = dr.json()['choices'][0]['message']['content'].strip()
         import re as _re
         dm = _re.search(r'\d{4}-\d{2}-\d{2}', event_date_str)
@@ -2784,9 +2784,9 @@ Rules:
 - Output ONLY JSON array, no explanation
 - Include ALL stops mentioned"""
     try:
-        resp = requests.post('https://api.groq.com/openai/v1/chat/completions',
-            headers={'Authorization':f'Bearer {groq_key}','Content-Type':'application/json'},
-            json={'model':'llama-3.1-8b-instant','messages':[
+        resp = requests.post('https://chat.motiftech.io/openapi/v1/chat/completions',
+            headers={'Authorization':f'Bearer {motif_key}','Content-Type':'application/json'},
+            json={'model':'motif-12.7b','messages':[
                 {'role':'system','content':system_prompt},
                 {'role':'user','content':msg}
             ],'temperature':0.1,'max_tokens':1000}, timeout=15)
@@ -2950,8 +2950,8 @@ def _moderate_chat(room_id):
         prompt = f"""당신은 채팅 중재자입니다. 다음 대화를 보고 분위기를 판단하세요.
 긍정적이면 칭찬, 부정적이면 부드럽게 조율하는 한 문장을 쓰세요.
 대화: {recent}"""
-        r = requests.post("https://api.groq.com/openai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {key}"}, json={"model":"llama-3.1-8b-instant","messages":[{"role":"user","content":prompt}],"max_tokens":100}, timeout=15)
+        r = requests.post("https://chat.motiftech.io/openapi/v1/chat/completions",
+            headers={"Authorization": f"Bearer {key}"}, json={"model":"motif-12.7b","messages":[{"role":"user","content":prompt}],"max_tokens":100}, timeout=15)
         if r.status_code == 200:
             reply = r.json()["choices"][0]["message"]["content"]
             db.session.add(ChatMessage(room_id=room_id, user_id=None, username=bot.bot_name, message=f"💬 {reply}", is_bot=True))

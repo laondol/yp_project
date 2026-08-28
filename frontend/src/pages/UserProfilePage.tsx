@@ -950,6 +950,7 @@ function BotSettingsPanel({ data, load, onClose }: { data: any; load: () => void
   const [name, setName] = useState(data.bot_name || '')
   const [llmProvider, setLlmProvider] = useState('motif')
   const [apiKey, setApiKey] = useState('')
+  const [showApiKey, setShowApiKey] = useState(false)
 
   const doRename = async () => {
     const n = name.trim()
@@ -986,8 +987,13 @@ function BotSettingsPanel({ data, load, onClose }: { data: any; load: () => void
       {/* API Key */}
       <div className="mb-2">
         <label className="form-label small fw-bold">API 키</label>
-        <input className="form-control form-control-sm" type="password" value={apiKey}
-          onChange={e => setApiKey(e.target.value)} placeholder="API 키 입력" />
+        <div className="input-group input-group-sm">
+          <input className="form-control" type={showApiKey ? 'text' : 'password'} value={apiKey}
+            onChange={e => setApiKey(e.target.value)} placeholder="API 키 입력" />
+          <button className="btn btn-outline-secondary" type="button" onClick={() => setShowApiKey(!showApiKey)}>
+            {showApiKey ? '🙈' : '👁️'}
+          </button>
+        </div>
         <small className="text-muted d-block mt-1">비워두면 기본 키가 사용됩니다.</small>
       </div>
 

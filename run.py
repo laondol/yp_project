@@ -204,6 +204,61 @@ def create_app():
                     with db.engine.connect() as _conn:
                         _conn.execute(_sa_text('ALTER TABLE news_article ADD COLUMN published_at TIMESTAMP WITH TIME ZONE'))
                         _conn.commit()
+            # 노동뉴스(labor_news_article) 테이블: 없으면 생성, 있으면 누락 컬럼 자동 보완
+            _labor_news_ddl = (
+                "CREATE TABLE IF NOT EXISTS labor_news_article ("
+                "id SERIAL PRIMARY KEY, title VARCHAR(300) NOT NULL, summary TEXT, content TEXT, "
+                "source_url TEXT, source_name VARCHAR(200), category VARCHAR(50) DEFAULT '정책정보', "
+                "is_selected BOOLEAN DEFAULT FALSE, is_ai_generated BOOLEAN DEFAULT FALSE, "
+                "ai_reason TEXT, created_by INTEGER, created_at TIMESTAMP, updated_at TIMESTAMP)"
+            )
+            with db.engine.connect() as _conn:
+                _conn.execute(_sa_text(_labor_news_ddl))
+                _conn.commit()
+            if 'labor_news_article' in _tbls:
+                _lcols = [c['name'] for c in _inspector.get_columns('labor_news_article')]
+                for _col_def in [
+                    ('source_url', 'TEXT'),
+                    ('source_name', "VARCHAR(200)"),
+                    ('category', "VARCHAR(50) DEFAULT '정책정보'"),
+                    ('is_selected', 'BOOLEAN DEFAULT FALSE'),
+                    ('is_ai_generated', 'BOOLEAN DEFAULT FALSE'),
+                    ('ai_reason', 'TEXT'),
+                    ('created_by', 'INTEGER'),
+                    ('created_at', 'TIMESTAMP'),
+                    ('updated_at', 'TIMESTAMP'),
+                ]:
+                    if _col_def[0] not in _lcols:
+                        with db.engine.connect() as _conn:
+                            _conn.execute(_sa_text(f'ALTER TABLE labor_news_article ADD COLUMN {_col_def[0]} {_col_def[1]}'))
+                            _conn.commit()
+                # like_count, dislike_count 컬럼 추가
+                for _col_def in [
+                    ('like_count', 'INTEGER DEFAULT 0'),
+                    ('dislike_count', 'INTEGER DEFAULT 0'),
+                ]:
+                    if _col_def[0] not in _lcols:
+                        with db.engine.connect() as _conn:
+                            _conn.execute(_sa_text(f'ALTER TABLE labor_news_article ADD COLUMN {_col_def[0]} {_col_def[1]}'))
+                            _conn.commit()
+            # labor_news_vote 테이블 (노동뉴스 투표 기록)
+            _vote_ddl = (
+                "CREATE TABLE IF NOT EXISTS labor_news_vote ("
+                "id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL, labor_news_id INTEGER NOT NULL, "
+                "vote VARCHAR(10) DEFAULT 'like', cost INTEGER DEFAULT 1, created_at TIMESTAMP)"
+            )
+            with db.engine.connect() as _conn:
+                _conn.execute(_sa_text(_vote_ddl))
+                _conn.commit()
+            # 공유마당 투표 테이블 (share_vote)
+            _share_vote_ddl = (
+                "CREATE TABLE IF NOT EXISTS share_vote ("
+                "id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL, share_id INTEGER NOT NULL, "
+                "vote VARCHAR(10) DEFAULT 'like', cost INTEGER DEFAULT 1, created_at TIMESTAMP)"
+            )
+            with db.engine.connect() as _conn:
+                _conn.execute(_sa_text(_share_vote_ddl))
+                _conn.commit()
             # 마을지기 홍보 지도 테이블 (신규: village_place_category / village_place / village_place_report)
             _place_ddl = [
                 ("CREATE TABLE IF NOT EXISTS village_place_category ("

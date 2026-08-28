@@ -169,6 +169,7 @@ export const psychoApi = {
   appointments: () => api.get<import('./types').PsychoAppointment[]>('/api/psycho/appointments'),
   schedules: () => api.get<{ available_dates: string[]; time_slots: { start: string; end: string }[] }>('/api/psycho/schedules'),
   create: (formData: FormData) => api.upload<{ status: string; id?: number }>('/api/psycho/create', formData),
+  editPost: (id: number, formData: FormData) => api.upload<{ status: string; msg?: string; file_path?: string }>(`/api/psycho/post/${id}/edit`, formData),
   comment: (postId: number, content: string) => {
     const fd = new FormData(); fd.append('content', content)
     return api.upload<{ status: string }>(`/api/psycho/post/${postId}/comment`, fd)

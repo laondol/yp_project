@@ -394,8 +394,8 @@ def api_epub_ai_assist():
     book_title = (data.get('book_title') or '').strip()
     if not section_title:
         return jsonify({"status": "error", "msg": "섹션 제목이 필요합니다."}), 400
-    groq_key = current_app.config.get('GROQ_API_KEY', '')
-    if not groq_key:
+    motif_key = current_app.config.get('MOTIF_API_KEY', '')
+    if not motif_key:
         return jsonify({"suggestion": "AI 서비스가 설정되지 않았습니다.", "status": "fallback"})
     import requests as _requests
     layout_name = {'newsletter': '마을 소식지', 'guidebook': '지역 가이드북', 'journal': '체험 수기/여행기'}.get(layout_type, '콘텐츠')
@@ -407,9 +407,9 @@ def api_epub_ai_assist():
         '이 섹션에 어울리는 글쓰기 가이드와 초안을 작성하세요.\n'
         '구체적인 예시와 함께 3~5문장 정도의 초안을 제시하세요.')
     try:
-        r = _requests.post('https://api.groq.com/openai/v1/chat/completions',
-            headers={'Authorization': 'Bearer ' + groq_key, 'Content-Type': 'application/json'},
-            json={'model': 'llama-3.1-8b-instant',
+        r = _requests.post('https://chat.motiftech.io/openapi/v1/chat/completions',
+            headers={'Authorization': 'Bearer ' + motif_key, 'Content-Type': 'application/json'},
+            json={'model': 'motif-12.7b',
                   'messages': [{'role': 'user', 'content': prompt}],
                   'temperature': 0.7}, timeout=30)
         suggestion = r.json()['choices'][0]['message']['content']
@@ -425,8 +425,8 @@ def api_epub_ai_headline():
     layout_type = data.get('layout_type', 'newsletter')
     if not topic:
         return jsonify({"status": "error", "msg": "주제가 필요합니다."}), 400
-    groq_key = current_app.config.get('GROQ_API_KEY', '')
-    if not groq_key:
+    motif_key = current_app.config.get('MOTIF_API_KEY', '')
+    if not motif_key:
         return jsonify({"headlines": [topic], "status": "fallback"})
     import requests as _requests
     layout_name = {'newsletter': '마을 소식지', 'guidebook': '지역 가이드북', 'journal': '체험 수기'}.get(layout_type, '콘텐츠')
@@ -435,9 +435,9 @@ def api_epub_ai_headline():
         '주제: ' + topic + '\n'
         '각 줄에 하나씩, 따옴표 없이 출력하세요.')
     try:
-        r = _requests.post('https://api.groq.com/openai/v1/chat/completions',
-            headers={'Authorization': 'Bearer ' + groq_key, 'Content-Type': 'application/json'},
-            json={'model': 'llama-3.1-8b-instant',
+        r = _requests.post('https://chat.motiftech.io/openapi/v1/chat/completions',
+            headers={'Authorization': 'Bearer ' + motif_key, 'Content-Type': 'application/json'},
+            json={'model': 'motif-12.7b',
                   'messages': [{'role': 'user', 'content': prompt}],
                   'temperature': 0.8}, timeout=20)
         out = r.json()['choices'][0]['message']['content']
@@ -453,8 +453,8 @@ def api_epub_ai_proofread():
     text = (data.get('text') or '').strip()
     if not text:
         return jsonify({"status": "error", "msg": "교정할 텍스트가 필요합니다."}), 400
-    groq_key = current_app.config.get('GROQ_API_KEY', '')
-    if not groq_key:
+    motif_key = current_app.config.get('MOTIF_API_KEY', '')
+    if not motif_key:
         return jsonify({"corrected": text, "status": "fallback"})
     import requests as _requests
     prompt = (
@@ -462,9 +462,9 @@ def api_epub_ai_proofread():
         '원문의 의미를 유지하면서 자연스럽게 다듬어 주세요.\n'
         '교정된 텍스트만 출력하세요.\n\n' + text)
     try:
-        r = _requests.post('https://api.groq.com/openai/v1/chat/completions',
-            headers={'Authorization': 'Bearer ' + groq_key, 'Content-Type': 'application/json'},
-            json={'model': 'llama-3.1-8b-instant',
+        r = _requests.post('https://chat.motiftech.io/openapi/v1/chat/completions',
+            headers={'Authorization': 'Bearer ' + motif_key, 'Content-Type': 'application/json'},
+            json={'model': 'motif-12.7b',
                   'messages': [{'role': 'user', 'content': prompt}],
                   'temperature': 0}, timeout=20)
         corrected = r.json()['choices'][0]['message']['content']

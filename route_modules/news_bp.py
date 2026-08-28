@@ -3,7 +3,7 @@ import requests
 from flask import Blueprint, render_template, request, redirect, url_for, jsonify, session, current_app, send_file
 from datetime import datetime, timezone
 from sqlalchemy import or_
-from models import db, NewsArticle, NewsComment, NewsRecommendation, NewsVote, Post, User, Message, LaborNewsArticle
+from models import db, NewsArticle, NewsComment, NewsRecommendation, NewsVote, Post, User, Message, LaborNewsArticle, LaborNewsVote
 from services.ai_service import call_ai_judge
 from services.point_service import add_points
 from route_modules.common import author_email_for as _author_email, is_legal_manager
@@ -95,7 +95,7 @@ def admin_news_ai_suggest():
         from services.news_service import ai_search_news
         suggestions = ai_search_news(news_type=tab, trending_context=trending_context)
         if not suggestions:
-            return jsonify({"status": "error", "msg": "AI 주제 제안 실패. Groq API 키를 확인하세요."})
+            return jsonify({"status": "error", "msg": "AI 주제 제안 실패. Motif API 키를 확인하세요."})
         from services.naver_news import search_news
         count = 0
         for item in suggestions:
@@ -127,8 +127,8 @@ def admin_news_ai_suggest():
                 raw_desc = real.get('description', '')
                 if tab == 'world' and raw_title:
                     try:
-                        from services.news_service import _groq_text
-                        trans = _groq_text(
+                        from services.news_service import _motif_text
+                        trans = _motif_text(
                             "Translate English news to natural Korean. Output JSON only.",
                             f"Translate to Korean:\nEN title: {raw_title[:200]}\nEN description: {raw_desc[:500]}\n\nJSON: {{\"title\": \"번역된 제목\", \"description\": \"번역된 내용\"}}",
                             format_json=True
@@ -301,12 +301,12 @@ def admin_news_edit(news_id):
             import requests as req
             r = req.get(article.source_url, headers={'User-Agent':'Mozilla/5.0'}, timeout=10)
             text = r.text[:3000]
-            key = current_app.config.get('GROQ_API_KEY','')
+            key = current_app.config.get('MOTIF_API_KEY','')
             if key:
                 prompt = f"다음 내용을 한국어로 번역하세요. 원문 그대로 상세히 번역하세요.\n\n{text}"
-                rr = req.post("https://api.groq.com/openai/v1/chat/completions",
+                rr = req.post("https://chat.motiftech.io/openapi/v1/chat/completions",
                     headers={"Authorization":f"Bearer {key}","Content-Type":"application/json"},
-                    json={"model":"llama-3.1-8b-instant","messages":[{"role":"user","content":prompt}],"max_tokens":1500},
+                    json={"model":"motif-12.7b","messages":[{"role":"user","content":prompt}],"max_tokens":1500},
                     timeout=30)
                 if rr.status_code == 200:
                     translated = rr.json()["choices"][0]["message"]["content"]
@@ -734,7 +734,7 @@ def admin_labor_news_ai_suggest():
         from services.news_service import ai_search_news
         suggestions = ai_search_news(news_type=tab, trending_context=trending_context, labor_only=True)
         if not suggestions:
-            return jsonify({"status": "error", "msg": "AI 주제 제안 실패. Groq API 키를 확인하세요."})
+            return jsonify({"status": "error", "msg": "AI 주제 제안 실패. Motif API 키를 확인하세요."})
         from services.naver_news import search_news
         count = 0
         for item in suggestions:
@@ -751,8 +751,8 @@ def admin_labor_news_ai_suggest():
                 raw_desc = real.get('description', '')
                 if tab == 'world' and raw_title:
                     try:
-                        from services.news_service import _groq_text
-                        trans = _groq_text(
+                        from services.news_service import _motif_text
+                        trans = _motif_text(
                             "Translate English news to natural Korean. Output JSON only.",
                             f"Translate to Korean:\nEN title: {raw_title[:200]}\nEN description: {raw_desc[:500]}\n\nJSON: {{\"title\": \"번역된 제목\", \"description\": \"번역된 내용\"}}",
                             format_json=True
@@ -920,4 +920,115 @@ def admin_labor_news_create():
         db.session.commit()
         return redirect(url_for('.admin_news'))
     return _serve_spa()
+
+@news_bp.route('/admin/labor-news/collect', methods=['POST'])
+def admin_labor_news_collect():
+    if not is_legal_manager():
+        return jsonify({"status": "error", "msg": "권한 없음"}), 403
+    try:
+        from services.labor_news_collector import collect_labor_news
+        count = collect_labor_news()
+        return jsonify({"status": "success", "count": count, "msg": f"✅ {count}건의 노동뉴스를 수집했습니다."})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"status": "error", "msg": f"수집 오류: {str(e)[:100]}"}), 500
+
+@news_bp.route('/admin/news/collect', methods=['POST'])
+def admin_news_collect():
+    if session.get('role') not in ['admin', 'leader']:
+        return jsonify({"status": "error", "msg": "권한 없음"}), 403
+    try:
+        from services.labor_news_collector import collect_kr_yp_news
+        count = collect_kr_yp_news()
+        return jsonify({"status": "success", "count": count, "msg": f"✅ {count}건의 대한민국·양평 뉴스를 수집했습니다."})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"status": "error", "msg": f"수집 오류: {str(e)[:100]}"}), 500
+
+@news_bp.route('/admin/news/collect-world', methods=['POST'])
+def admin_news_collect_world():
+    if session.get('role') not in ['admin', 'leader']:
+        return jsonify({"status": "error", "msg": "권한 없음"}), 403
+    try:
+        from services.labor_news_collector import collect_world_news
+        count = collect_world_news()
+        return jsonify({"status": "success", "count": count, "msg": f"✅ {count}건의 세계뉴스를 수집했습니다."})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"status": "error", "msg": f"수집 오류: {str(e)[:100]}"}), 500
+
+
+@news_bp.route('/labor-news/like/<int:labor_news_id>', methods=['POST'])
+def labor_news_like(labor_news_id):
+    if not session.get('username'):
+        return jsonify({"status": "error", "msg": "로그인이 필요합니다."}), 401
+    uid = session['user_id']
+    article = LaborNewsArticle.query.get_or_404(labor_news_id)
+    
+    # 관리자/리더는 Xml 차감 없음
+    is_manager = session.get('role') in ['admin', 'leader']
+    
+    # 게시물별 투표 횟수 계산
+    vote_count = LaborNewsVote.query.filter_by(user_id=uid, labor_news_id=labor_news_id).count()
+    cost = 1 if is_manager else (2 ** vote_count)
+    
+    # Xml 차감 (관리자가 아닌 경우)
+    if not is_manager:
+        from models import User
+        user = User.query.get(uid)
+        if not user or (user.points or 0) < cost:
+            return jsonify({"status": "error", "msg": f"Xml이 부족합니다. 필요: {cost}Xml"}), 400
+        add_points(uid, -cost, 'like', f'노동뉴스 좋아요 ({cost}Xml)', labor_news_id)
+    
+    # 투표 기록 추가
+    db.session.add(LaborNewsVote(user_id=uid, labor_news_id=labor_news_id, vote='like', cost=cost))
+    article.like_count += 1
+    db.session.commit()
+    
+    return jsonify({
+        "status": "success",
+        "likes": article.like_count,
+        "dislikes": article.dislike_count,
+        "cost": cost,
+        "next_cost": 2 ** (vote_count + 1) if not is_manager else 0
+    })
+
+
+@news_bp.route('/labor-news/dislike/<int:labor_news_id>', methods=['POST'])
+def labor_news_dislike(labor_news_id):
+    if not session.get('username'):
+        return jsonify({"status": "error", "msg": "로그인이 필요합니다."}), 401
+    uid = session['user_id']
+    article = LaborNewsArticle.query.get_or_404(labor_news_id)
+    
+    # 관리자/리더는 Xml 차감 없음
+    is_manager = session.get('role') in ['admin', 'leader']
+    
+    # 게시물별 투표 횟수 계산
+    vote_count = LaborNewsVote.query.filter_by(user_id=uid, labor_news_id=labor_news_id).count()
+    cost = 1 if is_manager else (2 ** vote_count)
+    
+    # Xml 차감 (관리자가 아닌 경우)
+    if not is_manager:
+        from models import User
+        user = User.query.get(uid)
+        if not user or (user.points or 0) < cost:
+            return jsonify({"status": "error", "msg": f"Xml이 부족합니다. 필요: {cost}Xml"}), 400
+        add_points(uid, -cost, 'dislike', f'노동뉴스 별로예요 ({cost}Xml)', labor_news_id)
+    
+    # 투표 기록 추가
+    db.session.add(LaborNewsVote(user_id=uid, labor_news_id=labor_news_id, vote='dislike', cost=cost))
+    article.dislike_count += 1
+    db.session.commit()
+    
+    return jsonify({
+        "status": "success",
+        "likes": article.like_count,
+        "dislikes": article.dislike_count,
+        "cost": cost,
+        "next_cost": 2 ** (vote_count + 1) if not is_manager else 0
+    })
 

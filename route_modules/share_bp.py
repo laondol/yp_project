@@ -6,7 +6,7 @@ from flask import Blueprint, render_template, request, redirect, url_for, jsonif
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import or_
 from werkzeug.utils import secure_filename
-from models import db, User, ShareReport, ShareComment, Message, Post, Comment, NewsArticle, VillagePage, RampApplication, PointHistory, Friend, VillageWish, LegalPost, ChatMessage, FriendGroup, LegalAppointment, TongBot, TongBotDraft, ConstructionNotice, GpsCalibration, StoreSuggestion, StoreMenu
+from models import db, User, ShareReport, ShareComment, ShareVote, Message, Post, Comment, NewsArticle, VillagePage, RampApplication, PointHistory, Friend, VillageWish, LegalPost, ChatMessage, FriendGroup, LegalAppointment, TongBot, TongBotDraft, ConstructionNotice, GpsCalibration, StoreSuggestion, StoreMenu
 from services.security import save_village_file
 from services.ai_service import background_process_share, moderate_image
 from services.geocode import haversine, gps_to_town_village, gps_to_address, get_nearby_reports, is_in_yangpyeong, YANGPYEONG_BOUNDS, YANGPYEONG_VILLAGES
@@ -864,9 +864,9 @@ def share_report_edit(report_id):
             lines = [l.strip() for l in menu_text.split('\n') if l.strip()]
             if lines:
                 try:
-                    r = _requests.post('https://api.groq.com/openai/v1/chat/completions',
-                        headers={'Authorization': 'Bearer ' + current_app.config.get('GROQ_API_KEY',''), 'Content-Type': 'application/json'},
-                        json={'model': 'llama-3.1-8b-instant',
+                    r = _requests.post('https://chat.motiftech.io/openapi/v1/chat/completions',
+                        headers={'Authorization': 'Bearer ' + current_app.config.get('MOTIF_API_KEY',''), 'Content-Type': 'application/json'},
+                        json={'model': 'motif-12.7b',
                               'messages': [{'role': 'user', 'content':
                                 '다음 메뉴 항목 각각을 "식사","음료","디저트","기타" 중 하나로 분류하세요. '
                                 '각 항목 앞에 라벨을 붙여 줄바꿈으로 출력하세요.\n' + '\n'.join(lines)}],
@@ -1060,23 +1060,90 @@ def share_report_toggle(report_id, action):
 def share_report_like(report_id):
     if not session.get('username'):
         return jsonify({"status": "error", "msg": "로그인이 필요합니다."}), 401
+    uid = session['user_id']
     report = ShareReport.query.get_or_404(report_id)
     if report.status != 'approved':
         return jsonify({"status": "error", "msg": "승인된 공유만 평가 가능합니다."}), 403
+    
+    # 게시물별 투표 횟수 계산
+    vote_count = ShareVote.query.filter_by(user_id=uid, share_id=report_id).count()
+    cost = 2 ** vote_count  # 1, 2, 4, 8...
+    
+    # Xml 차감
+    from services.point_service import add_points
+    user = User.query.get(uid)
+    if not user or (user.points or 0) < cost:
+        return jsonify({"status": "error", "msg": f"Xml이 부족합니다. 필요: {cost} Xml"}), 400
+    
+    add_points(uid, -cost, 'like', f'공유마당 좋아요 ({cost} Xml)', report_id)
+    
+    # Xml 분배: 첫번째는 작성자 100%, 그 다음부터는 반반
+    if report.user_id and report.user_id != uid:
+        if vote_count == 0:
+            # 첫번째 투표: 작성자에게 전액
+            add_points(report.user_id, cost, 'like', f'공유마당 좋아요 받음 ({cost} Xml)', report_id)
+        else:
+            # 두번째부터: 반반 (작성자 50%, 투표자 50%)
+            half = cost // 2
+            add_points(report.user_id, half, 'like', f'공유마당 좋아요 받음 ({half} Xml)', report_id)
+            add_points(uid, half, 'like_bonus', f'공유마당 좋아요 보너스 ({half} Xml)', report_id)
+    
+    # 투표 기록 추가
+    db.session.add(ShareVote(user_id=uid, share_id=report_id, vote='like', cost=cost))
     report.like_count += 1
     db.session.commit()
-    return jsonify({"status": "success", "likes": report.like_count, "dislikes": report.dislike_count})
+    
+    return jsonify({
+        "status": "success",
+        "likes": report.like_count,
+        "dislikes": report.dislike_count,
+        "cost": cost,
+        "next_cost": 2 ** (vote_count + 1)
+    })
+
 
 @share_bp.route('/share-report/dislike/<int:report_id>', methods=['POST'])
 def share_report_dislike(report_id):
     if not session.get('username'):
         return jsonify({"status": "error", "msg": "로그인이 필요합니다."}), 401
+    uid = session['user_id']
     report = ShareReport.query.get_or_404(report_id)
     if report.status != 'approved':
         return jsonify({"status": "error", "msg": "승인된 공유만 평가 가능합니다."}), 403
+    
+    # 게시물별 투표 횟수 계산
+    vote_count = ShareVote.query.filter_by(user_id=uid, share_id=report_id).count()
+    cost = 2 ** vote_count  # 1, 2, 4, 8...
+    
+    # Xml 차감
+    from services.point_service import add_points
+    user = User.query.get(uid)
+    if not user or (user.points or 0) < cost:
+        return jsonify({"status": "error", "msg": f"Xml이 부족합니다. 필요: {cost} Xml"}), 400
+    
+    add_points(uid, -cost, 'dislike', f'공유마당 별로예요 ({cost} Xml)', report_id)
+    
+    # Xml 분배: 첫번째는 작성자 100%, 그 다음부터는 반반
+    if report.user_id and report.user_id != uid:
+        if vote_count == 0:
+            add_points(report.user_id, cost, 'dislike', f'공유마당 별로예요 받음 ({cost} Xml)', report_id)
+        else:
+            half = cost // 2
+            add_points(report.user_id, half, 'dislike', f'공유마당 별로예요 받음 ({half} Xml)', report_id)
+            add_points(uid, half, 'dislike_bonus', f'공유마당 별로예요 보너스 ({half} Xml)', report_id)
+    
+    # 투표 기록 추가
+    db.session.add(ShareVote(user_id=uid, share_id=report_id, vote='dislike', cost=cost))
     report.dislike_count += 1
     db.session.commit()
-    return jsonify({"status": "success", "likes": report.like_count, "dislikes": report.dislike_count})
+    
+    return jsonify({
+        "status": "success",
+        "likes": report.like_count,
+        "dislikes": report.dislike_count,
+        "cost": cost,
+        "next_cost": 2 ** (vote_count + 1)
+    })
 
 @share_bp.route('/share-report/delete/<int:report_id>', methods=['POST'])
 def share_report_delete(report_id):
@@ -1566,18 +1633,18 @@ def api_store_suggest():
 
 @share_bp.route('/api/share/menu-classify', methods=['POST'])
 def api_menu_classify():
-    """메뉴 텍스트 -> 식사/음료/디저트/기타 AI 분류 (GROQ)"""
+    """메뉴 텍스트 -> 식사/음료/디저트/기타 AI 분류 (MOTIF)"""
     data = request.get_json(silent=True) or {}
     text = (data.get('text') or '').strip()
     if not text:
         return jsonify({"status": "error", "msg": "메뉴를 입력하세요"}), 400
-    groq_key = current_app.config.get('GROQ_API_KEY', '')
-    if not groq_key:
+    motif_key = current_app.config.get('MOTIF_API_KEY', '')
+    if not motif_key:
         return jsonify({"labels": ["기타"]})
     try:
-        r = _requests.post('https://api.groq.com/openai/v1/chat/completions',
-            headers={'Authorization': 'Bearer ' + groq_key, 'Content-Type': 'application/json'},
-            json={'model': 'llama-3.1-8b-instant',
+        r = _requests.post('https://chat.motiftech.io/openapi/v1/chat/completions',
+            headers={'Authorization': 'Bearer ' + motif_key, 'Content-Type': 'application/json'},
+            json={'model': 'motif-12.7b',
                   'messages': [{'role': 'user', 'content':
                     '다음 메뉴 항목 각각을 "식사","음료","디저트","기타" 중 하나로 분류하세요. '
                     '각 항목을 줄바꿈하고 가장 앞에 라벨을 붙이세요. 예시:\n식사: 된장찌개\n음료: 아메리카노\n디저트: 티라미수\n---\n' + text}],
@@ -1599,12 +1666,12 @@ def api_menu_classify():
 
 @share_bp.route('/api/share/menu-search', methods=['POST'])
 def api_menu_search():
-    """가게명으로 카카오맵 API 검색 + Groq AI 메뉴 추출"""
+    """가게명으로 카카오맵 API 검색 + Motif AI 메뉴 추출"""
     data = request.get_json(silent=True) or {}
     store_name = (data.get('store_name') or '').strip()
     if not store_name:
         return jsonify({"status": "error", "msg": "가게명을 입력하세요"}), 400
-    groq_key = current_app.config.get('GROQ_API_KEY', '')
+    motif_key = current_app.config.get('MOTIF_API_KEY', '')
     kakao_key = current_app.config.get('KAKAO_REST_API_KEY', '')
     store_info = None
     if kakao_key:
@@ -1626,14 +1693,14 @@ def api_menu_search():
         except Exception:
             pass
     menus = []
-    if groq_key:
+    if motif_key:
         try:
             ctx = '가게명: ' + store_name
             if store_info:
                 ctx += '\n주소: ' + store_info['address'] + '\n전화: ' + store_info['phone']
-            r = _requests.post('https://api.groq.com/openai/v1/chat/completions',
-                headers={'Authorization': 'Bearer ' + groq_key, 'Content-Type': 'application/json'},
-                json={'model': 'llama-3.1-8b-instant',
+            r = _requests.post('https://chat.motiftech.io/openapi/v1/chat/completions',
+                headers={'Authorization': 'Bearer ' + motif_key, 'Content-Type': 'application/json'},
+                json={'model': 'motif-12.7b',
                       'messages': [{'role': 'user', 'content':
                         '다음 가게의 대표 메뉴 5~10개를 JSON 배열로 출력하세요. '
                         '각 항목은 {"name": "메뉴명", "price": "가격(원)", "category": "식사/음료/디저트/기타"} 형식입니다. '

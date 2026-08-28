@@ -110,7 +110,6 @@ import VillagePageEdit from './pages/VillagePageEdit'
 import VillagePageView from './pages/VillagePageView'
 import VillageMapAdminPage from './pages/VillageMapAdminPage'
 import CompassNavPage from './pages/CompassNavPage'
-import PsychoPostEdit from './pages/PsychoPostEdit'
 import FloatingMemo from './components/FloatingMemo'
 import PopupBar from './components/PopupBar'
 
@@ -215,7 +214,7 @@ export default function App() {
             <Route path="/psycho/admin" element={<ProtectedRoute><PsychoAdminPage /></ProtectedRoute>} />
             <Route path="/psycho" element={<ProtectedRoute><PsychoList /></ProtectedRoute>} />
             <Route path="/psycho/:id" element={<ProtectedRoute><PsychoDetail /></ProtectedRoute>} />
-            <Route path="/psycho/:id/edit" element={<ProtectedRoute><PsychoPostEdit /></ProtectedRoute>} />
+            <Route path="/psycho/:id/edit" element={<ProtectedRoute><PsychoWrite /></ProtectedRoute>} />
             <Route path="/psycho/write" element={<ProtectedRoute><PsychoWrite /></ProtectedRoute>} />
             <Route path="/psycho/schedule" element={<ProtectedRoute><PsychoSchedule /></ProtectedRoute>} />
             <Route path="/village/admin" element={<ProtectedRoute><VillageAdminPage /></ProtectedRoute>} />

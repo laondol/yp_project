@@ -48,34 +48,65 @@ def mosaic_image_faces(image_path):
     cv2.imwrite(mosaic_path, img, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
     return mosaic_path
 
-GROQ_MODEL = "llama-3.3-70b-versatile"
-GROQ_VISION_MODEL = "qwen/qwen3.6-27b"
+MOTIF_MODEL = "motif-12.7b"
+MOTIF_VISION_MODEL = "motif-12.7b"
 
-def _groq_client():
+def _motif_client():
     from flask import current_app
-    key = current_app.config.get("GROQ_API_KEY", "")
-    return OpenAI(api_key=key, base_url="https://api.groq.com/openai/v1")
+    key = current_app.config.get("MOTIF_API_KEY", "")
+    return OpenAI(api_key=key, base_url="https://chat.motiftech.io/openapi/v1")
 
-def _groq_json(system, user, model=GROQ_MODEL, timeout=60):
+def _strip_wrappers(text):
+    if not text:
+        return ""
+    t = text.strip()
+    if t.startswith("```"):
+        t = t.split("\n", 1)[1] if "\n" in t else t[3:]
+        if t.endswith("```"):
+            t = t[:-3]
+        t = t.strip()
+        if t.startswith("json"):
+            t = t[4:].strip()
+    while "<think>" in t and "</think>" in t:
+        s = t.find("<think>")
+        e = t.find("</think>") + len("</think>")
+        t = (t[:s] + t[e:]).strip()
+    return t
+
+def _extract_json(text):
+    t = _strip_wrappers(text or "")
+    for delim, close in (("{", "}"), ("[", "]")):
+        start = t.find(delim)
+        if start != -1:
+            end = t.rfind(close)
+            if end > start:
+                try:
+                    return json.loads(t[start:end + 1])
+                except Exception:
+                    pass
+    return None
+
+def _motif_json(system, user, model=MOTIF_MODEL, timeout=60):
     try:
-        client = _groq_client()
+        client = _motif_client()
         resp = client.chat.completions.create(
             model=model,
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": user}
             ],
-            response_format={"type": "json_object"},
-            timeout=timeout
+            timeout=timeout,
+            response_format={"type": "json_object"}
         )
-        return json.loads(resp.choices[0].message.content)
+        data = _extract_json(resp.choices[0].message.content)
+        return data if data is not None else {}
     except Exception as e:
-        print(f"[GROQ JSON] error: {e}")
+        print(f"[MOTIF JSON] error: {e}")
         return {}
 
-def _groq_vision(system, user, b64_image, model=GROQ_VISION_MODEL, timeout=30):
+def _motif_vision(system, user, b64_image, model=MOTIF_VISION_MODEL, timeout=30):
     try:
-        client = _groq_client()
+        client = _motif_client()
         resp = client.chat.completions.create(
             model=model,
             messages=[{
@@ -87,15 +118,28 @@ def _groq_vision(system, user, b64_image, model=GROQ_VISION_MODEL, timeout=30):
             }],
             timeout=timeout
         )
-        text = resp.choices[0].message.content.strip()
-        start = text.find('{')
-        end = text.rfind('}')
-        if start != -1 and end != -1 and end > start:
-            text = text[start:end+1]
-        return json.loads(text)
+        data = _extract_json(resp.choices[0].message.content)
+        return data if data is not None else {}
     except Exception as e:
-        print(f"[GROQ VISION] error: {e}")
+        print(f"[MOTIF VISION] error: {e}")
         return {}
+
+def call_motif(prompt, system='', timeout=60):
+    try:
+        client = _motif_client()
+        messages = [{"role": "user", "content": prompt}]
+        if system:
+            messages = [{"role": "system", "content": system}, {"role": "user", "content": prompt}]
+        resp = client.chat.completions.create(
+            model=MOTIF_MODEL,
+            messages=messages,
+            timeout=timeout
+        )
+        return (resp.choices[0].message.content or '').strip()
+    except Exception as e:
+        print(f"[MOTIF TEXT] error: {e}")
+        return None
+
 
 def _image_to_base64(image_path):
     if not image_path or not os.path.exists(image_path):
@@ -127,7 +171,7 @@ def call_ai_judge(title, content, is_comment=False):
     system = f"당신은 '함께사는양평' {role}입니다. 반드시 한국어로 JSON 형식으로만 대답하세요."
     context = _load_rag_context(title, content, timeout=3) if not is_comment else ""
     user = f'{{"score": 숫자(-50~50), "category": "8대사회권분야", "summary": "3줄요약", "reason": "이유", "improvement_tip": "제안 보완을 위해 주민에게 제시할 대안 1가지"}}\n분석대상: 제목: {title}\n본문: {content}{context}' if not is_comment else content
-    data = _groq_json(system, user)
+    data = _motif_json(system, user)
     data['score'] = max(-50, min(50, int(data.get('score', 0))))
     return data
 
@@ -149,7 +193,7 @@ def moderate_comment(text):
 def call_ai_debate(post, admin_opinion, suggested_score):
     system = "당신은 자치 지킴이 AI입니다. 정중한 답변과 최종 점수를 합의하여 JSON을 출력하세요."
     user = f"관리자: '{admin_opinion}' / 요청점수: {suggested_score}\nJSON: {{{{'ai_reply': '답변', 'final_ai_score': 점수}}}}"
-    data = _groq_json(system, user, timeout=120)
+    data = _motif_json(system, user, timeout=120)
     data['final_ai_score'] = max(-50, min(50, int(data.get('final_ai_score', suggested_score))))
     return data
 
@@ -194,7 +238,7 @@ def moderate_image(image_path, app=None):
 ※ 조금이라도 의심되면 flagged=true.
 반드시 아래 JSON 형식으로만 응답하세요. 다른 말은 하지 마세요.
 {"flagged": true/false, "reason": "이유", "category": "person/privacy/violence/adult/illegal/spam/clean"}"""
-    data = _groq_vision(system, user, b64)
+    data = _motif_vision(system, user, b64)
     if not data:
         # 비전 모델 사용 불가 등 분석 실패 시 보류하지 않고 통과(clean) 처리
         return False, "", "clean"
@@ -250,7 +294,7 @@ def moderate_video_frames(video_path, app=None):
 위 내용이 하나라도 해당되면 flagged=true, 아니면 false.
 JSON: {"flagged": true/false, "reason": "이유", "category": "person/violence/adult/privacy/illegal/spam/clean"}"""
     for b64 in frames:
-        data = _groq_vision(system, user, b64)
+        data = _motif_vision(system, user, b64)
         if data.get('flagged', False):
             return True, data.get('reason', ''), data.get('category', '')
     return False, "", "clean"
@@ -263,7 +307,7 @@ def background_process_share(app, report_id, title, description, latitude, longi
         try:
             location_info = f"위도: {latitude}, 경도: {longitude}" if latitude and longitude else "위치 미제공"
             prompt = f"양평군 공유 내용을 분석해주세요.\n제목: {title or '제목 없음'}\n내용: {description or '내용 없음'}\n위치: {location_info}\n이미지: {'있음' if image_path else '없음'}\n그리기: {'있음' if drawing_path else '없음'}\n\nJSON: {{{{'category': '사건/풍경/장소/맛집/기타', 'summary': '3줄 요약', 'confidence': 0.0~1.0, 'danger_alert': true/false}}}}"
-            data = _groq_json("양평군 공유 분석 AI입니다.", prompt)
+            data = _motif_json("양평군 공유 분석 AI입니다.", prompt)
             if isinstance(data, str): data = json.loads(data)
             report.ai_category = data.get('category', '기타')
             report.ai_summary = data.get('summary', '')

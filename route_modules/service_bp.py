@@ -36,12 +36,12 @@ def news_translate():
         import requests as req
         r = req.get(url, headers={'User-Agent':'Mozilla/5.0'}, timeout=10)
         text = r.text[:3000]
-        key = current_app.config.get('GROQ_API_KEY','')
+        key = current_app.config.get('MOTIF_API_KEY','')
         if key:
             prompt = f"다음 웹페이지 내용을 한국어로 5문장 이내로 요약 번역하세요.\n\n제목: {title}\n내용: {text}"
-            rr = req.post("https://api.groq.com/openai/v1/chat/completions",
+            rr = req.post("https://chat.motiftech.io/openapi/v1/chat/completions",
                 headers={"Authorization":f"Bearer {key}","Content-Type":"application/json"},
-                json={"model":"llama-3.1-8b-instant","messages":[{"role":"user","content":prompt}],"max_tokens":500},
+                json={"model":"motif-12.7b","messages":[{"role":"user","content":prompt}],"max_tokens":500},
                 timeout=20)
             if rr.status_code == 200:
                 result = rr.json()["choices"][0]["message"]["content"]
@@ -59,8 +59,22 @@ def service_legal_edit():
     if session.get('role') not in ('admin', 'leader'):
         return "<script>alert('권한이 없습니다.'); history.back();</script>"
     if request.method == 'POST':
-        return "<script>alert('저장되었습니다.'); location.href='/service/legal';</script>"
+        data = request.get_json(silent=True) or {}
+        content = data.get('content', '')
+        row = SiteSetting.query.get('service_legal_content')
+        if row is None:
+            row = SiteSetting(key='service_legal_content', value=content)
+            db.session.add(row)
+        else:
+            row.value = content
+        db.session.commit()
+        return jsonify({"status": "success"})
     return _serve_spa()
+
+@service_bp.route('/api/service/legal/content')
+def api_service_legal_content():
+    row = SiteSetting.query.get('service_legal_content')
+    return jsonify({"content": row.value if row else ""})
 
 @service_bp.route('/service/psycho')
 def service_psycho():

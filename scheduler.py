@@ -177,6 +177,78 @@ def run_startup_tasks(app):
         print(f'[SKIP] flagged post cleanup: {e}')
 
 
+def run_labor_news_scheduler(app):
+    """매일 오전 6시에 10개 노동 뉴스 소스 자동 수집 (오전 10시까지 결과 준비)"""
+    def _wait_until_6am():
+        now = datetime.now()
+        target = now.replace(hour=6, minute=0, second=0, microsecond=0)
+        if now >= target:
+            from datetime import timedelta
+            target += timedelta(days=1)
+        wait_sec = (target - now).total_seconds()
+        print(f"[LABOR_NEWS_SCHEDULER] 다음 수집까지 {wait_sec/3600:.1f}시간 대기")
+        time.sleep(wait_sec)
+
+    _wait_until_6am()
+    while True:
+        try:
+            with app.app_context():
+                from services.labor_news_collector import collect_labor_news
+                count = collect_labor_news()
+                print(f"[LABOR_NEWS_SCHEDULER] 수집 완료: {count}건")
+        except Exception as e:
+            print(f"[LABOR_NEWS_SCHEDULER] 오류: {e}")
+        time.sleep(86400)
+
+
+def run_kr_yp_news_scheduler(app):
+    """매일 자정에 10개 주요 언론사 대한민국·양평 뉴스 자동 수집 (새벽 3시까지, 4시 정리)"""
+    def _wait_until_midnight():
+        now = datetime.now()
+        target = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        if now >= target:
+            from datetime import timedelta
+            target += timedelta(days=1)
+        wait_sec = (target - now).total_seconds()
+        print(f"[KR_YP_NEWS_SCHEDULER] 다음 수집까지 {wait_sec/3600:.1f}시간 대기")
+        time.sleep(wait_sec)
+
+    _wait_until_midnight()
+    while True:
+        try:
+            with app.app_context():
+                from services.labor_news_collector import collect_kr_yp_news
+                count = collect_kr_yp_news()
+                print(f"[KR_YP_NEWS_SCHEDULER] 자동 수집 완료: {count}건")
+        except Exception as e:
+            print(f"[KR_YP_NEWS_SCHEDULER] 수집 오류: {e}")
+        time.sleep(86400)
+
+
+def run_world_news_scheduler(app):
+    """매일 오후 1시에 10개 세계 언론사 글로벌 뉴스 자동 수집 (오후 8시까지, 9시 정리)"""
+    def _wait_until_1pm():
+        now = datetime.now()
+        target = now.replace(hour=13, minute=0, second=0, microsecond=0)
+        if now >= target:
+            from datetime import timedelta
+            target += timedelta(days=1)
+        wait_sec = (target - now).total_seconds()
+        print(f"[WORLD_NEWS_SCHEDULER] 다음 수집까지 {wait_sec/3600:.1f}시간 대기")
+        time.sleep(wait_sec)
+
+    _wait_until_1pm()
+    while True:
+        try:
+            with app.app_context():
+                from services.labor_news_collector import collect_world_news
+                count = collect_world_news()
+                print(f"[WORLD_NEWS_SCHEDULER] 자동 수집 완료: {count}건")
+        except Exception as e:
+            print(f"[WORLD_NEWS_SCHEDULER] 수집 오류: {e}")
+        time.sleep(86400)
+
+
 def main():
     print("[SCHEDULER] Starting background scheduler...")
     app = create_scheduler_app()
@@ -189,6 +261,9 @@ def main():
     threading.Thread(target=run_route_recalc_scheduler, args=(app,), daemon=True).start()
     threading.Thread(target=run_rag_rebuild, args=(app,), daemon=True).start()
     threading.Thread(target=run_monthly_payout, args=(app,), daemon=True).start()
+    threading.Thread(target=run_labor_news_scheduler, args=(app,), daemon=True).start()
+    threading.Thread(target=run_kr_yp_news_scheduler, args=(app,), daemon=True).start()
+    threading.Thread(target=run_world_news_scheduler, args=(app,), daemon=True).start()
 
     print("[SCHEDULER] All schedulers started. Keeping alive...")
     while True:

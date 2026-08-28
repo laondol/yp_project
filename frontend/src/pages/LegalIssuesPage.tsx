@@ -15,6 +15,8 @@ interface LaborIssue {
   comments_count?: number
   labor_approved?: boolean
   source_url?: string
+  like_count?: number
+  dislike_count?: number
   created_at?: string
   type?: 'post' | 'news'
   is_selected?: boolean
@@ -37,7 +39,7 @@ export default function LegalIssuesPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
-  const isLegalManager = user?.email === 'daerilee@gmail.com'
+  const isLegalManager = user?.role === 'admin' || user?.role === 'leader'
   const [showNewsModal, setShowNewsModal] = useState(false)
   const [importUrl, setImportUrl] = useState('')
   const [importing, setImporting] = useState(false)
@@ -129,6 +131,25 @@ export default function LegalIssuesPage() {
     } catch { alert('오류가 발생했습니다.') }
   }
 
+  const handleVote = async (id: number, vote: 'like' | 'dislike') => {
+    try {
+      const res = await fetch(`/labor-news/${vote}/${id}`, { method: 'POST' })
+      const data = await res.json()
+      if (data.status === 'success') {
+        setIssues(prev => prev.map(i => 
+          i.id === id && i.type === 'news' 
+            ? { ...i, like_count: data.likes, dislike_count: data.dislikes } 
+            : i
+        ))
+        if (data.cost) {
+          alert(`${vote === 'like' ? '좋아요' : '별로예요'} 완료! (${data.cost}.Xml 차감)`)
+        }
+      } else {
+        alert(data.msg || '투표 실패')
+      }
+    } catch { alert('오류가 발생했습니다.') }
+  }
+
   const formatDate = (dateStr?: string) => {
     if (!dateStr) return ''
     const d = new Date(dateStr)
@@ -144,8 +165,8 @@ export default function LegalIssuesPage() {
         <h4 className="fw-bold mb-0">노동이슈</h4>
         <div className="d-flex gap-2">
           {isLegalManager && (
-            <button className="btn btn-sm btn-outline-info" onClick={() => { setShowNewsModal(true); loadAdminNews() }}>
-              AI 추천뉴스
+            <button className="btn btn-sm btn-outline-warning" onClick={() => navigate('/legal/issues/admin')}>
+              ⚙️ 관리
             </button>
           )}
           {isLegalManager && (
@@ -176,6 +197,20 @@ export default function LegalIssuesPage() {
                           🔗 원문보기
                         </a>
                       )}
+                    </div>
+                    <div className="d-flex gap-2 mt-2">
+                      <button 
+                        className="btn btn-sm btn-outline-success py-0" 
+                        onClick={(e) => { e.stopPropagation(); handleVote(issue.id, 'like'); }}
+                      >
+                        👍 {issue.like_count ?? 0} <span className="text-muted">(1.Xml)</span>
+                      </button>
+                      <button 
+                        className="btn btn-sm btn-outline-danger py-0" 
+                        onClick={(e) => { e.stopPropagation(); handleVote(issue.id, 'dislike'); }}
+                      >
+                        👎 {issue.dislike_count ?? 0} <span className="text-muted">(1.Xml)</span>
+                      </button>
                     </div>
                   </div>
                 </div>

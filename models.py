@@ -207,9 +207,19 @@ class LaborNewsArticle(db.Model):
     is_selected = db.Column(db.Boolean, default=False)
     is_ai_generated = db.Column(db.Boolean, default=False)
     ai_reason = db.Column(db.Text)
+    like_count = db.Column(db.Integer, default=0)
+    dislike_count = db.Column(db.Integer, default=0)
     created_by = db.Column(db.Integer, db.ForeignKey('user.id'))
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now)
+
+class LaborNewsVote(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    labor_news_id = db.Column(db.Integer, db.ForeignKey('labor_news_article.id'), nullable=False)
+    vote = db.Column(db.String(10), default='like')
+    cost = db.Column(db.Integer, default=1)
+    created_at = db.Column(db.DateTime, default=datetime.now)
 
 class PointHistory(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -284,6 +294,14 @@ class ShareReport(db.Model):
     rejected_at = db.Column(db.DateTime)                    # 반려 시각 (30일 후 로컬 보관 이동 기준)
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now)
+
+class ShareVote(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    share_id = db.Column(db.Integer, db.ForeignKey('share_report.id'), nullable=False)
+    vote = db.Column(db.String(10), default='like')
+    cost = db.Column(db.Integer, default=1)
+    created_at = db.Column(db.DateTime, default=datetime.now)
 
 class StoreInfo(db.Model):
     """관리자 등록 동네가게 정보"""

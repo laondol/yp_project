@@ -603,7 +603,7 @@ def admin_ai_chat_send():
     context = f"현재 함께사는양평 현황: 총 회원 {user_count}명, 꿈꾸기 제안 {post_count}건, 공유마당 신고 {report_count}건, 마을지기 {village_count}명"
     try:
         from openai import OpenAI
-        client = OpenAI(base_url="https://api.groq.com/openai/v1", api_key=current_app.config.get('GROQ_API_KEY',''))
+        client = OpenAI(base_url="https://chat.motiftech.io/openapi/v1", api_key=current_app.config.get('MOTIF_API_KEY',''))
         system_prompt = f"""너는 함께사는양평 커뮤니티 플랫폼의 관리자 AI야. 최고책임자와 관리자를 도와 플랫폼 운영을 지원해.
 {context}
 네 역할:
@@ -614,7 +614,7 @@ def admin_ai_chat_send():
 5. 관리자 질문에 친절하고 전문적으로 답변
 답변은 한국어로, 필요시 마크다운 형식으로 구조화해서 제공해."""
         resp = client.chat.completions.create(
-            model="llama-3.1-8b-instant",
+            model="motif-12.7b",
             messages=[
                 {"role":"system","content":system_prompt},
                 {"role":"user","content":msg}

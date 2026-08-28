@@ -73,7 +73,6 @@ def has_page_access(page):
 
 
 LEADER_EMAIL = 'eou@kakao.com'        # 책임자: 비공개 글 전체 열람 권한(1인)
-LEGAL_MANAGER_EMAIL = 'daerilee@gmail.com'  # 이훈: 노동법률상담 페이지 관리자(해당 페이지+관련페이지만 권한, 타 페이지 무권한)
 
 RAMP_KEYWORDS = ('경사로', '휠체어', '휠체어경사로')
 
@@ -98,23 +97,18 @@ def is_privileged_viewer(author_uid=None, page_key=None):
     email = (session.get('email') or '').strip().lower()
     if email == LEADER_EMAIL:
         return True
-    if page_key and email == LEGAL_MANAGER_EMAIL and page_key == 'legal':
-        return True
     if page_key and uid:
         user = User.query.get(uid)
         if user and user.managed_pages:
             pages = [p.strip() for p in user.managed_pages.split(',')]
             if page_key in pages:
-                if not (email == LEGAL_MANAGER_EMAIL and page_key != 'legal'):
-                    return True
+                return True
     return False
 
 
 def is_legal_manager():
-    """노동이슈(법률상담실) 게시글 작성·AI 추천 선택 권한은 이훈(daerilee@gmail.com)만.
-    사용자 명시: '이훈에게만 있어야 됩니다' → 책임자(eou@kakao.com)도 이 권한에는 포함하지 않음."""
-    email = (session.get('email') or '').strip().lower()
-    return email == LEGAL_MANAGER_EMAIL
+    """노동이슈(법률상담실) 게시글 작성·AI 추천 선택 권한: 관리자(admin), 책임자(leader)"""
+    return session.get('role') in ('admin', 'leader')
 
 
 def mask_name(name):

@@ -86,6 +86,9 @@ export default function ShareList() {
           setItems(prev => prev.map(item =>
             item.id === id ? { ...item, [type === 'like' ? 'like_count' : 'dislike_count']: item[type === 'like' ? 'like_count' : 'dislike_count'] + 1 } : item
           ))
+          if (d.cost) {
+            alert(`${type === 'like' ? '좋아요' : '별로예요'} 완료! (${d.cost} Xml 차감)`)
+          }
         } else alert(d.msg || '오류')
       }).catch(e => alert('오류: ' + e))
   }

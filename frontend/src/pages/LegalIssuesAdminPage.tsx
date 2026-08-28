@@ -1,49 +1,35 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import Loading from '../components/common/Loading'
 import ErrorMessage from '../components/common/ErrorMessage'
+import { formatKST } from '../utils/format'
 
-interface LaborPost {
+interface LaborNewsItem {
   id: number
   title: string
-  content?: string
-  author_name?: string
-  labor_approved?: boolean
-  created_at?: string
+  summary: string
+  category: string
+  source_url: string
+  ai_reason: string
+  is_selected: boolean
+  created_at: string
 }
 
 export default function LegalIssuesAdminPage() {
   const navigate = useNavigate()
   const { user, loading: authLoading } = useAuth()
-  const [tab, setTab] = useState<'suggest' | 'url' | 'write' | 'list'>('list')
-  const [posts, setPosts] = useState<LaborPost[]>([])
+  const [news, setNews] = useState<LaborNewsItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-
-  const [suggestResult, setSuggestResult] = useState('')
-  const [suggestLoading, setSuggestLoading] = useState(false)
-
+  const [page, setPage] = useState(1)
+  const [totalPages, setTotalPages] = useState(1)
   const [importUrl, setImportUrl] = useState('')
-  const [importLoading, setImportLoading] = useState(false)
-
-  const [title, setTitle] = useState('')
-  const [content, setContent] = useState('')
-  const [sending, setSending] = useState(false)
-
-  const load = useCallback(async () => {
-    setLoading(true); setError('')
-    try {
-      const res = await fetch('/api/legal/issues')
-      if (!res.ok) throw new Error('불러오기 실패')
-      const data = await res.json()
-      setPosts(Array.isArray(data) ? data : data.issues || [])
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : '불러오기 실패')
-    } finally { setLoading(false) }
-  }, [])
-
-  useEffect(() => { if (tab === 'list') load() }, [tab, load])
+  const [importing, setImporting] = useState(false)
+  const [importMsg, setImportMsg] = useState('')
+  const [importMsgOk, setImportMsgOk] = useState(false)
+  const [suggesting, setSuggesting] = useState(false)
+  const [collecting, setCollecting] = useState(false)
 
   useEffect(() => {
     if (!authLoading && (!user || (user.role !== 'admin' && user.role !== 'leader'))) {
@@ -51,180 +37,249 @@ export default function LegalIssuesAdminPage() {
     }
   }, [user, authLoading, navigate])
 
-  const handleAiSuggest = async () => {
-    setSuggestLoading(true); setSuggestResult('')
+  const fetchNews = async () => {
+    setLoading(true)
+    setError('')
     try {
-      const res = await fetch('/legal/issues/ai-suggest', { method: 'POST' })
+      const res = await fetch(`/api/admin/labor-news?page=${page}`)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = await res.json()
-      setSuggestResult(data.suggestion || data.result || JSON.stringify(data))
-    } catch { setSuggestResult('AI 추천 중 오류가 발생했습니다.') }
-    finally { setSuggestLoading(false) }
+      setNews(data.items ?? [])
+      setTotalPages(data.total_pages ?? 1)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : '불러오기 실패')
+    } finally {
+      setLoading(false)
+    }
   }
+
+  useEffect(() => {
+    fetchNews()
+  }, [page])
 
   const handleImportUrl = async () => {
     if (!importUrl.trim()) return
-    setImportLoading(true)
+    setImporting(true)
+    setImportMsg('')
     try {
-      const fd = new FormData()
-      fd.append('url', importUrl.trim())
-      const res = await fetch('/legal/issues/import-url', { method: 'POST', body: fd })
+      const formData = new FormData()
+      formData.append('url', importUrl)
+      const res = await fetch('/admin/labor-news/import-url', { method: 'POST', body: formData })
       const data = await res.json()
-      if (data.status === 'success') {
+      if (data.status === 'success' || data.success) {
+        setImportMsg('가져오기 성공!')
+        setImportMsgOk(true)
         setImportUrl('')
-        alert('가져오기 성공')
+        fetchNews()
       } else {
-        alert(data.msg || '가져오기 실패')
+        setImportMsg(data.msg || data.message || '가져오기 실패')
+        setImportMsgOk(false)
       }
-    } catch { alert('URL 가져오기 중 오류') }
-    finally { setImportLoading(false) }
+    } catch {
+      setImportMsg('오류가 발생했습니다.')
+      setImportMsgOk(false)
+    } finally {
+      setImporting(false)
+    }
   }
 
-  const handleWrite = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!title.trim() || !content.trim()) return
-    setSending(true)
+  const handleAiSuggest = async () => {
+    setSuggesting(true)
     try {
-      const fd = new FormData()
-      fd.append('title', title.trim())
-      fd.append('content', content.trim())
-      const res = await fetch('/api/legal/issues/write', { method: 'POST', body: fd })
+      const res = await fetch('/admin/labor-news/ai-suggest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'tab=kr_yp',
+      })
       const data = await res.json()
-      if (data.id || data.status === 'success') {
-        setTitle('')
-        setContent('')
-        alert('등록 성공')
-        setTab('list')
+      if (data.status === 'success' || data.success) {
+        alert(data.msg || `✅ ${data.count}개의 노동 뉴스를 가져왔습니다.`)
+        fetchNews()
       } else {
-        alert(data.msg || '등록 실패')
+        alert(data.msg || data.message || '추천 실패')
       }
-    } catch { alert('등록 중 오류') }
-    finally { setSending(false) }
+    } catch {
+      alert('오류가 발생했습니다.')
+    } finally {
+      setSuggesting(false)
+    }
+  }
+
+  const handleCollect = async () => {
+    setCollecting(true)
+    try {
+      const res = await fetch('/admin/labor-news/collect', { method: 'POST' })
+      const data = await res.json()
+      if (data.status === 'success' || data.success) {
+        alert(data.msg || `✅ ${data.count}건 수집 완료`)
+        fetchNews()
+      } else {
+        alert(data.msg || data.message || '수집 실패')
+      }
+    } catch {
+      alert('오류가 발생했습니다.')
+    } finally {
+      setCollecting(false)
+    }
   }
 
   const handleToggle = async (id: number) => {
     try {
-      const res = await fetch(`/legal/issues/toggle/${id}`, { method: 'POST' })
+      const res = await fetch(`/admin/labor-news/toggle/${id}`)
       const data = await res.json()
-      if (data.status === 'success') load()
-      else alert(data.msg || '토글 실패')
-    } catch { alert('상태 변경 중 오류') }
+      if (data.status === 'success' || data.success) {
+        fetchNews()
+      } else {
+        alert(data.msg || data.message || '토글 실패')
+      }
+    } catch {
+      alert('오류가 발생했습니다.')
+    }
+  }
+
+  const handleDelete = async (id: number) => {
+    if (!confirm('삭제하시겠습니까?')) return
+    try {
+      const res = await fetch(`/admin/labor-news/delete/${id}`, { method: 'POST' })
+      const data = await res.json()
+      if (data.status === 'success' || data.success) {
+        setNews(prev => prev.filter(n => n.id !== id))
+      } else {
+        alert(data.msg || data.message || '삭제 실패')
+      }
+    } catch {
+      alert('오류가 발생했습니다.')
+    }
   }
 
   if (authLoading) return <Loading />
 
   return (
-    <div style={{ maxWidth: 1140, margin: '0 auto' }}>
-      <h4 className="fw-bold mb-3">노동 게시판 관리</h4>
+    <div className="container mt-4">
+      <div className="d-flex justify-content-between align-items-center mb-4">
+        <h3 className="fw-bold mb-0">📋 노동뉴스 관리</h3>
+        <a href="/admin/labor-news/create" className="btn btn-success">✏️ 직접 작성</a>
+      </div>
 
-      <ul className="nav nav-tabs mb-4">
-        <li className="nav-item">
-          <button className={`nav-link ${tab === 'suggest' ? 'active' : ''}`} onClick={() => setTab('suggest')}>
-            AI 추천
+      {/* URL Import + AI Suggest */}
+      <div className="card border-0 shadow-sm mb-4 p-3">
+        <div className="input-group">
+          <input
+            type="url"
+            className="form-control"
+            placeholder="뉴스 URL을 붙여넣으세요..."
+            value={importUrl}
+            onChange={e => setImportUrl(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleImportUrl()}
+          />
+          <button
+            className="btn btn-outline-primary"
+            onClick={handleImportUrl}
+            disabled={importing || !importUrl.trim()}
+          >
+            {importing ? '⏳ 가져오는 중...' : '🌐 가져오기 + AI 요약'}
           </button>
-        </li>
-        <li className="nav-item">
-          <button className={`nav-link ${tab === 'url' ? 'active' : ''}`} onClick={() => setTab('url')}>
-            URL 가져오기
+        </div>
+        {importMsg && (
+          <div className={`mt-2 small ${importMsgOk ? 'text-success' : 'text-danger'}`}>{importMsg}</div>
+        )}
+        <div className="mt-2">
+          <button className="btn btn-outline-success btn-sm" onClick={handleAiSuggest} disabled={suggesting}>
+            {suggesting ? '⏳ 생성 중...' : '🤖 AI 뉴스 추천'}
           </button>
-        </li>
-        <li className="nav-item">
-          <button className={`nav-link ${tab === 'write' ? 'active' : ''}`} onClick={() => setTab('write')}>
-            직접작성
+          <button className="btn btn-outline-info btn-sm ms-1" onClick={handleCollect} disabled={collecting}>
+            {collecting ? '⏳ 수집 중...' : '📰 10개 사이트 자동 수집'}
           </button>
-        </li>
-        <li className="nav-item">
-          <button className={`nav-link ${tab === 'list' ? 'active' : ''}`} onClick={() => setTab('list')}>
-            목록
-          </button>
-        </li>
-      </ul>
+          <small className="text-muted ms-2">매일 오전 6시 자동 수집 / 수동 수집 가능</small>
+        </div>
+      </div>
 
-      {tab === 'suggest' && (
-        <div className="card border-0 shadow-sm p-4" style={{ borderRadius: 16 }}>
-          <p className="small text-muted mb-3">AI가 추천하는 노동 이슈를 확인합니다.</p>
-          <button className="btn btn-info mb-3" onClick={handleAiSuggest} disabled={suggestLoading}>
-            {suggestLoading ? '추천 중...' : 'AI 추천 받기'}
-          </button>
-          {suggestResult && (
-            <div className="p-3 bg-light rounded" style={{ whiteSpace: 'pre-wrap', lineHeight: 1.8 }}>
-              {suggestResult}
-            </div>
-          )}
+      {/* News Table */}
+      {loading ? (
+        <Loading />
+      ) : error ? (
+        <ErrorMessage message={error} onRetry={fetchNews} />
+      ) : news.length === 0 ? (
+        <div className="card border-0 shadow-sm">
+          <div className="text-center py-5 text-muted">
+            등록된 노동뉴스가 없습니다. AI 추천 또는 직접 작성해 주세요.
+          </div>
+        </div>
+      ) : (
+        <div className="card border-0 shadow-sm">
+          <div className="table-responsive">
+            <table className="table table-hover align-middle mb-0">
+              <thead className="table-light">
+                <tr className="text-center small">
+                  <th style={{ width: '5%' }}>ID</th>
+                  <th style={{ width: '25%' }}>제목</th>
+                  <th style={{ width: '8%' }}>분류</th>
+                  <th style={{ width: '15%' }}>AI 선정 이유</th>
+                  <th style={{ width: '10%' }}>원본링크</th>
+                  <th style={{ width: '8%' }}>등록일</th>
+                  <th style={{ width: '12%' }}>관리</th>
+                </tr>
+              </thead>
+              <tbody>
+                {news.map(item => (
+                  <tr key={item.id} className="text-center">
+                    <td className="text-muted">{item.id}</td>
+                    <td className="text-start ps-3">
+                      <div className="fw-bold text-dark">
+                        {item.title.length > 60 ? item.title.slice(0, 60) + '...' : item.title}
+                      </div>
+                      <small className="text-muted">
+                        {item.summary && item.summary.length > 80
+                          ? item.summary.slice(0, 80) + '...'
+                          : item.summary}
+                      </small>
+                    </td>
+                    <td><span className="badge bg-secondary">{item.category}</span></td>
+                    <td className="text-start small" style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={item.ai_reason || ''}>
+                      {item.ai_reason ? (
+                        <span className="text-success" title={item.ai_reason}>
+                          💡 {item.ai_reason.length > 50 ? item.ai_reason.slice(0, 50) + '...' : item.ai_reason}
+                        </span>
+                      ) : (
+                        <span className="text-muted">-</span>
+                      )}
+                    </td>
+                    <td>
+                      {item.source_url ? (
+                        <a href={item.source_url} target="_blank" rel="noopener noreferrer" className="btn btn-sm btn-outline-primary">🔗 원문</a>
+                      ) : (
+                        <span className="text-muted small">-</span>
+                      )}
+                    </td>
+                    <td className="small text-muted">
+                      {item.created_at ? formatKST(item.created_at, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-'}
+                    </td>
+                    <td>
+                      <button className={`btn btn-sm ${item.is_selected ? 'btn-outline-success' : 'btn-outline-secondary'} me-1`} onClick={() => handleToggle(item.id)} title={item.is_selected ? '표시중' : '비활성'}>
+                        {item.is_selected ? '👁️' : '🚫'}
+                      </button>
+                      <a href={`/admin/labor-news/edit/${item.id}`} className="btn btn-sm btn-outline-success me-1">편집</a>
+                      <button className="btn btn-sm btn-outline-danger" onClick={() => handleDelete(item.id)}>삭제</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
-      {tab === 'url' && (
-        <div className="card border-0 shadow-sm p-4" style={{ borderRadius: 16 }}>
-          <div className="mb-3">
-            <label className="form-label small fw-bold">URL</label>
-            <div className="d-flex gap-2">
-              <input className="form-control" value={importUrl} onChange={e => setImportUrl(e.target.value)} placeholder="가져올 URL" />
-              <button className="btn btn-info" onClick={handleImportUrl} disabled={importLoading || !importUrl.trim()}>
-                {importLoading ? '가져오는 중...' : '가져오기'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {tab === 'write' && (
-        <form onSubmit={handleWrite} className="card border-0 shadow-sm p-4" style={{ borderRadius: 16 }}>
-          <div className="mb-3">
-            <label className="form-label small fw-bold">제목</label>
-            <input className="form-control" value={title} onChange={e => setTitle(e.target.value)} placeholder="제목" />
-          </div>
-          <div className="mb-3">
-            <label className="form-label small fw-bold">내용</label>
-            <textarea className="form-control" rows={10} value={content} onChange={e => setContent(e.target.value)} placeholder="내용" />
-          </div>
-          <button type="submit" className="btn btn-success w-100" disabled={sending || !title.trim() || !content.trim()}>
-            {sending ? '등록 중...' : '등록'}
-          </button>
-        </form>
-      )}
-
-      {tab === 'list' && (
-        <>
-          {loading && <Loading />}
-          {error && <ErrorMessage message={error} onRetry={load} />}
-          {!loading && !error && (
-            <div className="card border-0 shadow-sm" style={{ borderRadius: 16 }}>
-              <div className="table-responsive">
-                <table className="table table-hover align-middle mb-0 small">
-                  <thead className="table-light">
-                    <tr><th>#</th><th>제목</th><th>작성자</th><th>상태</th><th>관리</th></tr>
-                  </thead>
-                  <tbody>
-                    {posts.map(p => (
-                      <tr key={p.id}>
-                        <td>{p.id}</td>
-                        <td>
-                          <span className="text-decoration-none" style={{ cursor: 'pointer' }}
-                            onClick={() => navigate(`/legal/issues/${p.id}`)}>
-                            {p.title}
-                          </span>
-                        </td>
-                        <td>{p.author_name || '익명'}</td>
-                        <td>
-                          {p.labor_approved
-                            ? <span className="badge bg-success">게시</span>
-                            : <span className="badge bg-secondary">미게시</span>}
-                        </td>
-                        <td>
-                          <button className="btn btn-sm btn-outline-primary py-0"
-                            onClick={() => handleToggle(p.id)}>
-                            {p.labor_approved ? '미게시로' : '게시로'}
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              {posts.length === 0 && <div className="text-center py-4 text-muted">등록된 게시글이 없습니다.</div>}
-            </div>
-          )}
-        </>
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <nav className="mt-3">
+          <ul className="pagination justify-content-center">
+            {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
+              <li key={p} className={`page-item ${p === page ? 'active' : ''}`}>
+                <button className="page-link" onClick={() => setPage(p)}>{p}</button>
+              </li>
+            ))}
+          </ul>
+        </nav>
       )}
     </div>
   )

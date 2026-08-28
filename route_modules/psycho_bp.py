@@ -173,6 +173,18 @@ def psycho_admin_answer(post_id):
     db.session.commit()
     EmailService.send(post.email, f"[양평마을] 심리상담 답변이 등록되었습니다",
         f"문의하신 '{post.title}'에 대한 답변이 등록되었습니다.\n\n{request.host_url}psycho/post/{post.id}")
+    if post.user_id:
+        try:
+            db.session.add(Message(
+                sender_id=_system_sender_id(),
+                sender_name="양평마을",
+                receiver_id=post.user_id,
+                subject="[심리상담] 답변이 등록되었습니다",
+                content="문의하신 " + repr(post.title) + "에 대한 답변이 등록되었습니다.\n\n" + request.host_url + "psycho/post/" + str(post.id),
+                letter_type="private"))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
     admins = User.query.filter(User.role.in_(['admin','leader'])).all()
     for admin in admins:
         try:
@@ -195,6 +207,18 @@ def psycho_appointment_approve(appt_id):
     db.session.commit()
     EmailService.send(appt.email, "[양평마을] 심리상담 예약이 승인되었습니다",
         f"심리상담 예약이 승인되었습니다.\n\n일시: {appt.date} {appt.time_slot}\n\n{request.host_url}psycho/schedule")
+    if appt.user_id:
+        try:
+            db.session.add(Message(
+                sender_id=_system_sender_id(),
+                sender_name="양평마을",
+                receiver_id=appt.user_id,
+                subject="[심리상담] 예약이 승인되었습니다",
+                content="심리상담 예약이 승인되었습니다.\n\n일시: " + str(appt.date) + " " + str(appt.time_slot) + "\n\n" + request.host_url + "psycho/schedule",
+                letter_type="private"))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
     admins = User.query.filter(User.role.in_(['admin','leader'])).all()
     for admin in admins:
         try:
@@ -365,6 +389,25 @@ def api_psycho_create():
             current_app.logger.warning(f'psycho create attachment save failed: {_e}')
     db.session.add(post)
     db.session.commit()
+    from services.email_service import EmailService
+    admins = User.query.filter(User.role.in_(["admin","leader"])).all()
+    for admin in admins:
+        try:
+            EmailService.send(admin.email, f"[심리상담] {title}",
+                "작성자: " + post.author_name + "\n이메일: " + email + "\n제목: " + title + "\n내용: " + content[:500])
+        except:
+            pass
+        try:
+            db.session.add(Message(
+                sender_id=_system_sender_id(),
+                sender_name="양평마을",
+                receiver_id=admin.id,
+                subject=f"[심리상담] {title}",
+                content="작성자: " + post.author_name + "\n이메일: " + email + "\n제목: " + title + "\n내용: " + content[:500],
+                letter_type="private"))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
     return jsonify({'status': 'success', 'id': post.id})
 
 @psycho_bp.route('/api/psycho/post/<int:post_id>/comment', methods=['POST'])

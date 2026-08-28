@@ -29,15 +29,18 @@ def village_ai_categorize():
     content = request.json.get('content','')[:1000]
     try:
         from openai import OpenAI
-        client = OpenAI(base_url="https://api.groq.com/openai/v1", api_key=current_app.config.get('GROQ_API_KEY',''))
+        client = OpenAI(base_url="https://chat.motiftech.io/openapi/v1", api_key=current_app.config.get('MOTIF_API_KEY',''))
         resp = client.chat.completions.create(
-            model="llama-3.1-8b-instant",
+            model="motif-12.7b",
             messages=[{"role":"system","content":"다음 글을 분석해서 '개인' 또는 '공공'으로 분류하고 한줄 요약해줘. JSON: {\"category\":\"개인\" or \"공공\",\"summary\":\"한줄요약\"}"},
                       {"role":"user","content":content}],
             temperature=0.3, max_tokens=200
         )
-        import json as _json
-        result = _json.loads(resp.choices[0].message.content)
+        import json as _json, re as _re
+        _raw = resp.choices[0].message.content or ""
+        _raw = _re.sub(r'```(?:json)?', '', _raw).strip()
+        _s = _raw.find('{'); _e = _raw.rfind('}')
+        result = _json.loads(_raw[_s:_e+1]) if _s != -1 and _e > _s else _json.loads(_raw)
     except:
         result = {"category":"공공","summary":content[:50]}
     return jsonify(result)
@@ -418,9 +421,9 @@ def village_event_chat(event_id):
     blocked = False
     try:
         from openai import OpenAI
-        client = OpenAI(base_url="https://api.groq.com/openai/v1", api_key=current_app.config.get('GROQ_API_KEY',''))
+        client = OpenAI(base_url="https://chat.motiftech.io/openapi/v1", api_key=current_app.config.get('MOTIF_API_KEY',''))
         resp = client.chat.completions.create(
-            model="llama-3.1-8b-instant",
+            model="motif-12.7b",
             messages=[{"role":"system","content":"다음 채팅 메시지가 욕설,비방,광고성인지 'clean'또는'block'으로만 답변"},{"role":"user","content":msg}],
             temperature=0, max_tokens=10
         )
@@ -445,9 +448,9 @@ def village_event_ai_summary(event_id):
     messages = '\n'.join([f'{c.author}: {c.message}' for c in chat])
     try:
         from openai import OpenAI
-        client = OpenAI(base_url="https://api.groq.com/openai/v1", api_key=current_app.config.get('GROQ_API_KEY',''))
+        client = OpenAI(base_url="https://chat.motiftech.io/openapi/v1", api_key=current_app.config.get('MOTIF_API_KEY',''))
         resp = client.chat.completions.create(
-            model="llama-3.1-8b-instant",
+            model="motif-12.7b",
             messages=[{"role":"system","content":"회의 채팅 내용을 주제별로 묶어서 정리해줘. 비슷한 질문은 그룹화하고, 주요 논의사항과 결정사항을 구분해. 마크다운으로."},
                       {"role":"user","content":messages[:3000]}],
             temperature=0.5, max_tokens=800
