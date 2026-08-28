@@ -294,6 +294,19 @@ export default function TongBotChatPage() {
     }
   }, [startRecognition])
 
+  // 채팅창 열림/닫힘 알림 → 네비바 웨이크워드 마이크 충돌 방지
+  useEffect(() => {
+    try { localStorage.setItem('tongbot_popup_open', '1') } catch {}
+    const cleanup = () => { try { localStorage.removeItem('tongbot_popup_open') } catch {} }
+    window.addEventListener('pagehide', cleanup)
+    window.addEventListener('beforeunload', cleanup)
+    return () => {
+      window.removeEventListener('pagehide', cleanup)
+      window.removeEventListener('beforeunload', cleanup)
+      cleanup()
+    }
+  }, [])
+
   // TTS 재생
   const handleSpeak = useCallback((text: string, idx: number) => {
     const synth = window.speechSynthesis

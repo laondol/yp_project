@@ -47,6 +47,7 @@ export default function NavBar() {
   const wakeRecRef = useRef<any>(null)
   const wakeCooldownRef = useRef(0)
   const wakeNamesRef = useRef<string[]>(['통벗'])
+  const wakeSuspendedRef = useRef(false)
 
   // 봇 이름 가져오기: 이름이 지정되어 있으면 그 이름(감돌 등)으로도 부르기 가능
   useEffect(() => {
@@ -62,7 +63,16 @@ export default function NavBar() {
     try { localStorage.setItem('tongbot_wake', String(wakeOn)) } catch {}
   }, [wakeOn])
 
+  const isBotPopupOpen = () => {
+    try { return localStorage.getItem('tongbot_popup_open') === '1' } catch { return false }
+  }
+
   const startWakeListening = () => {
+    // 통벗 채팅창이 열려 있으면 마이크 충돌 방지를 위해 대기 (채팅창 닫히면 자동 재개)
+    if (isBotPopupOpen()) {
+      wakeSuspendedRef.current = true
+      return
+    }
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
     if (!SR) {
       alert('이 브라우저는 음성 인식을 지원하지 않습니다.\nChrome/Edge 브라우저를 사용해 주세요.')
@@ -90,8 +100,10 @@ export default function NavBar() {
       }
     }
     rec.onend = () => {
-      if (wakeRef.current) {
-        setTimeout(() => { if (wakeRef.current) { try { wakeRecRef.current?.start() } catch {} } }, 500)
+      if (wakeRef.current && !wakeSuspendedRef.current) {
+        setTimeout(() => {
+          if (wakeRef.current && !wakeSuspendedRef.current) { try { wakeRecRef.current?.start() } catch {} }
+        }, 500)
       }
     }
     wakeRecRef.current = rec
@@ -103,8 +115,42 @@ export default function NavBar() {
     wakeRef.current = next
     setWakeOn(next)
     if (next) startWakeListening()
-    else { try { wakeRecRef.current?.stop() } catch {} }
+    else {
+      wakeSuspendedRef.current = false
+      try { wakeRecRef.current?.stop() } catch {}
+    }
   }
+
+  // 통벗 채팅창 열림/닫힘에 따라 웨이크워드 마이크 자동 중지/재개
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== 'tongbot_popup_open') return
+      if (e.newValue === '1') {
+        // 채팅창 열림 → 네비바 마이크 중지
+        wakeSuspendedRef.current = true
+        try { wakeRecRef.current?.stop() } catch {}
+      } else {
+        // 채팅창 닫힘 → 네비바 마이크 재개
+        wakeSuspendedRef.current = false
+        if (wakeRef.current) {
+          setTimeout(() => { if (wakeRef.current && !wakeSuspendedRef.current) startWakeListening() }, 600)
+        }
+      }
+    }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [])
+
+  // 안전장치: 채팅창이 비정상 종료되어 키가 남아있는 경우 5초마다 확인 후 재개
+  useEffect(() => {
+    const iv = setInterval(() => {
+      if (wakeRef.current && wakeSuspendedRef.current && !isBotPopupOpen()) {
+        wakeSuspendedRef.current = false
+        startWakeListening()
+      }
+    }, 5000)
+    return () => clearInterval(iv)
+  }, [])
 
   useEffect(() => {
     if (wakeRef.current) startWakeListening()
