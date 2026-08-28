@@ -46,6 +46,17 @@ export default function NavBar() {
   const wakeRef = useRef(wakeOn)
   const wakeRecRef = useRef<any>(null)
   const wakeCooldownRef = useRef(0)
+  const wakeNamesRef = useRef<string[]>(['통벗'])
+
+  // 봇 이름 가져오기: 이름이 지정되어 있으면 그 이름(감돌 등)으로도 부르기 가능
+  useEffect(() => {
+    fetch('/api/me', { credentials: 'include' }).then(r => r.json()).then(d => {
+      const name = d?.bot?.bot_name
+      if (name && name !== '통벗' && !/^[A-Za-z]-/.test(name)) {
+        wakeNamesRef.current = ['통벗', name]
+      }
+    }).catch(() => {})
+  }, [])
 
   useEffect(() => {
     try { localStorage.setItem('tongbot_wake', String(wakeOn)) } catch {}
@@ -66,7 +77,8 @@ export default function NavBar() {
     rec.onresult = (e: any) => {
       let t = ''
       for (let i = e.resultIndex; i < e.results.length; i++) t += e.results[i][0].transcript
-      if (t.includes('통벗') && Date.now() - wakeCooldownRef.current > 5000) {
+      const hit = wakeNamesRef.current.some(n => t.includes(n))
+      if (hit && Date.now() - wakeCooldownRef.current > 5000) {
         wakeCooldownRef.current = Date.now()
         notifBeep(880, [0.12])
         openTongbotChat()

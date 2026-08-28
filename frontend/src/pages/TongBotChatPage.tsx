@@ -90,6 +90,9 @@ function playBeep(freq = 880, duration = 120) {
   } catch {}
 }
 
+// 채팅창 닫기 음성 명령 ("채팅창 닫아(줘)" 등 짧은 마침 표현)
+const CLOSE_WIN_RE = /^(?:[가-힣]{1,3}\s*)?(?:채팅\s*창|창)?\s*(?:닫아|닫아\s*줘|닫기|꺼줘|끝낼게|끝내자|그만하자)(?:\s*(?:줘|요))?$/
+
 export default function TongBotChatPage() {
   const navigate = useNavigate()
   const [bot, setBot] = useState<BotInfo | null>(null)
@@ -210,6 +213,15 @@ export default function TongBotChatPage() {
       for (let i = event.resultIndex; i < event.results.length; i++) {
         transcript += event.results[i][0].transcript
       }
+      // 채팅창 닫기 음성 명령 즉시 처리
+      if (!sendingRef.current && CLOSE_WIN_RE.test(transcript.trim())) {
+        if (silenceTimerRef.current) { window.clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null }
+        lastTranscriptRef.current = ''
+        setInput('')
+        playBeep(520)
+        setTimeout(() => window.close(), 400)
+        return
+      }
       lastTranscriptRef.current = transcript
       setInput(transcript)
       armSilenceTimer()
@@ -329,9 +341,16 @@ export default function TongBotChatPage() {
       if (d.listen_cmd === 'on' && !continuousRef.current) setContinuousMode(true)
       if (d.listen_cmd === 'off' && continuousRef.current) setContinuousMode(false)
       // 자동 TTS (통벗 말하는 동안 마이크 중지 → 말 끝나면 재개)
+      const ttsDone = () => {
+        resumeMicIfContinuous()
+        if (d.close_cmd) window.close()
+      }
       if ((autoTts || d.voice_cmd === 'on') && reply) {
         suspendMicForTts()
-        setTimeout(() => speak(reply, 'ko-KR', resumeMicIfContinuous), 300)
+        setTimeout(() => speak(reply, 'ko-KR', ttsDone), 300)
+      } else if (d.close_cmd) {
+        // 인사 확인 후 채팅창 닫기
+        setTimeout(() => window.close(), 1500)
       }
     }).catch(() => setMessages(prev => [...prev, { role: 'bot', text: '응답 실패', name: 'AI' }]))
       .finally(() => {

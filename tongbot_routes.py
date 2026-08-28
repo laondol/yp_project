@@ -272,13 +272,17 @@ def bot_chat():
     # 음성/연속듣기 명령 태그 파싱 후 답변 텍스트에서 제거
     voice_cmd = None
     listen_cmd = None
+    close_cmd = False
     _vm = re.search(r'<voice_(on|off)>', raw_reply)
     _lm = re.search(r'<listen_(on|off)>', raw_reply)
+    _cm = re.search(r'<close_window>', raw_reply)
     if _vm:
         voice_cmd = _vm.group(1)
     if _lm:
         listen_cmd = _lm.group(1)
-    raw_reply = re.sub(r'<voice_(?:on|off)>|<listen_(?:on|off)>', '', raw_reply).strip()
+    if _cm:
+        close_cmd = True
+    raw_reply = re.sub(r'<voice_(?:on|off)>|<listen_(?:on|off)>|<close_window>', '', raw_reply).strip()
     # AI가 <memo>태그로 기록한 내용 → 자동 메모 저장
     memo_match = re.search(r'<memo>(.*?)</memo>', raw_reply, re.DOTALL)
     memo_saved = None
@@ -435,7 +439,7 @@ def bot_chat():
         if any(k in reply for k in ['열어드릴 수 없', '열 수 없', '기능이 없', '지원하지 않', '제공할 수 없', '없습니다', '할 수 없']):
             reply = "원하시는 페이지를 아래 '페이지 열기' 버튼으로 바로 열어드릴게요! 👇"
 
-    return jsonify({"reply": reply, "bot_name": bot.bot_name, "talent": talent, "mood": bot.mood, "level": bot.level, "counselor": counselor_msg, "schedule": schedule_info, "shopping": shopping_info, "pages": page_links, "voice_cmd": voice_cmd, "listen_cmd": listen_cmd})
+    return jsonify({"reply": reply, "bot_name": bot.bot_name, "talent": talent, "mood": bot.mood, "level": bot.level, "counselor": counselor_msg, "schedule": schedule_info, "shopping": shopping_info, "pages": page_links, "voice_cmd": voice_cmd, "listen_cmd": listen_cmd, "close_cmd": close_cmd})
 
 @tongbot_bp.route('/api/bot/history')
 def bot_history():
@@ -1189,6 +1193,7 @@ def _ai_reply(bot, user, user_msg):
         음성을 끄라고 하면 답변 맨 끝에 <voice_off> 태그를 붙이세요.
         회원이 "계속 듣고 있어/연속으로 말할게/마이크 계속 켜줘/자동으로 보내줘"라고 하면 답변 맨 끝에 <listen_on> 태그를 붙이세요.
         연속 듣기를 끄라고 하면 답변 맨 끝에 <listen_off> 태그를 붙이세요.
+        회원이 채팅창을 닫아달라고 하면("채팅창 닫아줘/이제 끝낼게/그만하자/오늘은 여기까지") 짧게 인사한 뒤 답변 맨 끝에 <close_window> 태그를 붙이세요.
         이 태그들은 화면에 표시되지 않고 자동으로 기능을 켜고 끕니다. 음성 기능이 없다고 절대 말하지 마세요.
 
         [플랫폼 안내 - 플랫폼 기능 질문시에만 참고]
@@ -1219,11 +1224,14 @@ def _ai_reply(bot, user, user_msg):
             voice_blk = ''
             vm = re.search(r'<voice_(?:on|off)>', reply)
             lm = re.search(r'<listen_(?:on|off)>', reply)
+            cm = re.search(r'<close_window>', reply)
             if vm:
                 voice_blk += '\n' + vm.group(0)
             if lm:
                 voice_blk += '\n' + lm.group(0)
-            reply_clean = re.sub(r'<voice_(?:on|off)>|<listen_(?:on|off)>', '', reply_clean).strip()
+            if cm:
+                voice_blk += '\n' + cm.group(0)
+            reply_clean = re.sub(r'<voice_(?:on|off)>|<listen_(?:on|off)>|<close_window>', '', reply_clean).strip()
             _save_knowledge(bot, user_msg, reply_clean)
             out = reply_clean
             if memo_blk:
