@@ -978,7 +978,6 @@ function BotSettingsPanel({ data, load, onClose }: { data: any; load: () => void
         <label className="form-label small fw-bold">LLM 제공자</label>
         <select className="form-select form-select-sm" value={llmProvider} onChange={e => setLlmProvider(e.target.value)}>
           <option value="motif">MOTIF (기본)</option>
-          <option value="motif_beta">MOTIF 베타 (morphfactory)</option>
           <option value="groq">Groq</option>
           <option value="openai">OpenAI</option>
         </select>
