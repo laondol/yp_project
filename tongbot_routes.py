@@ -1086,7 +1086,7 @@ def _ai_reply(bot, user, user_msg):
         # provider별 base_url 매핑
         provider_urls = {
             'motif': 'https://chat.motiftech.io/openapi/v1',
-            'motif_beta': 'https://api-cbt.morphfactory.io/v1',
+            'motif_beta': 'https://chat.motiftech.io/openapi/v1',
             'groq': 'https://api.groq.com/openai/v1',
             'openai': 'https://api.openai.com/v1',
         }
@@ -1097,7 +1097,7 @@ def _ai_reply(bot, user, user_msg):
         # provider별 기본 모델名 매핑
         provider_models = {
             'motif': 'motif-12.7b',
-            'motif_beta': 'motif/motif-3',
+            'motif_beta': 'motif-12.7b-reasoning',
             'groq': 'llama-3.3-70b-versatile',
             'openai': 'gpt-4o-mini',
         }
