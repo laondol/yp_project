@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { Link } from 'react-router-dom';
+import { openTongbotChat } from '../lib/popup'
 
 let _notifBeepCtx: AudioContext | null = null
 function notifBeep(freq: number, pattern: number[]) {
@@ -37,6 +38,66 @@ export default function NavBar() {
   const toastIdRef = useRef(0)
   const [searchOpen, setSearchOpen] = useState(false)
   const searchRef = useRef<HTMLInputElement>(null)
+
+  // 통벗 웨이크워드: "통벗"이라고 부르면 채팅창이 앞으로 뜸
+  const [wakeOn, setWakeOn] = useState(() => {
+    try { return localStorage.getItem('tongbot_wake') === 'true' } catch { return false }
+  })
+  const wakeRef = useRef(wakeOn)
+  const wakeRecRef = useRef<any>(null)
+  const wakeCooldownRef = useRef(0)
+
+  useEffect(() => {
+    try { localStorage.setItem('tongbot_wake', String(wakeOn)) } catch {}
+  }, [wakeOn])
+
+  const startWakeListening = () => {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+    if (!SR) {
+      alert('이 브라우저는 음성 인식을 지원하지 않습니다.\nChrome/Edge 브라우저를 사용해 주세요.')
+      wakeRef.current = false; setWakeOn(false)
+      return
+    }
+    try { wakeRecRef.current?.stop() } catch {}
+    const rec = new SR()
+    rec.lang = 'ko-KR'
+    rec.continuous = true
+    rec.interimResults = true
+    rec.onresult = (e: any) => {
+      let t = ''
+      for (let i = e.resultIndex; i < e.results.length; i++) t += e.results[i][0].transcript
+      if (t.includes('통벗') && Date.now() - wakeCooldownRef.current > 5000) {
+        wakeCooldownRef.current = Date.now()
+        notifBeep(880, [0.12])
+        openTongbotChat()
+      }
+    }
+    rec.onerror = (e: any) => {
+      if (e?.error === 'not-allowed' || e?.error === 'service-not-allowed') {
+        wakeRef.current = false; setWakeOn(false)
+      }
+    }
+    rec.onend = () => {
+      if (wakeRef.current) {
+        setTimeout(() => { if (wakeRef.current) { try { wakeRecRef.current?.start() } catch {} } }, 500)
+      }
+    }
+    wakeRecRef.current = rec
+    rec.start()
+  }
+
+  const toggleWake = () => {
+    const next = !wakeRef.current
+    wakeRef.current = next
+    setWakeOn(next)
+    if (next) startWakeListening()
+    else { try { wakeRecRef.current?.stop() } catch {} }
+  }
+
+  useEffect(() => {
+    if (wakeRef.current) startWakeListening()
+    return () => { try { wakeRecRef.current?.stop() } catch {} }
+  }, [])
 
   useEffect(() => {
     if (!user?.id) return
@@ -126,6 +187,9 @@ export default function NavBar() {
             <button className="btn btn-sm btn-outline-warning px-2 py-0" style={{ fontSize: '0.9rem' }}
               onClick={() => document.getElementById('quickMenu')?.classList.toggle('d-none')}>⭐</button>
             <a href="/share-report" className="btn btn-sm btn-outline-success px-2 py-0 ms-1" style={{ fontSize: '0.9rem' }}>📸</a>
+            <button className={`btn btn-sm px-2 py-0 ms-1 ${wakeOn ? 'btn-success' : 'btn-outline-secondary'}`} style={{ fontSize: '0.9rem' }}
+              title={wakeOn ? '"통벗"이라고 부르면 채팅창이 열립니다 (끄려면 클릭)' : '켜면 "통벗"이라고 말할 때 채팅창이 열립니다'}
+              onClick={toggleWake}>🎙️</button>
             {user?.id && hasVillage && (
               <div className="d-inline-flex align-items-center ms-1 position-relative">
                 <a href="/village" className="text-decoration-none" title="마을" style={{ fontSize: '1.2rem' }}
@@ -145,7 +209,7 @@ export default function NavBar() {
               <a className="d-block small py-1 px-2 text-dark text-decoration-none rounded" href="/main">💭 꿈꾸기</a>
               <a className="d-block small py-1 px-2 text-dark text-decoration-none rounded" href="/construction">📍 위치기반안내</a>
               <a className="d-block small py-1 px-2 text-dark text-decoration-none rounded" href="#"
-                onClick={e => { e.preventDefault(); window.open('/bot/chat?popup=1', 'tongbotChat', 'width=450,height=700,left=100,top=50') }}>🤖 통벗채팅</a>
+                onClick={e => { e.preventDefault(); openTongbotChat() }}>🤖 통벗채팅</a>
             </div>
           </div>
         </div>

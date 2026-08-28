@@ -100,7 +100,7 @@ export default function TongBotChatPage() {
   const [showHistory, setShowHistory] = useState(false)
   const [historyData, setHistoryData] = useState<{role:string;text:string}[]>([])
   const bottomRef = useRef<HTMLDivElement>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
 
   // STT/TTS 상태
   const [isListening, setIsListening] = useState(false)
@@ -181,6 +181,15 @@ export default function TongBotChatPage() {
   useEffect(() => {
     if (!sending) inputRef.current?.focus()
   }, [sending])
+
+  // 입력창 자동 확장 (말하는 대로 글이 모두 보이게)
+  useEffect(() => {
+    const el = inputRef.current
+    if (el) {
+      el.style.height = 'auto'
+      el.style.height = Math.min(el.scrollHeight, 120) + 'px'
+    }
+  }, [input])
 
   // STT 시작
   const startRecognition = useCallback((isContinuous: boolean) => {
@@ -451,10 +460,11 @@ export default function TongBotChatPage() {
         >
           {isListening ? '⏹' : '🎤'}
         </button>
-        <input ref={inputRef} className="form-control" placeholder={isListening ? (continuous ? '연속 듣는 중... 3초 침묵 시 자동 전송' : '듣는 중...') : '메시지를 입력하세요...'}
+        <textarea ref={inputRef} rows={1} className="form-control" placeholder={isListening ? (continuous ? '연속 듣는 중... 3초 침묵 시 자동 전송' : '듣는 중...') : '메시지를 입력하세요...'}
           value={input} onChange={e => setInput(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat() }}}
-          disabled={sending} />
+          disabled={sending}
+          style={{ resize: 'none', overflow: 'hidden', maxHeight: 120 }} />
         <button className="btn btn-success px-4" onClick={() => sendChat()} disabled={sending || !input.trim()}>전송</button>
         <button className="btn btn-outline-secondary" onClick={loadHistory} title="대화 기록">📜</button>
       </div>
