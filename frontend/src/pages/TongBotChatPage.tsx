@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 const MOODS: Record<string, { emoji: string; label: string }> = {
@@ -24,6 +24,47 @@ interface ChatMessage {
   pages?: { label: string; path: string }[]
 }
 
+// Web Speech API 타입 선언
+interface SpeechRecognitionEvent extends Event {
+  results: SpeechRecognitionResultList
+  resultIndex: number
+}
+interface SpeechRecognitionResultList {
+  length: number
+  item(index: number): SpeechRecognitionResult
+  [index: number]: SpeechRecognitionResult
+}
+interface SpeechRecognitionResult {
+  length: number
+  item(index: number): SpeechRecognitionAlternative
+  [index: number]: SpeechRecognitionAlternative
+  isFinal: boolean
+}
+interface SpeechRecognitionAlternative {
+  transcript: string
+  confidence: number
+}
+
+declare global {
+  interface Window {
+    SpeechRecognition: any
+    webkitSpeechRecognition: any
+  }
+}
+
+function speak(text: string, lang = 'ko-KR') {
+  if (!('speechSynthesis' in window)) return
+  window.speechSynthesis.cancel()
+  const utter = new SpeechSynthesisUtterance(text.replace(/[^\w\s가-힣ㄱ-ㅎㅏ-ㅣ.,!?~]/g, ''))
+  utter.lang = lang
+  utter.rate = 1
+  utter.pitch = 1
+  const voices = window.speechSynthesis.getVoices()
+  const ko = voices.find(v => v.lang.startsWith('ko'))
+  if (ko) utter.voice = ko
+  window.speechSynthesis.speak(utter)
+}
+
 export default function TongBotChatPage() {
   const navigate = useNavigate()
   const [bot, setBot] = useState<BotInfo | null>(null)
@@ -35,6 +76,18 @@ export default function TongBotChatPage() {
   const [historyData, setHistoryData] = useState<{role:string;text:string}[]>([])
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  // STT/TTS 상태
+  const [isListening, setIsListening] = useState(false)
+  const [autoTts, setAutoTts] = useState(() => {
+    try { return localStorage.getItem('tongbot_auto_tts') === 'true' } catch { return false }
+  })
+  const [speakingIdx, setSpeakingIdx] = useState<number | null>(null)
+  const recognitionRef = useRef<any>(null)
+
+  useEffect(() => {
+    try { localStorage.setItem('tongbot_auto_tts', String(autoTts)) } catch {}
+  }, [autoTts])
 
   useEffect(() => {
     fetch('/api/me', { credentials: 'include' }).then(r => r.json()).then(d => {
@@ -48,6 +101,14 @@ export default function TongBotChatPage() {
     })
   }, [])
 
+  // 음성 합성 음성 목록 로드
+  useEffect(() => {
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.getVoices()
+      window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices()
+    }
+  }, [])
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, sending])
@@ -55,6 +116,67 @@ export default function TongBotChatPage() {
   useEffect(() => {
     if (!sending) inputRef.current?.focus()
   }, [sending])
+
+  // STT 시작/중지
+  const toggleListening = useCallback(() => {
+    if (isListening) {
+      recognitionRef.current?.stop()
+      setIsListening(false)
+      return
+    }
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+    if (!SpeechRecognition) {
+      alert('이 브라우저는 음성 인식을 지원하지 않습니다.\nChrome 브라우저를 사용해 주세요.')
+      return
+    }
+    const recognition = new SpeechRecognition()
+    recognition.lang = 'ko-KR'
+    recognition.interimResults = true
+    recognition.continuous = false
+    recognition.maxAlternatives = 1
+
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
+      let transcript = ''
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        transcript += event.results[i][0].transcript
+      }
+      setInput(transcript)
+      if (event.results[event.resultIndex].isFinal) {
+        setIsListening(false)
+        // 자동 전송
+        setTimeout(() => {
+          const msg = transcript.trim()
+          if (msg) {
+            setInput(msg)
+          }
+        }, 100)
+      }
+    }
+    recognition.onerror = () => setIsListening(false)
+    recognition.onend = () => setIsListening(false)
+
+    recognitionRef.current = recognition
+    recognition.start()
+    setIsListening(true)
+  }, [isListening])
+
+  // TTS 재생
+  const handleSpeak = useCallback((text: string, idx: number) => {
+    if (speakingIdx === idx) {
+      window.speechSynthesis?.cancel()
+      setSpeakingIdx(null)
+      return
+    }
+    setSpeakingIdx(idx)
+    speak(text)
+    // 재생 완료 시 초기화
+    const check = setInterval(() => {
+      if (!window.speechSynthesis?.speaking) {
+        setSpeakingIdx(null)
+        clearInterval(check)
+      }
+    }, 200)
+  }, [speakingIdx])
 
   const sendChat = () => {
     const msg = input.trim()
@@ -67,8 +189,9 @@ export default function TongBotChatPage() {
       body: JSON.stringify({ message: msg }),
       credentials: 'include',
     }).then(r => r.json()).then(d => {
+      const reply = d.reply || '(응답 없음)'
       const msgs: ChatMessage[] = [
-        { role: 'bot', text: d.reply || '(응답 없음)', name: d.bot_name || bot?.bot_name || '통벗' }
+        { role: 'bot', text: reply, name: d.bot_name || bot?.bot_name || '통벗' }
       ]
       if (d.schedule) { msgs.push({ role: 'bot', text: `📅 ${d.schedule.title}`, name: 'AI' }) }
       if (d.suggestion) d.suggestion.forEach((s: {text:string}) => msgs.push({ role: 'bot', text: `💡 ${s.text}`, name: '제안' }))
@@ -76,6 +199,10 @@ export default function TongBotChatPage() {
         msgs.push({ role: 'bot', text: '🔗 아래 페이지를 바로 열어드릴게요.', name: '통벗', pages: d.pages })
       }
       setMessages(prev => [...prev, ...msgs])
+      // 자동 TTS
+      if (autoTts && reply) {
+        setTimeout(() => speak(reply), 300)
+      }
     }).catch(() => setMessages(prev => [...prev, { role: 'bot', text: '응답 실패', name: 'AI' }]))
       .finally(() => {
         setSending(false)
@@ -105,9 +232,17 @@ export default function TongBotChatPage() {
             <small className="text-muted d-block">{moodInfo.label} · {levelInfo.name} Lv.{bot?.level || 1}</small>
           </div>
         </div>
-        <div className="ms-auto d-flex align-items-center gap-3 small text-muted">
-          <span>💬 {bot?.chat_count || 0}</span>
-          <span>❤️ {bot?.intimacy || 0}</span>
+        <div className="ms-auto d-flex align-items-center gap-2 small">
+          <button
+            className={`btn btn-sm py-0 ${autoTts ? 'btn-success' : 'btn-outline-secondary'}`}
+            onClick={() => setAutoTts(!autoTts)}
+            title={autoTts ? '자동 음성 ON' : '자동 음성 OFF'}
+            style={{ fontSize: '0.75rem' }}
+          >
+            🔊 {autoTts ? 'ON' : 'OFF'}
+          </button>
+          <span className="text-muted">💬 {bot?.chat_count || 0}</span>
+          <span className="text-muted">❤️ {bot?.intimacy || 0}</span>
         </div>
       </div>
 
@@ -134,6 +269,13 @@ export default function TongBotChatPage() {
                 )}
                 {c.role === 'bot' && (
                   <div className="position-absolute d-flex gap-1" style={{ top: 2, right: 4 }}>
+                    <button
+                      className="btn btn-sm p-0" title="음성으로 듣기"
+                      style={{ fontSize: '0.7rem', color: speakingIdx === i ? '#198754' : '#6c757d' }}
+                      onClick={() => handleSpeak(c.text, i)}
+                    >
+                      {speakingIdx === i ? '⏸' : '🔊'}
+                    </button>
                     <button className="btn btn-sm p-0" title="도움됨" style={{ fontSize: '0.65rem' }}
                       onClick={async () => {
                         await fetch('/api/bot/feedback', {
@@ -169,8 +311,16 @@ export default function TongBotChatPage() {
       </div>
 
       {/* Input */}
-      <div className="p-3 border-top d-flex gap-2 bg-white" style={{ flexShrink: 0 }}>
-        <input ref={inputRef} className="form-control" placeholder="메시지를 입력하세요..."
+      <div className="p-3 border-top d-flex gap-2 bg-white align-items-center" style={{ flexShrink: 0 }}>
+        <button
+          className={`btn ${isListening ? 'btn-danger' : 'btn-outline-secondary'} d-flex align-items-center justify-content-center`}
+          onClick={toggleListening}
+          title={isListening ? '음성 입력 중지' : '음성 입력'}
+          style={{ width: 42, height: 42, borderRadius: '50%', flexShrink: 0, fontSize: '1.1rem' }}
+        >
+          {isListening ? '⏹' : '🎤'}
+        </button>
+        <input ref={inputRef} className="form-control" placeholder={isListening ? '듣는 중...' : '메시지를 입력하세요...'}
           value={input} onChange={e => setInput(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat() }}}
           disabled={sending} />
