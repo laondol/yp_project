@@ -326,7 +326,12 @@ def spa_fallback(path):
     # SPA 클라이언트 라우트 직접접속/새로고침 지원 (API·정적자산은 개별 라우트가 우선)
     if path.startswith('api/'):
         return 'Not Found', 404
-    _idx = os.path.join(app.root_path, 'frontend', 'dist', 'index.html')
+    _dist = os.path.join(app.root_path, 'frontend', 'dist')
+    _file = os.path.normpath(os.path.join(_dist, path))
+    # dist 내부 실제 파일이면 우선 서빙 (경로 탈출 방지)
+    if path and _file.startswith(_dist) and os.path.isfile(_file):
+        return send_file(_file)
+    _idx = os.path.join(_dist, 'index.html')
     if os.path.exists(_idx):
         return send_file(_idx)
     return 'Not Found', 404

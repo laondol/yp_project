@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head><meta charset="utf-8"><title>TTS 진단</title></head>
+<body style="font-family:sans-serif;padding:20px;max-width:700px">
+<h2>TTS 진단 페이지 (임시)</h2>
+<button onclick="test1()">1. 영어 테스트 (hello)</button><br><br>
+<button onclick="test2()">2. 한국어 테스트 (안녕하세요)</button><br><br>
+<button onclick="listVoices()">3. 설치된 음성 목록 보기</button>
+<pre id="out" style="background:#f3f3f3;padding:10px;margin-top:16px;white-space:pre-wrap;min-height:60px"></pre>
+<script>
+function log(m){document.getElementById('out').textContent += m + '\n'}
+function test1(){
+  const u = new SpeechSynthesisUtterance("hello world");
+  speechSynthesis.cancel();
+  u.onend = () => log('1번: 재생 완료됨');
+  u.onerror = (e) => log('1번: 재생 오류 - ' + e.error);
+  speechSynthesis.speak(u);
+  log('1번: 재생 시도...');
+}
+function test2(){
+  const u = new SpeechSynthesisUtterance("안녕하세요. 테스트입니다.");
+  u.lang = "ko-KR";
+  const vs = speechSynthesis.getVoices();
+  const ko = vs.find(v => v.lang.startsWith('ko'));
+  if (ko) u.voice = ko;
+  speechSynthesis.cancel();
+  u.onend = () => log('2번: 재생 완료됨');
+  u.onerror = (e) => log('2번: 재생 오류 - ' + e.error);
+  speechSynthesis.speak(u);
+  log('2번: 재생 시도... (한국어 음성: ' + (ko ? ko.name : '없음, 기본음성 사용)') + ')');
+}
+function listVoices(){
+  const vs = speechSynthesis.getVoices();
+  log('전체 음성 수: ' + vs.length);
+  vs.forEach(v => log(v.lang + ' | ' + v.name));
+  if (vs.length === 0) log('>> 음성이 하나도 없음! OS 음성팩 문제');
+}
+</script>
+</body></html>
