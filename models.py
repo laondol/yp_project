@@ -783,6 +783,7 @@ class VillageEvent(db.Model):
     video_url = db.Column(db.String(500))
     event_date = db.Column(db.DateTime)
     status = db.Column(db.String(20), default='upcoming')  # upcoming, ongoing, completed, afterparty
+    chat_close_date = db.Column(db.DateTime)  # 채팅방 종료 예정일 (답변 완료 후 +10일)
     created_by = db.Column(db.Integer, db.ForeignKey('user.id'))
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
@@ -808,6 +809,31 @@ class VillageEventChat(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
     author = db.Column(db.String(50))
     message = db.Column(db.Text, nullable=False)
+    msg_type = db.Column(db.String(10), default='')  # question(질문), opinion(의견), ''(일반)
+    like_count = db.Column(db.Integer, default=0)    # 동의(좋아요)
+    dislike_count = db.Column(db.Integer, default=0) # 별로예요
+    answer = db.Column(db.Text)                      # 발표자/마을지기 답변
+    answered_by = db.Column(db.Integer, db.ForeignKey('user.id'))
+    answered_at = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+class VillageEventChatVote(db.Model):
+    __tablename__ = 'village_event_chat_vote'
+    id = db.Column(db.Integer, primary_key=True)
+    chat_id = db.Column(db.Integer, db.ForeignKey('village_event_chat.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    vote = db.Column(db.String(10), nullable=False)  # like / dislike
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+class VillageEventFile(db.Model):
+    __tablename__ = 'village_event_file'
+    id = db.Column(db.Integer, primary_key=True)
+    event_id = db.Column(db.Integer, db.ForeignKey('village_event.id'), nullable=False)
+    uploader_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+    uploader_name = db.Column(db.String(50))
+    filename = db.Column(db.String(255), nullable=False)  # 표시용 원본 파일명
+    file_path = db.Column(db.String(500), nullable=False) # 저장된 URL 경로
+    file_size = db.Column(db.Integer)
     created_at = db.Column(db.DateTime, default=datetime.now)
 
 class VillagePage(db.Model):

@@ -1,11 +1,21 @@
 from flask import Blueprint, render_template, request, redirect, url_for, jsonify, session, current_app, send_file
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from sqlalchemy import or_
-from models import db, User, ShareReport, VillageWish, VillageBroadcast, ContentPermission, Post, Message, VillageCache, VillagePage, VillageEvent, VillageEventAttendee, VillageEventChat, StoreInfo, NewsArticle, VillagePlace, VillagePlaceCategory, VillagePlaceReport
+from models import db, User, ShareReport, VillageWish, VillageBroadcast, ContentPermission, Post, Message, VillageCache, VillagePage, VillageEvent, VillageEventAttendee, VillageEventChat, VillageEventChatVote, VillageEventFile, StoreInfo, NewsArticle, VillagePlace, VillagePlaceCategory, VillagePlaceReport
 from route_modules.common import has_page_access
 from services.geocode import haversine
 
 village_bp = Blueprint('village', __name__)
+
+def _is_presenter(event_id, uid):
+    """발표자 여부 (참석자 역할이 '발표자')"""
+    if not uid:
+        return False
+    att = VillageEventAttendee.query.filter_by(event_id=event_id, user_id=uid, role='발표자').first()
+    return bool(att)
+
+def _chat_open(ev):
+    return not (ev.chat_close_date and datetime.now() > ev.chat_close_date)
 
 def _serve_spa():
     import os
@@ -419,9 +429,15 @@ def village_event_chat(event_id):
     uid = session.get('user_id')
     if not uid:
         return jsonify({"error":"로그인 필요"}), 401
+    ev = VillageEvent.query.get_or_404(event_id)
+    if not _chat_open(ev):
+        return jsonify({"status":"closed","msg":"종료된 채팅방입니다."}), 403
     msg = request.form.get('message','').strip()
     if not msg:
         return jsonify({"error":"메시지 입력"})
+    msg_type = request.form.get('msg_type','').strip()
+    if msg_type not in ('question','opinion',''):
+        msg_type = ''
     user = User.query.get(uid)
     # AI 프로텍터: 욕설/비방 필터링
     blocked = False
@@ -439,10 +455,98 @@ def village_event_chat(event_id):
         pass
     if blocked:
         return jsonify({"status":"blocked","msg":"AI가 부적절한 메시지로 판단했습니다."})
-    chat = VillageEventChat(event_id=event_id, user_id=uid, author=user.real_name or user.username, message=msg)
+    chat = VillageEventChat(event_id=event_id, user_id=uid, author=user.real_name or user.username, message=msg, msg_type=msg_type)
     db.session.add(chat)
     db.session.commit()
     return jsonify({"status":"success"})
+
+@village_bp.route('/village/event/<int:event_id>/chats')
+def village_event_chats(event_id):
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({"error":"로그인 필요"}), 401
+    sort = request.args.get('sort', 'new')
+    q = VillageEventChat.query.filter_by(event_id=event_id)
+    if sort == 'likes':
+        chats = q.order_by(VillageEventChat.like_count.desc(), VillageEventChat.created_at.desc()).all()
+    else:
+        chats = q.order_by(VillageEventChat.created_at.desc()).all()
+    my_votes = {}
+    if chats:
+        votes = VillageEventChatVote.query.filter(VillageEventChatVote.chat_id.in_([c.id for c in chats]), VillageEventChatVote.user_id == uid).all()
+        my_votes = {v.chat_id: v.vote for v in votes}
+    answerer_ids = {c.answered_by for c in chats if c.answered_by}
+    answerers = {u.id: (u.real_name or u.username) for u in User.query.filter(User.id.in_(answerer_ids or [0])).all()}
+    ev = VillageEvent.query.get_or_404(event_id)
+    can_answer = has_page_access('village') or _is_presenter(event_id, uid)
+    return jsonify({
+        'chats': [{
+            'id': c.id, 'author': c.author, 'message': c.message, 'msg_type': c.msg_type or '',
+            'like_count': c.like_count or 0, 'dislike_count': c.dislike_count or 0,
+            'my_vote': my_votes.get(c.id, ''),
+            'answer': c.answer, 'answerer': answerers.get(c.answered_by, ''),
+            'answered_at': c.answered_at.isoformat() if c.answered_at else None,
+            'created_at': c.created_at.isoformat() if c.created_at else None,
+        } for c in chats],
+        'can_answer': can_answer,
+        'chat_open': _chat_open(ev),
+        'chat_close_date': ev.chat_close_date.isoformat() if ev.chat_close_date else None,
+    })
+
+@village_bp.route('/village/event/<int:event_id>/chat/<int:chat_id>/vote', methods=['POST'])
+def village_event_chat_vote(event_id, chat_id):
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({"error":"로그인 필요"}), 401
+    ev = VillageEvent.query.get_or_404(event_id)
+    if not _chat_open(ev):
+        return jsonify({"status":"closed","msg":"종료된 채팅방입니다."}), 403
+    vote = request.form.get('vote','')
+    if vote not in ('like','dislike'):
+        return jsonify({"error":"vote 값 오류"})
+    chat = VillageEventChat.query.get_or_404(chat_id)
+    existing = VillageEventChatVote.query.filter_by(chat_id=chat_id, user_id=uid).first()
+    if existing:
+        if existing.vote == vote:
+            db.session.delete(existing)
+        else:
+            existing.vote = vote
+    else:
+        db.session.add(VillageEventChatVote(chat_id=chat_id, user_id=uid, vote=vote))
+    db.session.commit()
+    chat.like_count = VillageEventChatVote.query.filter_by(chat_id=chat_id, vote='like').count()
+    chat.dislike_count = VillageEventChatVote.query.filter_by(chat_id=chat_id, vote='dislike').count()
+    db.session.commit()
+    return jsonify({"status":"success","like_count":chat.like_count,"dislike_count":chat.dislike_count})
+
+@village_bp.route('/village/event/<int:event_id>/chat/<int:chat_id>/answer', methods=['POST'])
+def village_event_chat_answer(event_id, chat_id):
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({"error":"로그인 필요"}), 401
+    if not (has_page_access('village') or _is_presenter(event_id, uid)):
+        return jsonify({"error":"발표자/마을지기만 답변할 수 있습니다."}), 403
+    answer = request.form.get('answer','').strip()
+    if not answer:
+        return jsonify({"error":"답변 내용을 입력하세요."})
+    chat = VillageEventChat.query.get_or_404(chat_id)
+    chat.answer = answer
+    chat.answered_by = uid
+    chat.answered_at = datetime.now()
+    db.session.commit()
+    return jsonify({"status":"success"})
+
+@village_bp.route('/village/event/<int:event_id>/close-chat', methods=['POST'])
+def village_event_close_chat(event_id):
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({"error":"로그인 필요"}), 401
+    if not (has_page_access('village') or _is_presenter(event_id, uid)):
+        return jsonify({"error":"발표자/마을지기만 종료할 수 있습니다."}), 403
+    ev = VillageEvent.query.get_or_404(event_id)
+    ev.chat_close_date = datetime.now() + timedelta(days=10)
+    db.session.commit()
+    return jsonify({"status":"success","chat_close_date":ev.chat_close_date.isoformat()})
 
 @village_bp.route('/village/event/<int:event_id>/ai-summary', methods=['POST'])
 def village_event_ai_summary(event_id):
@@ -451,13 +555,15 @@ def village_event_ai_summary(event_id):
     chat = VillageEventChat.query.filter_by(event_id=event_id).order_by(VillageEventChat.created_at.asc()).all()
     if not chat:
         return jsonify({"summary":"대화 내용이 없습니다."})
-    messages = '\n'.join([f'{c.author}: {c.message}' for c in chat])
+    def _t(c):
+        return '질문' if c.msg_type == 'question' else ('의견' if c.msg_type == 'opinion' else '일반')
+    messages = '\n'.join([f'{c.author}: {c.message} [{_t(c)}|공감{c.like_count or 0}]' for c in chat])
     try:
         from openai import OpenAI
         client = OpenAI(base_url="https://chat.motiftech.io/openapi/v1", api_key=current_app.config.get('MOTIF_API_KEY',''))
         resp = client.chat.completions.create(
             model="motif-12.7b",
-            messages=[{"role":"system","content":"회의 채팅 내용을 주제별로 묶어서 정리해줘. 비슷한 질문은 그룹화하고, 주요 논의사항과 결정사항을 구분해. 마크다운으로."},
+            messages=[{"role":"system","content":"회의 채팅 내용을 [질문]과 [의견]으로 나누어 정리해줘. 같은 주제는 묶고, 공감(좋아요)이 많은 순서로 배치해. 각 항목 앞에 [질문] 또는 [의견] 표시와 (공감 n)을 붙여줘. 마지막에 주요 논의사항과 결정사항을 구분해 마크다운으로 정리해줘."},
                       {"role":"user","content":messages[:3000]}],
             temperature=0.5, max_tokens=800
         )
@@ -1261,3 +1367,64 @@ def api_village_map_upload():
     except Exception as e:
         return jsonify({"error": f"이미지 업로드 실패: {e}"}), 500
 
+
+# ============ 회의 채팅방 자료실 ============
+@village_bp.route('/village/event/<int:event_id>/files', methods=['GET'])
+def village_event_files(event_id):
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({"error":"로그인 필요"}), 401
+    files = VillageEventFile.query.filter_by(event_id=event_id).order_by(VillageEventFile.created_at.desc()).all()
+    ev = VillageEvent.query.get_or_404(event_id)
+    return jsonify({
+        'files': [{
+            'id': f.id, 'filename': f.filename, 'uploader_name': f.uploader_name or '',
+            'file_size': f.file_size or 0,
+            'created_at': f.created_at.isoformat() if f.created_at else None,
+        } for f in files],
+        'can_upload': has_page_access('village') or _is_presenter(event_id, uid),
+        'chat_open': _chat_open(ev),
+    })
+
+@village_bp.route('/village/event/<int:event_id>/files', methods=['POST'])
+def village_event_file_upload(event_id):
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({"error":"로그인 필요"}), 401
+    if not (has_page_access('village') or _is_presenter(event_id, uid)):
+        return jsonify({"error":"마을지기/발표자만 자료를 올릴 수 있습니다."}), 403
+    file = request.files.get('file')
+    if not file or not file.filename:
+        return jsonify({"error":"파일을 선택하세요."})
+    import os as _os
+    from services.security import secure_save
+    save_dir = _os.path.join(current_app.root_path, 'static', 'uploads', 'village_event_files')
+    try:
+        url_path = secure_save(file, save_dir, max_mb=30)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": f"업로드 실패: {e}"}), 500
+    user = User.query.get(uid)
+    f = VillageEventFile(
+        event_id=event_id, uploader_id=uid,
+        uploader_name=(user.real_name or user.username) if user else '',
+        filename=file.filename, file_path=url_path,
+        file_size=request.content_length or 0,
+    )
+    db.session.add(f)
+    db.session.commit()
+    return jsonify({"status":"success","id":f.id})
+
+@village_bp.route('/village/event/<int:event_id>/files/<int:file_id>/download')
+def village_event_file_download(event_id, file_id):
+    if not session.get('user_id'):
+        return jsonify({"error":"로그인 필요"}), 401
+    f = VillageEventFile.query.get_or_404(file_id)
+    if f.event_id != event_id:
+        return jsonify({"error":"잘못된 요청"}), 400
+    import os as _os
+    local_path = _os.path.join(current_app.root_path, f.file_path.lstrip('/'))
+    if not _os.path.exists(local_path):
+        return jsonify({"error":"파일이 없습니다."}), 404
+    return send_file(local_path, as_attachment=True, download_name=f.filename)
