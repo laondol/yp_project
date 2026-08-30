@@ -613,11 +613,11 @@ def admin_reject_pending(msg_id):
     # 발송자에게 반려 통보 (AI관리자 명의)
     reject_msg = Message(
         sender_id=INTERNAL_AI_ADMIN_ID,
-        sender_name='AI 관리자',
+        sender_name='함께사는양평',
         sender_role='admin',
         receiver_id=msg.sender_id,
         subject='편지 발송 반려: ' + msg.subject,
-        content=('[AI 관리자 알림] 귀하가 보낸 편지(제목: ' + msg.subject + ')가 검토 결과 반려되었습니다.\n\n'
+        content=('[함께사는양평 알림] 귀하가 보낸 편지(제목: ' + msg.subject + ')가 검토 결과 반려되었습니다.\n\n'
                  '반려 사유: ' + reason + '\n\n'
                  '※ 이 메시지는 자동 검토 시스템에 의해 발송되었습니다.'),
         is_public=False,

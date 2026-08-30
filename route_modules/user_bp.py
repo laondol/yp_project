@@ -484,7 +484,7 @@ def api_user_change_password_send_code():
     session['pw_change_code'] = code
     session['pw_change_code_time'] = time.time()
     from services.email_service import EmailService
-    EmailService.send(user.email, '[양평마을] 비밀번호 변경 인증코드', f'인증코드: {code}\n\n5분간 유효합니다.')
+    EmailService.send(user.email, '[함께사는양평] 비밀번호 변경 인증코드', f'인증코드: {code}\n\n5분간 유효합니다.')
     return jsonify({'status': 'success', 'msg': f'{user.email}로 인증코드를 발송했습니다.'})
 
 

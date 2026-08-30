@@ -40,7 +40,7 @@ def register_send_code():
     session['verify_code_time'] = time.time()
     session['verify_purpose'] = purpose
     from services.email_service import EmailService
-    sent = EmailService.send(email, '[양평마을] 이메일 인증 코드', f'인증 코드: {code}\n\n5분간 유효합니다.')
+    sent = EmailService.send(email, '[함께사는양평] 이메일 인증 코드', f'인증 코드: {code}\n\n5분간 유효합니다.')
     if sent:
         return jsonify({'status':'success','msg':'인증 코드를 이메일로 발송했습니다.'})
     else:
@@ -177,7 +177,7 @@ def reset_password_send():
     db.session.commit()
     reset_url = url_for('auth.reset_password_confirm', token=token, _external=True)
     from services.email_service import EmailService
-    sent = EmailService.send(email, '[양평마을] 비밀번호 재설정',
+    sent = EmailService.send(email, '[함께사는양평] 비밀번호 재설정',
         f'비밀번호 재설정 링크:\n{reset_url}\n\n1시간 내에 사용해 주세요.')
     if sent:
         return jsonify({"status":"success","msg":"재설정 링크를 이메일로 발송했습니다."})
@@ -321,8 +321,8 @@ def register():
             print(f'[WARN] auto-friend error: {e}')
         
         from services.email_service import EmailService
-        EmailService.send(verified_email, f"[양평마을] 가입을 환영합니다, {real_name}님",
-            f"{real_name}님, 양평마을에 가입해 주셔서 감사합니다.\n\n지금 바로 다양한 서비스를 이용해 보세요.\n- 게시글 작성 및 공유\n- 법률/심리 상담\n- 경사로 설치 신청\n- 이웃과 소통\n\nhttps://unocum.kr")
+        EmailService.send(verified_email, f"[함께사는양평] 가입을 환영합니다, {real_name}님",
+            f"{real_name}님, 함께사는양평에 가입해 주셔서 감사합니다.\n\n지금 바로 다양한 서비스를 이용해 보세요.\n- 게시글 작성 및 공유\n- 법률/심리 상담\n- 경사로 설치 신청\n- 이웃과 소통\n\nhttps://unocum.kr")
         
         return "<script>alert('가입 신청 완료! 로그인을 진행하세요.'); location.href='/intro';</script>"
     return _serve_spa()

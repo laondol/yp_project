@@ -144,7 +144,7 @@ def service_ramp_apply():
     )
     db.session.add(appt)
     db.session.commit()
-    EmailService.send(email, "[양평마을] 경사로 설치 신청이 접수되었습니다",
+    EmailService.send(email, "[함께사는양평] 경사로 설치 신청이 접수되었습니다",
         f"{name}님, 경사로 설치 신청이 접수되었습니다.\n\n접수 번호: {appt.id}번\n위치: {location}\n\n검토 후 연락드리겠습니다.\n\nhttps://unocum.kr")
     return "<script>alert('신청이 접수되었습니다. 검토 후 연락드립니다. (대기자 순번: " + str(appt.id) + "번)'); location.href='/service/ramp';</script>"
 

@@ -252,9 +252,9 @@ def bot_chat():
                 date_str = s.event_date.strftime('%m월 %d일 %H:%M') if s.event_date else ''
                 loc_html = f'<br>📍 {s.location}' if s.location else ''
                 desc_html = f'<br><br>{s.description}' if s.description else ''
-                content = f'<div style="padding:10px;"><strong>📅 {s.title}</strong><br>🕐 {date_str}{loc_html}{desc_html}</div>'
+                content = f'<div style="padding:10px;"><strong>📅 {s.title}</strong><br><small>{user.username}님이 공유한 일정</small><br>🕐 {date_str}{loc_html}{desc_html}</div>'
                 msg_obj = Message(
-                    sender_id=uid, sender_name=user.username, receiver_id=receiver.id,
+                    sender_id=uid, sender_name='함께사는양평', receiver_id=receiver.id,
                     subject=f'📅 일정 공유: {s.title}', content=content, sender_role='member'
                 )
                 db.session.add(msg_obj)

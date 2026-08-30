@@ -587,7 +587,7 @@ def _notify_legal_new_post(post):
         try:
             db.session.add(Message(
                 sender_id=manager.id if manager else _system_sender_id(),
-                sender_name=manager.real_name if (manager and manager.real_name) else '양평마을',
+                sender_name=manager.real_name if (manager and manager.real_name) else '함께사는양평',
                 receiver_id=post.user_id,
                 subject='[법률상담] 글 접수되었습니다',
                 content=f"{post.author_name}님, 법률상담 글이 접수되었습니다.\n제목: {post.title}\n수정 링크: {edit_link_rel}",
@@ -649,7 +649,7 @@ def _notify_legal_appointment(appt, name, email, phone, date_str, time_slot, loc
         try:
             db.session.add(Message(
                 sender_id=manager.id if manager else _system_sender_id(),
-                sender_name=manager.real_name if (manager and manager.real_name) else '양평마을',
+                sender_name=manager.real_name if (manager and manager.real_name) else '함께사는양평',
                 receiver_id=appt.user_id,
                 subject='[법률상담 예약] 접수되었습니다',
                 content=f'{name}님, 법률상담 예약이 접수되었습니다.\n날짜: {date_str} {time_slot}\n수정 링크: {edit_link_rel}',
@@ -725,7 +725,7 @@ def legal_admin_answer(post_id):
         try:
             db.session.add(Message(
                 sender_id=_system_sender_id(),
-                sender_name="양평마을",
+                sender_name="함께사는양평",
                 receiver_id=post.user_id,
                 subject="[법률상담] 답변이 등록되었습니다",
                 content=f"{post.title}에 대한 답변이 등록되었습니다.\n\n{request.host_url}legal/{post.id}",
@@ -749,7 +749,7 @@ def legal_admin_answer(post_id):
         try:
             db.session.add(Message(
                 sender_id=_system_sender_id(),
-                sender_name="양평마을",
+                sender_name="함께사는양평",
                 receiver_id=admin.id,
                 subject=f"[법률상담 답변] {post.title}",
                 content=f"{session.get(chr(39)+chr(39),chr(39))}님이 답변을 등록했습니다.\n\n{request.host_url}legal/admin",
@@ -806,7 +806,7 @@ def legal_appointment_approve(appt_id):
         try:
             db.session.add(Message(
                 sender_id=_system_sender_id(),
-                sender_name="양평마을",
+                sender_name="함께사는양평",
                 receiver_id=appt.user_id,
                 subject="[법률상담] 예약이 승인되었습니다",
                 content="법률상담 예약이 승인되었습니다.\n\n일시: " + str(appt.date) + " " + str(appt.time_slot) + "\n\n" + request.host_url + "legal/schedule",

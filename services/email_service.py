@@ -3,7 +3,11 @@ import ssl
 import os
 import base64
 from email.mime.text import MIMEText
+from email.header import Header
+from email.utils import formataddr
 from flask import current_app
+
+_OFFICIAL_NAME = '함께사는양평'
 
 _DEV_MODE = os.environ.get('DEV_MODE') == '1'
 
@@ -30,7 +34,7 @@ class EmailService:
 
         msg = MIMEText(body, 'plain', 'utf-8')
         msg['Subject'] = subject
-        msg['From'] = from_addr
+        msg['From'] = formataddr((str(Header(_OFFICIAL_NAME, 'utf-8')), from_addr))
         msg['To'] = to
 
         # 1) TLS 시도

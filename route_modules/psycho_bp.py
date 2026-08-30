@@ -171,13 +171,13 @@ def psycho_admin_answer(post_id):
     post.fee = int(request.form.get('fee')) if request.form.get('fee') else None
     post.travel_allowance = int(request.form.get('travel_allowance')) if request.form.get('travel_allowance') else None
     db.session.commit()
-    EmailService.send(post.email, f"[양평마을] 심리상담 답변이 등록되었습니다",
+    EmailService.send(post.email, f"[함께사는양평] 심리상담 답변이 등록되었습니다",
         f"문의하신 '{post.title}'에 대한 답변이 등록되었습니다.\n\n{request.host_url}psycho/post/{post.id}")
     if post.user_id:
         try:
             db.session.add(Message(
                 sender_id=_system_sender_id(),
-                sender_name="양평마을",
+                sender_name="함께사는양평",
                 receiver_id=post.user_id,
                 subject="[심리상담] 답변이 등록되었습니다",
                 content="문의하신 " + repr(post.title) + "에 대한 답변이 등록되었습니다.\n\n" + request.host_url + "psycho/post/" + str(post.id),
@@ -205,13 +205,13 @@ def psycho_appointment_approve(appt_id):
     appt.fee = int(request.form.get('fee')) if request.form.get('fee') else None
     appt.travel_allowance = int(request.form.get('travel_allowance')) if request.form.get('travel_allowance') else None
     db.session.commit()
-    EmailService.send(appt.email, "[양평마을] 심리상담 예약이 승인되었습니다",
+    EmailService.send(appt.email, "[함께사는양평] 심리상담 예약이 승인되었습니다",
         f"심리상담 예약이 승인되었습니다.\n\n일시: {appt.date} {appt.time_slot}\n\n{request.host_url}psycho/schedule")
     if appt.user_id:
         try:
             db.session.add(Message(
                 sender_id=_system_sender_id(),
-                sender_name="양평마을",
+                sender_name="함께사는양평",
                 receiver_id=appt.user_id,
                 subject="[심리상담] 예약이 승인되었습니다",
                 content="심리상담 예약이 승인되었습니다.\n\n일시: " + str(appt.date) + " " + str(appt.time_slot) + "\n\n" + request.host_url + "psycho/schedule",
@@ -400,7 +400,7 @@ def api_psycho_create():
         try:
             db.session.add(Message(
                 sender_id=_system_sender_id(),
-                sender_name="양평마을",
+                sender_name="함께사는양평",
                 receiver_id=admin.id,
                 subject=f"[심리상담] {title}",
                 content="작성자: " + post.author_name + "\n이메일: " + email + "\n제목: " + title + "\n내용: " + content[:500],

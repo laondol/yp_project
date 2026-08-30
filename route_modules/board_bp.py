@@ -194,7 +194,7 @@ def post_like(post_id):
         if admin_user and post.user_id and post.user_id != admin_user.id:
             msg = Message(
                 sender_id=admin_user.id,
-                sender_name=admin_user.username,
+                sender_name='함께사는양평',
                 sender_role='admin',
                 receiver_id=post.user_id,
                 subject='🎉 현실화 축하드립니다',

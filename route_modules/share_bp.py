@@ -68,7 +68,7 @@ def _send_auto_confirm_notice(report):
     try:
         db.session.add(_Msg(
             sender_id=admin_user.id if admin_user else 0,
-            sender_name=admin_user.username if admin_user else '관리자',
+            sender_name='함께사는양평',
             sender_role='admin',
             receiver_id=report.user_id,
             subject='공유 자동 접수 확인 요청',
@@ -123,7 +123,7 @@ def _send_auto_saved_notice(report, created_new=False):
     try:
         db.session.add(Message(
             sender_id=admin_user.id if admin_user else 0,
-            sender_name=admin_user.username if admin_user else '관리자',
+            sender_name='함께사는양평',
             sender_role='admin',
             receiver_id=report.user_id,
             subject=f'공유 자동보관 완료 #{report.id}',
@@ -1043,7 +1043,7 @@ def share_report_toggle(report_id, action):
                 admin_user = User.query.filter(User.role == 'admin').first()
                 db.session.add(Message(
                     sender_id=admin_user.id if admin_user else 0,
-                    sender_name=admin_user.username if admin_user else '관리자',
+                    sender_name='함께사는양평',
                     sender_role='admin',
                     receiver_id=report.user_id,
                     subject='공유가 보류(반려)되었습니다',
