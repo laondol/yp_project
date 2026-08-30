@@ -371,6 +371,8 @@ def village_event_create():
             myeon=myeon, ri=ri,
             title=request.form['title'],
             event_type=request.form.get('event_type','meeting'),
+            meeting_category=request.form.get('meeting_category','gathering'),
+            meeting_mode=request.form.get('meeting_mode',''),
             description=request.form.get('description',''),
             location=request.form.get('location',''),
             video_url=request.form.get('video_url',''),
@@ -393,18 +395,22 @@ def village_event_join(event_id):
     consented = request.form.get('consented') == 'true'
     email = request.form.get('email','').strip()
     name = request.form.get('name','').strip()
+    mobile_helper = request.form.get('mobile_helper','').strip()
+    if mobile_helper not in ('지원','필요'):
+        mobile_helper = ''
     attendee = None
     if uid:
         attendee = VillageEventAttendee.query.filter_by(event_id=event_id, user_id=uid).first()
     elif email:
         attendee = VillageEventAttendee.query.filter_by(event_id=event_id, email=email).first()
     if not attendee:
-        attendee = VillageEventAttendee(event_id=event_id, user_id=uid, email=email, name=name, consented=consented)
+        attendee = VillageEventAttendee(event_id=event_id, user_id=uid, email=email, name=name, consented=consented, mobile_helper=mobile_helper)
         db.session.add(attendee)
     else:
         attendee.consented = consented
         attendee.email = email or attendee.email
         attendee.name = name or attendee.name
+        attendee.mobile_helper = mobile_helper or attendee.mobile_helper
     db.session.commit()
     return jsonify({"status":"success","consented":attendee.consented})
 
@@ -829,6 +835,9 @@ def api_village_events():
     return jsonify([{
         'id': e.id, 'myeon': e.myeon, 'ri': e.ri, 'title': e.title,
         'event_type': e.event_type, 'description': e.description,
+        'meeting_category': e.meeting_category or 'gathering',
+        'meeting_mode': e.meeting_mode or '',
+        'video_url': e.video_url,
         'location': e.location, 'status': e.status,
         'event_date': e.event_date.isoformat() if e.event_date else None,
         'created_at': e.created_at.isoformat() if e.created_at else None,

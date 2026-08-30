@@ -776,6 +776,8 @@ class VillageEvent(db.Model):
     ri = db.Column(db.String(20))
     title = db.Column(db.String(200), nullable=False)
     event_type = db.Column(db.String(20), default='meeting')  # meeting, activity
+    meeting_category = db.Column(db.String(20), default='gathering')  # gathering(간담회), conference(컨퍼런스)
+    meeting_mode = db.Column(db.String(20), default='')  # online(온라인), offline(오프라인), hybrid(온오프라인) — 간담회용
     description = db.Column(db.Text)
     location = db.Column(db.String(200))
     video_url = db.Column(db.String(500))
@@ -793,6 +795,7 @@ class VillageEventAttendee(db.Model):
     email = db.Column(db.String(100))
     name = db.Column(db.String(50))
     consented = db.Column(db.Boolean, default=False)
+    mobile_helper = db.Column(db.String(10))  # 지원(도우미 자원) / 필요(도우미 요청) / None
     role = db.Column(db.String(50))
     status = db.Column(db.String(20), default='pending')  # pending, confirmed, attended, absent
     last_ping = db.Column(db.DateTime)

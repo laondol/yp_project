@@ -9,6 +9,8 @@ export default function VillageEventCreatePage() {
   const { user, loading: authLoading } = useAuth()
   const navigate = useNavigate()
   const [eventType, setEventType] = useState('meeting')
+  const [meetingCategory, setMeetingCategory] = useState('gathering')
+  const [meetingMode, setMeetingMode] = useState('offline')
   const [title, setTitle] = useState('')
   const [eventDate, setEventDate] = useState('')
   const [location, setLocation] = useState('')
@@ -27,6 +29,10 @@ export default function VillageEventCreatePage() {
     try {
       const fd = new FormData()
       fd.append('event_type', eventType)
+      if (eventType === 'meeting') {
+        fd.append('meeting_category', meetingCategory)
+        fd.append('meeting_mode', meetingMode)
+      }
       fd.append('title', title.trim())
       fd.append('event_date', eventDate)
       fd.append('location', location)
@@ -56,6 +62,25 @@ export default function VillageEventCreatePage() {
             <option value="activity">활동</option>
           </select>
         </div>
+        {eventType === 'meeting' && (
+          <div className="row g-2 mb-3">
+            <div className="col-6">
+              <label className="small fw-bold">분류</label>
+              <select className="form-select" value={meetingCategory} onChange={e => setMeetingCategory(e.target.value)}>
+                <option value="gathering">간담회</option>
+                <option value="conference">컨퍼런스</option>
+              </select>
+            </div>
+            <div className="col-6">
+              <label className="small fw-bold">진행 방식</label>
+              <select className="form-select" value={meetingMode} onChange={e => setMeetingMode(e.target.value)}>
+                <option value="online">💻 온라인</option>
+                <option value="offline">🏠 오프라인</option>
+                <option value="hybrid">🔀 온오프라인</option>
+              </select>
+            </div>
+          </div>
+        )}
         <div className="mb-3">
           <label className="small fw-bold">제목</label>
           <input type="text" className="form-control" value={title} onChange={e => setTitle(e.target.value)} required />

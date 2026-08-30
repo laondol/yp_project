@@ -7,6 +7,12 @@ import ErrorMessage from '../components/common/ErrorMessage'
 import EmptyState from '../components/common/EmptyState'
 import { formatKST } from '../utils/format';
 
+const MODE_BADGE: Record<string, { label: string; cls: string }> = {
+  online: { label: '💻 온라인', cls: 'bg-primary' },
+  offline: { label: '🏠 오프라인', cls: 'bg-secondary' },
+  hybrid: { label: '🔀 온오프라인', cls: 'bg-dark' },
+}
+
 export default function VillageEventList() {
   const navigate = useNavigate()
   const [events, setEvents] = useState<VillageEvent[]>([])
@@ -59,6 +65,14 @@ export default function VillageEventList() {
                   <span className={`badge ${e.event_type === 'meeting' ? 'bg-info' : 'bg-warning'} me-1`}>
                     {e.event_type === 'meeting' ? '회의' : '행사'}
                   </span>
+                  {e.event_type === 'meeting' && e.meeting_category === 'conference' && (
+                    <span className="badge bg-dark me-1">컨퍼런스</span>
+                  )}
+                  {e.event_type === 'meeting' && MODE_BADGE[e.meeting_mode || ''] && (
+                    <span className={`badge ${MODE_BADGE[e.meeting_mode || ''].cls} me-1`}>
+                      {MODE_BADGE[e.meeting_mode || ''].label}
+                    </span>
+                  )}
                   <strong>{e.title}</strong>
                 </div>
                 <small className="text-muted">{e.event_date ? formatKST(e.event_date) : ''}</small>

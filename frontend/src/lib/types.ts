@@ -96,6 +96,7 @@ export interface PsychoAppointment {
 export interface VillageEvent {
   id: number; myeon?: string; ri?: string;
   title: string; event_type?: string; description?: string;
+  meeting_category?: string; meeting_mode?: string; video_url?: string;
   location?: string; event_date?: string; status?: string;
 }
 export interface VillageAlert {
