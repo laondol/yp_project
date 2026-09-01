@@ -38,6 +38,14 @@ def upload_post_image():
     path = secure_save(file, post_img_dir)
     if not path:
         return jsonify({"status": "error", "msg": "업로드 할 수 없는 파일입니다."}), 400
+    # FTP 백업 (이중저장)
+    try:
+        from services.security import ftp_backup
+        import os as _os
+        _abs = _os.path.join(current_app.root_path, path.lstrip('/'))
+        ftp_backup(_abs, 'post_images')
+    except Exception:
+        pass
     return jsonify({"status": "success", "url": path})
 
 def _serve_spa():
@@ -82,14 +90,28 @@ def submit_post():
         if file and file.filename != '':
             file_url = save_village_file(file, current_app.config['UPLOAD_FOLDER'], post.author_name, user.town or 'unknown')
             post.file_path = file_url
+            # FTP 백업 (이중저장)
+            try:
+                from services.security import ftp_backup
+                _abs = os.path.join(current_app.root_path, file_url.lstrip('/'))
+                ftp_backup(_abs, 'post_images')
+            except Exception:
+                pass
     drawing = request.form.get('drawing_data')
     if drawing and len(drawing) > 2000:
         data = base64.b64decode(drawing.split(",")[1])
         fname = f"draw_{datetime.now().strftime('%Y%m%d%H%M%S')}.png"
         target_dir = os.path.join(current_app.config['UPLOAD_FOLDER'], f"{post.author_name}_{user.town or 'unknown'}")
         if not os.path.exists(target_dir): os.makedirs(target_dir)
-        with open(os.path.join(target_dir, fname), "wb") as f: f.write(data)
+        draw_path = os.path.join(target_dir, fname)
+        with open(draw_path, "wb") as f: f.write(data)
         post.file_path = f"/static/uploads/{post.author_name}_{user.town or 'unknown'}/{fname}"
+        # FTP 백업 (이중저장)
+        try:
+            from services.security import ftp_backup
+            ftp_backup(draw_path, 'post_images')
+        except Exception:
+            pass
     db.session.add(post)
     db.session.commit()
     ai_res = call_ai_judge(post.title, post.content)
@@ -122,6 +144,13 @@ def edit_post(post_id):
             if file and file.filename != '':
                 file_url = save_village_file(file, current_app.config['UPLOAD_FOLDER'], post.author_name, post.user.town if post.user else 'unknown')
                 post.file_path = file_url
+                # FTP 백업 (이중저장)
+                try:
+                    from services.security import ftp_backup
+                    _abs = os.path.join(current_app.root_path, file_url.lstrip('/'))
+                    ftp_backup(_abs, 'post_images')
+                except Exception:
+                    pass
         
         # 그림판 드로잉 저장
         drawing = request.form.get('drawing_data')

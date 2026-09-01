@@ -104,6 +104,13 @@ def village_message_all():
                 upload_dir = _os.path.join(current_app.config['UPLOAD_FOLDER'], 'village_msg')
                 _os.makedirs(upload_dir, exist_ok=True)
                 attachment_path = secure_save(file, upload_dir)
+                # FTP 백업 (이중저장)
+                try:
+                    from services.security import ftp_backup
+                    _abs = _os.path.join(current_app.root_path, attachment_path.lstrip('/'))
+                    ftp_backup(_abs, 'village_msg')
+                except Exception:
+                    pass
             except Exception:
                 pass
     from sqlalchemy import or_, and_
@@ -211,6 +218,13 @@ def village_register_member():
                 upload_dir = _os.path.join(current_app.config['UPLOAD_FOLDER'], 'village_members')
                 _os.makedirs(upload_dir, exist_ok=True)
                 member.photo_path = secure_save(photo, upload_dir)
+                # FTP 백업 (이중저장)
+                try:
+                    from services.security import ftp_backup
+                    _abs = _os.path.join(current_app.root_path, member.photo_path.lstrip('/'))
+                    ftp_backup(_abs, 'village_members')
+                except Exception:
+                    pass
             except Exception:
                 pass
     # 마을지기의 managed_pages에 등록
@@ -1363,6 +1377,13 @@ def api_village_map_upload():
         return jsonify({"error": msg}), 400
     try:
         path = secure_save(file, upload_dir, max_mb=20)
+        # FTP 백업 (이중저장)
+        try:
+            from services.security import ftp_backup
+            _abs = _os.path.join(current_app.root_path, path.lstrip('/'))
+            ftp_backup(_abs, 'village_map')
+        except Exception:
+            pass
         return jsonify({"success": True, "url": path, "type": "image"})
     except Exception as e:
         return jsonify({"error": f"이미지 업로드 실패: {e}"}), 500
@@ -1401,6 +1422,13 @@ def village_event_file_upload(event_id):
     save_dir = _os.path.join(current_app.root_path, 'static', 'uploads', 'village_event_files')
     try:
         url_path = secure_save(file, save_dir, max_mb=30)
+        # FTP 백업 (이중저장)
+        try:
+            from services.security import ftp_backup
+            _abs = _os.path.join(current_app.root_path, url_path.lstrip('/'))
+            ftp_backup(_abs, 'village_event_files')
+        except Exception:
+            pass
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     except Exception as e:
@@ -1425,6 +1453,16 @@ def village_event_file_download(event_id, file_id):
         return jsonify({"error":"잘못된 요청"}), 400
     import os as _os
     local_path = _os.path.join(current_app.root_path, f.file_path.lstrip('/'))
-    if not _os.path.exists(local_path):
-        return jsonify({"error":"파일이 없습니다."}), 404
-    return send_file(local_path, as_attachment=True, download_name=f.filename)
+    if _os.path.exists(local_path):
+        return send_file(local_path, as_attachment=True, download_name=f.filename)
+    #FTP 폴백: 서버 로컬에 없으면 FTP에서 가져오기
+    try:
+        from services.security import ftp_retrieve_file
+        data = ftp_retrieve_file('village_event_files', _os.path.basename(f.file_path))
+        if data:
+            resp = send_file(data, as_attachment=True, download_name=f.filename)
+            resp.headers['X-Content-Type-Options'] = 'nosniff'
+            return resp
+    except Exception:
+        pass
+    return jsonify({"error":"파일이 없습니다."}), 404

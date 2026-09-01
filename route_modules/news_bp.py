@@ -239,6 +239,13 @@ def admin_news_create():
                     img_dir = os.path.join(current_app.root_path, 'static', 'uploads', 'news')
                     if not os.path.exists(img_dir): os.makedirs(img_dir)
                     img_path = secure_save(file, img_dir)
+                    # FTP 백업 (이중저장)
+                    try:
+                        from services.security import ftp_backup
+                        _abs = os.path.join(current_app.root_path, img_path.lstrip('/'))
+                        ftp_backup(_abs, 'news')
+                    except Exception:
+                        pass
                 except Exception:
                     pass
         article = NewsArticle(
@@ -330,6 +337,13 @@ def admin_news_edit(news_id):
                     img_dir = os.path.join(current_app.root_path, 'static', 'uploads', 'news')
                     if not os.path.exists(img_dir): os.makedirs(img_dir)
                     article.image_path = secure_save(file, img_dir)
+                    # FTP 백업 (이중저장)
+                    try:
+                        from services.security import ftp_backup
+                        _abs = os.path.join(current_app.root_path, article.image_path.lstrip('/'))
+                        ftp_backup(_abs, 'news')
+                    except Exception:
+                        pass
                 except Exception:
                     pass
         try:

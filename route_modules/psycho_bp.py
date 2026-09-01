@@ -135,6 +135,14 @@ def psycho_post_edit(post_id):
                 if post.file_path:
                     _delete_upload(post.file_path)
                 post.file_path = save_upload(f, 'psycho')
+                # FTP 백업 (이중저장)
+                try:
+                    from services.security import ftp_backup
+                    import os as _os
+                    _abs = _os.path.join(current_app.root_path, post.file_path.lstrip('/'))
+                    ftp_backup(_abs, 'psycho')
+                except Exception:
+                    pass
             except Exception as _e:
                 current_app.logger.warning(f'psycho edit attachment save failed: {_e}')
         db.session.commit()
@@ -385,6 +393,14 @@ def api_psycho_create():
         try:
             from services.file_service import save_upload
             post.file_path = save_upload(f, 'psycho')
+            # FTP 백업 (이중저장)
+            try:
+                from services.security import ftp_backup
+                import os as _os
+                _abs = _os.path.join(current_app.root_path, post.file_path.lstrip('/'))
+                ftp_backup(_abs, 'psycho')
+            except Exception:
+                pass
         except Exception as _e:
             current_app.logger.warning(f'psycho create attachment save failed: {_e}')
     db.session.add(post)

@@ -278,6 +278,13 @@ def register():
                 try:
                     path = secure_save(profile_img, profile_dir, max_mb=5)
                     new_user.profile_image = path
+                    # FTP 백업 (이중저장)
+                    try:
+                        from services.security import ftp_backup
+                        _abs = os.path.join(current_app.root_path, path.lstrip('/'))
+                        ftp_backup(_abs, 'profiles')
+                    except Exception:
+                        pass
                 except Exception:
                     pass
         new_user.last_payout = now
@@ -728,6 +735,13 @@ def api_register():
             try:
                 path = secure_save(profile_img, profile_dir, max_mb=5)
                 new_user.profile_image = path
+                # FTP 백업 (이중저장)
+                try:
+                    from services.security import ftp_backup
+                    _abs = os.path.join(current_app.root_path, path.lstrip('/'))
+                    ftp_backup(_abs, 'profiles')
+                except Exception:
+                    pass
             except Exception:
                 pass
     new_user.last_payout = now

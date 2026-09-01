@@ -294,6 +294,13 @@ def api_epub_media_upload():
             continue
         try:
             path = secure_save(file, upload_dir)
+            # FTP 백업 (이중저장)
+            try:
+                from services.security import ftp_backup
+                _abs = os.path.join(current_app.root_path, path.lstrip('/'))
+                ftp_backup(_abs, 'epub_media')
+            except Exception:
+                pass
         except Exception:
             continue
         lat, lon = _extract_gps(file, path)

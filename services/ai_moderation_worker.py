@@ -317,17 +317,14 @@ def _review_letter_content(msg):
 
 
 def _archive_expired_rejected():
-    """반려 30일 경과 글 → 서버 로컬 server_local/rejected_archive/YYYY-MM/ 로 이동 + 사이트 제거"""
+    """반려 30일 경과 글 → 서버 로컬 파일 삭제 (FTP 백업은 업로드 시 이미 완료) + 사이트 제거"""
     cutoff = datetime.now() - timedelta(days=30)
     expired = ShareReport.query.filter(
         ShareReport.status == 'rejected',
         ShareReport.rejected_at < cutoff
     ).all()
     for r in expired:
-        month = r.rejected_at.strftime('%Y-%m') if r.rejected_at else datetime.now().strftime('%Y-%m')
-        arch = os.path.join(app.root_path, REJECTED_ARCHIVE_ROOT, month)
-        os.makedirs(arch, exist_ok=True)
-        moved_any = False
+        # 로컬 파일 삭제 (FTP 백업이 이미 존재)
         for attr in ('image_path', 'drawing_path', 'video_path'):
             p = getattr(r, attr, None)
             if not p:
@@ -335,9 +332,7 @@ def _archive_expired_rejected():
             src = os.path.join(app.root_path, p.lstrip('/'))
             if os.path.exists(src):
                 try:
-                    dst = os.path.join(arch, os.path.basename(src))
-                    shutil.move(src, dst)
-                    moved_any = True
+                    os.remove(src)
                 except Exception:
                     pass
         if r.extra_images:
@@ -348,13 +343,11 @@ def _archive_expired_rejected():
                 src = os.path.join(app.root_path, ep.lstrip('/'))
                 if os.path.exists(src):
                     try:
-                        dst = os.path.join(arch, os.path.basename(src))
-                        shutil.move(src, dst)
-                        moved_any = True
+                        os.remove(src)
                     except Exception:
                         pass
         db.session.delete(r)
-        print(f"[WORKER] #{r.id} rejected >30d → moved to {os.path.join(REJECTED_ARCHIVE_ROOT, month)} and removed")
+        print(f"[WORKER] #{r.id} rejected >30d → local files deleted (FTP backup preserved), removed from DB")
 
 
 def process_all():

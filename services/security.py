@@ -2,6 +2,7 @@ import os
 import uuid
 import io
 import struct
+import ftplib
 from werkzeug.utils import secure_filename
 
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp', 'heic', 'heif'}
@@ -229,3 +230,204 @@ def apply_watermark(image_path, text, position='bottom-right', opacity=0.5, font
         except Exception:
             pass
         return False
+
+
+# ============================================================
+# FTP 백업 (이중저장: 서버 primary + ipDisk backup)
+# ============================================================
+_ftp_cache = {'ok': None, 'ts': 0.0, 'ttl': 60.0}
+
+
+def _ftp_config():
+    """Flask config에서 FTP 설정 읽기"""
+    try:
+        from flask import current_app
+        cfg = current_app.config
+    except RuntimeError:
+        return None
+    if not cfg.get('FTP_ENABLED'):
+        return None
+    host = cfg.get('FTP_HOST', '')
+    if not host:
+        return None
+    return {
+        'host': host,
+        'port': int(cfg.get('FTP_PORT', 21)),
+        'user': cfg.get('FTP_USER', ''),
+        'pass': cfg.get('FTP_PASS', ''),
+        'remote_dir': (cfg.get('FTP_REMOTE_DIR') or '/').strip(),
+        'use_tls': bool(cfg.get('FTP_USE_TLS', False)),
+        'passive_min': int(cfg.get('FTP_PASSIVE_MIN', 50000)),
+        'passive_max': int(cfg.get('FTP_PASSIVE_MAX', 50100)),
+    }
+
+
+def _ftp_connect(cfg):
+    """FTP 서버에 연결 (캐싱: 실패 시 60초간 재시도 안 함)"""
+    import time
+    now = time.time()
+    if _ftp_cache['ok'] is False and (now - _ftp_cache['ts']) < _ftp_cache['ttl']:
+        return None
+    try:
+        if cfg['use_tls']:
+            ftp = ftplib.FTP_TLS()
+        else:
+            ftp = ftplib.FTP()
+        # IPv4 강제 (Docker/Tailnet 환경에서 IPv6 불안정 대응)
+        host = cfg['host']
+        try:
+            import socket
+            infos = socket.getaddrinfo(host, cfg['port'], socket.AF_INET, socket.SOCK_STREAM)
+            if infos:
+                host = infos[0][4][0]
+        except Exception:
+            pass
+        ftp.connect(host, cfg['port'], timeout=10)
+        ftp.login(cfg['user'], cfg['pass'])
+        if cfg['use_tls']:
+            ftp.prot_p()
+        #被动 모드 활성화
+        try:
+            ftp.set_pasv(True)
+        except Exception:
+            pass
+        # 디렉토리 이동 (없으면 생성)
+        rdir = cfg['remote_dir']
+        if rdir and rdir not in ('/', ''):
+            parts = [p for p in rdir.split('/') if p]
+            try:
+                ftp.cwd(rdir)
+            except ftplib.error_perm:
+                ftp.cwd('/')
+                for p in parts:
+                    try:
+                        ftp.cwd(p)
+                    except ftplib.error_perm:
+                        ftp.mkd(p)
+                        ftp.cwd(p)
+        _ftp_cache['ok'] = True
+        _ftp_cache['ts'] = now
+        return ftp
+    except Exception as e:
+        try:
+            from flask import current_app
+            current_app.logger.warning('FTP 연결 실패: %s', e)
+        except Exception:
+            pass
+        _ftp_cache['ok'] = False
+        _ftp_cache['ts'] = now
+        return None
+
+
+def _ftp_store(ftp, remote_path, local_path):
+    """FTP에 파일 업로드. 성공 True / 실패 False"""
+    try:
+        with open(local_path, 'rb') as f:
+            ftp.storbinary('STOR ' + remote_path, f)
+        return True
+    except Exception as e:
+        try:
+            from flask import current_app
+            current_app.logger.warning('FTP 업로드 실패 (%s): %s', remote_path, e)
+        except Exception:
+            pass
+        return False
+
+
+def _ftp_retrieve(ftp, remote_path):
+    """FTP에서 파일 바이트 반환. 실패/없음 시 None"""
+    try:
+        buf = io.BytesIO()
+        ftp.retrbinary('RETR ' + remote_path, buf.write)
+        buf.seek(0)
+        return buf
+    except Exception as e:
+        try:
+            from flask import current_app
+            current_app.logger.warning('FTP 다운로드 실패 (%s): %s', remote_path, e)
+        except Exception:
+            pass
+        return None
+
+
+def ftp_backup(local_path, sub_dir):
+    """
+    로컬 파일을 ipDiskFTP로 백업 (이중저장).
+    - local_path: 절대 경로 (예: /yp_project/static/uploads/share_reports/rejected/abc.jpg)
+    - sub_dir: FTP 서브디렉토리 (예: 'share_reports/rejected')
+    성공 시 True, 실패 시 False (로컬 저장은 성공으로 유지).
+    """
+    cfg = _ftp_config()
+    if not cfg:
+        return False
+    if not os.path.exists(local_path):
+        return False
+    ftp = _ftp_connect(cfg)
+    if not ftp:
+        return False
+    try:
+        # 서브디렉토리 생성
+        if sub_dir:
+            parts = [p for p in sub_dir.split('/') if p]
+            cur = ftp.pwd()
+            for p in parts:
+                try:
+                    ftp.cwd(p)
+                except ftplib.error_perm:
+                    try:
+                        ftp.mkd(p)
+                        ftp.cwd(p)
+                    except Exception:
+                        pass
+            remote_dir = ftp.pwd()
+            ftp.cwd(cur)
+        else:
+            remote_dir = cfg['remote_dir'] or '/'
+        # 파일 업로드
+        fname = os.path.basename(local_path)
+        remote_path = f"{remote_dir.rstrip('/')}/{fname}"
+        return _ftp_store(ftp, remote_path, local_path)
+    except Exception as e:
+        try:
+            from flask import current_app
+            current_app.logger.warning('FTP 백업 실패: %s', e)
+        except Exception:
+            pass
+        return False
+    finally:
+        try:
+            ftp.quit()
+        except Exception:
+            pass
+
+
+def ftp_retrieve_file(sub_dir, filename):
+    """
+    ipDiskFTP에서 파일 가져오기 (서버 로컬에 없을 때 사용).
+    - sub_dir: FTP 서브디렉토리 (예: 'share_reports/rejected')
+    - filename: 파일명 (예: 'abc123.jpg')
+    성공 시 BytesIO 객체 반환, 실패 시 None.
+    """
+    cfg = _ftp_config()
+    if not cfg:
+        return None
+    ftp = _ftp_connect(cfg)
+    if not ftp:
+        return None
+    try:
+        # 서브디렉토리 이동
+        if sub_dir:
+            parts = [p for p in sub_dir.split('/') if p]
+            for p in parts:
+                try:
+                    ftp.cwd(p)
+                except ftplib.error_perm:
+                    return None
+        return _ftp_retrieve(ftp, filename)
+    except Exception:
+        return None
+    finally:
+        try:
+            ftp.quit()
+        except Exception:
+            pass

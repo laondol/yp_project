@@ -200,6 +200,13 @@ def share_report():
             try:
                 path = secure_save(file, img_dir)
                 image_paths.append(path)
+                # FTP 백업 (이중저장)
+                try:
+                    from services.security import ftp_backup
+                    _abs = os.path.join(current_app.root_path, path.lstrip('/'))
+                    ftp_backup(_abs, 'share_reports')
+                except Exception:
+                    pass
             except Exception:
                 pass
 
@@ -213,8 +220,15 @@ def share_report():
         fname = f"draw_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}.png"
         target_dir = os.path.join(current_app.root_path, 'static', 'uploads', 'share_reports')
         if not os.path.exists(target_dir): os.makedirs(target_dir)
-        with open(os.path.join(target_dir, fname), "wb") as f: f.write(data)
+        draw_path = os.path.join(target_dir, fname)
+        with open(draw_path, "wb") as f: f.write(data)
         drawing_path = f"/static/uploads/share_reports/{fname}"
+        # FTP 백업 (이중저장)
+        try:
+            from services.security import ftp_backup
+            ftp_backup(draw_path, 'share_reports')
+        except Exception:
+            pass
 
     video_path = None
     if 'video' in request.files:
@@ -224,8 +238,15 @@ def share_report():
             if ext in ('mp4', 'avi', 'mov', 'mkv', 'webm'):
                 img_dir = os.path.join(current_app.root_path, 'static', 'uploads', 'share_reports')
                 fname = f"video_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}_{secure_filename(file.filename)}"
-                file.save(os.path.join(img_dir, fname))
+                vpath = os.path.join(img_dir, fname)
+                file.save(vpath)
                 video_path = f"/static/uploads/share_reports/{fname}"
+                # FTP 백업 (이중저장)
+                try:
+                    from services.security import ftp_backup
+                    ftp_backup(vpath, 'share_reports')
+                except Exception:
+                    pass
 
     from services.geocode import gps_to_town_village, gps_to_address
     resolved_town, resolved_village = gps_to_town_village(latitude, longitude)
@@ -332,7 +353,15 @@ def share_report_auto_save():
         ok, msg = validate_upload(file)
         if ok:
             try:
-                new_image_paths.append(secure_save(file, img_dir))
+                p = secure_save(file, img_dir)
+                new_image_paths.append(p)
+                # FTP 백업 (이중저장)
+                try:
+                    from services.security import ftp_backup
+                    _abs = os.path.join(current_app.root_path, p.lstrip('/'))
+                    ftp_backup(_abs, 'share_reports')
+                except Exception:
+                    pass
             except Exception:
                 pass
 
@@ -734,6 +763,13 @@ def share_report_edit(report_id):
                     ok, msg = validate_upload(blob)
                     if ok:
                         new_rel = secure_save(blob, img_dir)
+                        # FTP 백업 (이중저장)
+                        try:
+                            from services.security import ftp_backup
+                            _abs = os.path.join(current_app.root_path, new_rel.lstrip('/'))
+                            ftp_backup(_abs, 'share_reports')
+                        except Exception:
+                            pass
                         # DB 필드에서 old_path 교체
                         if report.image_path == old_path:
                             report.image_path = new_rel
@@ -810,6 +846,13 @@ def share_report_edit(report_id):
             if ok:
                 try:
                     path = secure_save(file, img_dir)
+                    # FTP 백업 (이중저장)
+                    try:
+                        from services.security import ftp_backup
+                        _abs = os.path.join(current_app.root_path, path.lstrip('/'))
+                        ftp_backup(_abs, 'share_reports')
+                    except Exception:
+                        pass
                     angle = rotate_angles.get(str(idx))
                     if angle in (90, 180, 270):
                         try:

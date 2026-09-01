@@ -132,6 +132,13 @@ def service_ramp_apply():
                 target_dir = os.path.join(current_app.config['UPLOAD_FOLDER'], 'ramp')
                 if not os.path.exists(target_dir): os.makedirs(target_dir)
                 photo_path = secure_save(file, target_dir)
+                # FTP 백업 (이중저장)
+                try:
+                    from services.security import ftp_backup
+                    _abs = os.path.join(current_app.root_path, photo_path.lstrip('/'))
+                    ftp_backup(_abs, 'ramp')
+                except Exception:
+                    pass
             except Exception:
                 pass
 

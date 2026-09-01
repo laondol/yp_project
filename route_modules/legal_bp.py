@@ -332,6 +332,14 @@ def api_legal_create():
             path = save_upload(request.files['attachment'], subdir='legal')
             if path:
                 post.file_path = path
+                # FTP 백업 (이중저장)
+                try:
+                    from services.security import ftp_backup
+                    import os as _os
+                    _abs = _os.path.join(current_app.root_path, path.lstrip('/'))
+                    ftp_backup(_abs, 'legal')
+                except Exception:
+                    pass
         except Exception as _e:
             current_app.logger.warning(f'legal attachment save failed: {_e}')
     db.session.add(post)
