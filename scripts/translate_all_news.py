@@ -8,10 +8,10 @@ log = logging.getLogger(__name__)
 from run import create_app
 
 WORLD_CATS = ['세계뉴스', '환경뉴스', '건강정보', '복지정보', '농업정보', '관광소식']
-ENG_THRESHOLD = 0.0  # 세계뉴스는 전체 번역, 기타 카테고리는 영문 비율 0.3 이상
+ENG_THRESHOLD = 0.3  # 영문 비율 30% 이상이면 번역 대상
 
 def is_english_title(title):
-    """제목이 번역이 필요한 영문인지 판단"""
+    """제목이 번역이 필요한 영문인지 판단 (이미 한글이면 건너뜀)"""
     if not title:
         return False
     eng_chars = sum(1 for c in title if c.isascii() and c.isalpha())
