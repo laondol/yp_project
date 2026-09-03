@@ -99,8 +99,16 @@ def run_monthly_payout(app):
 
 
 def run_startup_tasks(app):
-    with app.app_context():
-        db.create_all()
+    for attempt in range(10):
+        try:
+            with app.app_context():
+                db.create_all()
+            break
+        except Exception as e:
+            print(f"[STARTUP] DB 연결 실패 (시도 {attempt+1}/10): {e}")
+            time.sleep(10)
+    else:
+        print("[STARTUP] DB 연결 10회 실패 - startup tasks 건너뜀")
 
     # Friend 요청 불일치 보정
     try:
@@ -253,8 +261,11 @@ def main():
     print("[SCHEDULER] Starting background scheduler...")
     app = create_scheduler_app()
 
-    with app.app_context():
-        run_startup_tasks(app)
+    try:
+        with app.app_context():
+            run_startup_tasks(app)
+    except Exception as e:
+        print(f"[SCHEDULER] startup tasks failed: {e}")
 
     threading.Thread(target=run_cache_scheduler, args=(app,), daemon=True).start()
     threading.Thread(target=run_notification_scheduler, args=(app,), daemon=True).start()

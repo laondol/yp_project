@@ -106,6 +106,10 @@ def admin_news_ai_suggest():
             news_results, news_source = search_news(title, display=1, language=search_lang)
             if news_results:
                 real = news_results[0]
+                if tab == 'kr_yp':
+                    from services.naver_news import _is_korean_source
+                    if not _is_korean_source(real.get('url', '')):
+                        continue
                 _pub = real.get('pubDate', '')
                 published_at = None
                 if _pub:
@@ -127,15 +131,13 @@ def admin_news_ai_suggest():
                 raw_desc = real.get('description', '')
                 if tab == 'world' and raw_title:
                     try:
-                        from services.news_service import _motif_text
-                        trans = _motif_text(
-                            "Translate English news to natural Korean. Output JSON only.",
-                            f"Translate to Korean:\nEN title: {raw_title[:200]}\nEN description: {raw_desc[:500]}\n\nJSON: {{\"title\": \"번역된 제목\", \"description\": \"번역된 내용\"}}",
-                            format_json=True
-                        )
-                        if trans:
-                            raw_title = trans.get('title', raw_title) or raw_title
-                            raw_desc = trans.get('description', raw_desc) or raw_desc
+                        from services.news_service import ai_translate_and_format
+                        eng_ratio = sum(1 for c in raw_title if c.isascii() and c.isalpha()) / max(sum(1 for c in raw_title if c.isalpha()), 1)
+                        if eng_ratio > 0.5:
+                            tr = ai_translate_and_format(raw_title, raw_desc)
+                            if tr and isinstance(tr, dict):
+                                raw_title = tr.get('title', raw_title) or raw_title
+                                raw_desc = tr.get('summary', raw_desc) or raw_desc
                     except:
                         pass
                 article = NewsArticle(
@@ -392,6 +394,47 @@ def admin_news_clean_cjk():
             pass
     db.session.commit()
     return jsonify({"status": "success", "count": count, "msg": f"✅ 뉴스 {count}개 한자/일본어 정리 완료"})
+
+@news_bp.route('/admin/news/translate-world', methods=['POST'])
+def admin_news_translate_world():
+    if session.get('role') not in ['admin', 'leader']:
+        return jsonify({"status": "error", "msg": "권한 없음"}), 403
+    from services.news_service import ai_translate_and_format
+    articles = NewsArticle.query.filter(
+        NewsArticle.id >= 194,
+        NewsArticle.category == '세계뉴스'
+    ).order_by(NewsArticle.id.asc()).all()
+    total = len(articles)
+    count = 0
+    errors = []
+    for a in articles:
+        try:
+            title_text = a.title or ''
+            eng_chars = sum(1 for c in title_text if c.isascii() and c.isalpha())
+            total_chars = sum(1 for c in title_text if c.isalpha())
+            if total_chars > 0 and eng_chars / total_chars < 0.5:
+                continue
+            result = ai_translate_and_format(a.title, a.content or a.summary or '')
+            if result and isinstance(result, dict):
+                new_title = result.get('title', '')
+                new_summary = result.get('summary', '')
+                new_content = result.get('content', '')
+                if new_title:
+                    a.title = new_title
+                if new_summary:
+                    a.summary = new_summary
+                if new_content:
+                    a.content = new_content
+                a.updated_at = datetime.now()
+                count += 1
+            import time; time.sleep(1)
+        except Exception as e:
+            errors.append(f"#{a.id}: {str(e)[:50]}")
+    db.session.commit()
+    msg = f"✅ 세계뉴스 {count}/{total}건 한글 번역 완료"
+    if errors:
+        msg += f" (실패 {len(errors)}건)"
+    return jsonify({"status": "success", "count": count, "total": total, "errors": errors[:5], "msg": msg})
 
 @news_bp.route('/admin/news/import-url', methods=['POST'])
 def admin_news_import_url():

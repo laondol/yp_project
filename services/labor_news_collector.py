@@ -3,6 +3,27 @@ import re
 import xml.etree.ElementTree as ET
 from datetime import datetime
 
+KOREAN_DOMAINS = [
+    '.co.kr', '.or.kr', '.go.kr', '.kr',
+    'naver.com', 'daum.net', 'kakao.com', 'nate.com',
+    'youtube.com', 'facebook.com', 'twitter.com', 'instagram.com',
+    'yna.co.kr', 'kbs.co.kr', 'mbc.co.kr', 'sbs.co.kr',
+    'hani.co.kr', 'donga.com', 'chosun.com', 'joongang.co.kr',
+    'hankyoreh.com', 'kyunghyang.com', 'metro.co.kr',
+    'news1.kr', 'newsis.com', 'ytn.co.kr', 'channeln.com',
+    'etnews.com', 'zdnet.co.kr', '전자신문',
+]
+
+def _is_korean_source(url):
+    """URL이 한국 뉴스 소스인지 확인"""
+    if not url:
+        return False
+    url_lower = url.lower()
+    for domain in KOREAN_DOMAINS:
+        if domain in url_lower:
+            return True
+    return False
+
 LABOR_SOURCES = [
     {"name": "매일노동뉴스", "domain": "labortoday.co.kr", "query": "site:labortoday.co.kr"},
     {"name": "참세상", "domain": "pressian.com", "query": "site:pressian.com"},
@@ -256,10 +277,29 @@ def collect_world_news():
                 if existing:
                     continue
 
+                art_title = f"[{source['name']}] {title}"
+                art_summary = desc[:200]
+                art_content = f"<p>{desc[:1000]}</p>"
+
+                try:
+                    from services.news_service import ai_translate_and_format
+                    eng_ratio = sum(1 for c in title if c.isascii() and c.isalpha()) / max(sum(1 for c in title if c.isalpha()), 1)
+                    if eng_ratio > 0.5:
+                        tr = ai_translate_and_format(title, desc)
+                        if tr and isinstance(tr, dict):
+                            if tr.get('title'):
+                                art_title = f"[{source['name']}] {tr['title']}"
+                            if tr.get('summary'):
+                                art_summary = tr['summary'][:200]
+                            if tr.get('content'):
+                                art_content = tr['content'][:1000]
+                except Exception:
+                    pass
+
                 article = NewsArticle(
-                    title=f"[{source['name']}] {title}",
-                    summary=desc[:200],
-                    content=f"<p>{desc[:1000]}</p>",
+                    title=art_title,
+                    summary=art_summary,
+                    content=art_content,
                     source_url=link,
                     category="세계뉴스",
                     is_selected=False,
@@ -304,6 +344,8 @@ def collect_world_news():
                 for item in items:
                     url = item.get('link', '')
                     if not url or url in seen_urls:
+                        continue
+                    if not _is_korean_source(url):
                         continue
                     seen_urls.add(url)
 

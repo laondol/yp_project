@@ -41,6 +41,7 @@ export default function AdminNews() {
   const [cleaning, setCleaning] = useState(false)
   const [collecting, setCollecting] = useState(false)
   const [collectingWorld, setCollectingWorld] = useState(false)
+  const [translating, setTranslating] = useState(false)
 
   const fetchNews = async () => {
     setLoading(true)
@@ -135,6 +136,29 @@ export default function AdminNews() {
       alert('오류가 발생했습니다.')
     } finally {
       setCleaning(false)
+    }
+  }
+
+  const handleTranslateWorld = async () => {
+    if (!confirm('194번 이후 세계뉴스 영문 기사를 한글로 번역하시겠습니까?\nMotif API를 사용하므로 5~8분 소요될 수 있습니다.')) return
+    setTranslating(true)
+    try {
+      const res = await fetch('/admin/news/translate-world', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'tab=world',
+      })
+      const data = await res.json()
+      if (data.status === 'success' || data.success) {
+        alert(data.msg || `✅ ${data.count}건 번역 완료`)
+        fetchNews()
+      } else {
+        alert(data.msg || data.message || '번역 실패')
+      }
+    } catch {
+      alert('오류가 발생했습니다.')
+    } finally {
+      setTranslating(false)
     }
   }
 
@@ -274,6 +298,9 @@ export default function AdminNews() {
             </button>
             <button className="btn btn-outline-primary btn-sm ms-1" onClick={handleCollectWorld} disabled={collectingWorld}>
               {collectingWorld ? '⏳ 수집 중...' : '🌐 세계뉴스 자동 수집'}
+            </button>
+            <button className="btn btn-outline-danger btn-sm ms-1" onClick={handleTranslateWorld} disabled={translating}>
+              {translating ? '⏳ 번역 중...' : '🔤 세계뉴스 한글 번역'}
             </button>
             <small className="text-muted ms-2">
               {tab === 'world' ? '🌐 영문 검색 → 해외 기사 중심' : '🇰🇷 국내 검색 → 한국 뉴스 중심'} (자동 가져오기)

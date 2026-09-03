@@ -8,6 +8,26 @@ from datetime import datetime, timedelta
 NAVER_NEWS_URL = "https://openapi.naver.com/v1/search/news.json"
 GOOGLE_NEWS_RSS = "https://news.google.com/rss/search?hl=ko&gl=KR&ceid=KR:ko"
 
+KOREAN_DOMAINS = [
+    '.co.kr', '.or.kr', '.go.kr', '.kr',
+    'naver.com', 'daum.net', 'kakao.com', 'nate.com',
+    'youtube.com', 'facebook.com', 'twitter.com', 'instagram.com',
+    'yna.co.kr', 'kbs.co.kr', 'mbc.co.kr', 'sbs.co.kr',
+    'hani.co.kr', 'donga.com', 'chosun.com', 'joongang.co.kr',
+    'hankyoreh.com', 'kyunghyang.com', 'metro.co.kr',
+    'news1.kr', 'newsis.com', 'ytn.co.kr', 'channeln.com',
+    'etnews.com', 'zdnet.co.kr',
+]
+
+def _is_korean_source(url):
+    if not url:
+        return False
+    url_lower = url.lower()
+    for domain in KOREAN_DOMAINS:
+        if domain in url_lower:
+            return True
+    return False
+
 def search_naver_news(query, display=5):
     client_id = current_app.config.get('NAVER_SEARCH_CLIENT_ID', '')
     client_secret = current_app.config.get('NAVER_SEARCH_CLIENT_SECRET', '')
@@ -93,6 +113,8 @@ def search_news(query, display=5, language='ko', days=7):
             else:
                 filtered.append(r)
         results = filtered[:display]
+    if language == 'ko' and results:
+        results = [r for r in results if _is_korean_source(r.get('url', ''))]
     return results, source
 
 def get_local_share_context(title, description, town, village, exclude_id=0):
