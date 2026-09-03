@@ -5,6 +5,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
 log = logging.getLogger(__name__)
 
+from run import create_app
+
 WORLD_CATS = ['세계뉴스', '환경뉴스', '건강정보', '복지정보', '농업정보', '관광소식']
 ENG_THRESHOLD = 0.0  # 세계뉴스는 전체 번역, 기타 카테고리는 영문 비율 0.3 이상
 
