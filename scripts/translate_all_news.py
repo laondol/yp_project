@@ -1,6 +1,7 @@
 #!/usr/bin/env python
-"""영문 뉴스 한글 번역 (일회성) - 세계와양평 전체 카테고리 대상"""
-import sys, os, time, json, logging
+"""영문 뉴스 한글 번역 (일회성) - 세계와양평 전체 카테고리 대상
+재실행 시 이미 번역된 기사는 자동 건너뜀 (영문 비율 0.3 미만)"""
+import sys, os, time, json, logging, signal
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
 log = logging.getLogger(__name__)
@@ -8,10 +9,19 @@ log = logging.getLogger(__name__)
 from run import create_app
 
 WORLD_CATS = ['세계뉴스', '환경뉴스', '건강정보', '복지정보', '농업정보', '관광소식']
-ENG_THRESHOLD = 0.3  # 영문 비율 30% 이상이면 번역 대상
+ENG_THRESHOLD = 0.3
+
+interrupted = False
+
+def handle_signal(sig, frame):
+    global interrupted
+    interrupted = True
+    log.warning('중단 요청됨 (Ctrl+C). 현재 기사 처리 완료 후 종료합니다...')
+
+signal.signal(signal.SIGINT, handle_signal)
+signal.signal(signal.SIGTERM, handle_signal)
 
 def is_english_title(title):
-    """제목이 번역이 필요한 영문인지 판단 (이미 한글이면 건너뜀)"""
     if not title:
         return False
     eng_chars = sum(1 for c in title if c.isascii() and c.isalpha())
@@ -32,20 +42,27 @@ def main():
             NewsArticle.category.in_(WORLD_CATS)
         ).order_by(NewsArticle.id.asc()).all()
         total = len(articles)
+
+        need_translate = []
+        already_done = 0
+        for a in articles:
+            if is_english_title(a.title or ''):
+                need_translate.append(a)
+            else:
+                already_done += 1
+
+        log.info(f'전체: {total}건 | 이미 번역됨: {already_done}건 | 번역 필요: {len(need_translate)}건')
+
+        if not need_translate:
+            log.info('번역할 기사가 없습니다. 모두 완료!')
+            return
+
         count = 0
-        skip = 0
         errors = []
-        report = {'total': total, 'translated': 0, 'skipped': 0, 'errors': [], 'details': []}
-
-        log.info(f'전체 대상: {total}건 (카테고리: {", ".join(WORLD_CATS)})')
-
-        for i, a in enumerate(articles):
-            title_text = a.title or ''
-            if not is_english_title(title_text):
-                skip += 1
-                report['skipped'] += 1
-                continue
-
+        for i, a in enumerate(need_translate):
+            if interrupted:
+                log.warning(f'중단됨. {i}/{len(need_translate)} 완료 (이번 실행 번역: {count}건)')
+                break
             try:
                 result = ai_translate_and_format(a.title, a.content or a.summary or '')
                 if result and isinstance(result, dict):
@@ -61,29 +78,20 @@ def main():
                     a.updated_at = datetime.now()
                     db.session.commit()
                     count += 1
-                    report['translated'] += 1
-                    report['details'].append({'id': a.id, 'category': a.category, 'title': a.title[:60], 'status': 'ok'})
-                    log.info(f'[{i+1}/{total}] #{a.id} [{a.category}] OK: {a.title[:50]}')
+                    log.info(f'[{i+1}/{len(need_translate)}] #{a.id} [{a.category}] OK: {a.title[:50]}')
                 time.sleep(1)
             except Exception as e:
                 err_msg = str(e)[:80]
                 errors.append(f'#{a.id}: {err_msg}')
-                report['errors'].append({'id': a.id, 'category': a.category, 'error': err_msg})
-                report['details'].append({'id': a.id, 'category': a.category, 'title': title_text[:60], 'status': 'error', 'error': err_msg})
-                log.warning(f'[{i+1}/{total}] #{a.id} [{a.category}] ERR: {err_msg}')
+                log.warning(f'[{i+1}/{len(need_translate)}] #{a.id} [{a.category}] ERR: {err_msg}')
                 time.sleep(2)
 
-        report_path = '/tmp/translate_report.json'
-        with open(report_path, 'w') as f:
-            json.dump(report, f, ensure_ascii=False, indent=2)
-
-        log.info(f'완료: 번역 {count}건, 건너뜀 {skip}건, 실패 {len(errors)}건')
-        log.info(f'리포트: {report_path}')
-
+        log.info(f'이번 실행: 번역 {count}건, 실패 {len(errors)}건')
         if errors:
             log.warning('실패 목록:')
             for e in errors:
                 log.warning(f'  {e}')
+        log.info('다시 실행하면 미번역 기사만 이어서 번역됩니다.')
 
 if __name__ == '__main__':
     main()
