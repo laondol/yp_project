@@ -73,6 +73,30 @@ def run_rag_rebuild(app):
         print(f"[RAG] rebuild error: {e}")
 
 
+def run_construction_extract_scheduler(app):
+    """매일 새벽 5시에 최근 기사에서 공사현안을 AI로 추출하여 위치기반안내에 등록"""
+    time.sleep(120)  # 기동 직후 1회 선실행 (배포 즉시 반영)
+    while True:
+        try:
+            with app.app_context():
+                from services.news_construction import process_recent_articles
+                process_recent_articles(app, days=3)
+        except Exception as e:
+            print(f"[CONSTRUCTION_EXTRACT] 오류: {e}")
+        try:
+            now = datetime.now()
+            target = now.replace(hour=5, minute=0, second=0, microsecond=0)
+            if now >= target:
+                from datetime import timedelta
+                target += timedelta(days=1)
+            wait_sec = (target - now).total_seconds()
+            print(f"[CONSTRUCTION_EXTRACT] 다음 실행까지 {wait_sec/3600:.1f}시간 대기")
+            time.sleep(wait_sec)
+        except Exception as e:
+            print(f"[CONSTRUCTION_EXTRACT] 대기 오류: {e}")
+            time.sleep(3600)
+
+
 def run_monthly_payout(app):
     time.sleep(30)
     while True:
@@ -276,6 +300,7 @@ def main():
     # RAG 재구축은 yp_rag 서버 시작 시 자체 수행하므로 중복 제거 (타임아웃 오류 해결)
     # threading.Thread(target=run_rag_rebuild, args=(app,), daemon=True).start()
     threading.Thread(target=run_monthly_payout, args=(app,), daemon=True).start()
+    threading.Thread(target=run_construction_extract_scheduler, args=(app,), daemon=True).start()
     threading.Thread(target=run_labor_news_scheduler, args=(app,), daemon=True).start()
     threading.Thread(target=run_kr_yp_news_scheduler, args=(app,), daemon=True).start()
     threading.Thread(target=run_world_news_scheduler, args=(app,), daemon=True).start()
