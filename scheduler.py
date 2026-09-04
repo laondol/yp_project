@@ -80,16 +80,19 @@ def run_monthly_payout(app):
             with app.app_context():
                 from models import User
                 from services.point_service import add_points
-                now = datetime.now()
+                now = datetime.now(timezone.utc)
                 granted = 0
                 for u in User.query.all():
                     base = u.last_payout or u.created_at
-                    if base and (now - base).days >= 30:
-                        add_points(u.id, 1000, 'monthly', '30일 주기 물맑은머니 지급')
-                        if 'village' in (u.managed_pages or ''):
-                            add_points(u.id, 10000, 'village_monthly', '마을지기 활동지원금')
-                        u.last_payout = now
-                        granted += 1
+                    if base:
+                        if base.tzinfo is None:
+                            base = base.replace(tzinfo=timezone.utc)
+                        if (now - base).days >= 30:
+                            add_points(u.id, 1000, 'monthly', '30일 주기 물맑은머니 지급')
+                            if 'village' in (u.managed_pages or ''):
+                                add_points(u.id, 10000, 'village_monthly', '마을지기 활동지원금')
+                            u.last_payout = now
+                            granted += 1
                 if granted:
                     db.session.commit()
                     print(f'[PAYOUT] monthly points granted to {granted} user(s)')
@@ -187,9 +190,9 @@ def run_startup_tasks(app):
 
 def run_labor_news_scheduler(app):
     """매일 오전 6시에 10개 노동 뉴스 소스 자동 수집 (오전 10시까지 결과 준비)"""
-    def _wait_until_6am():
+    def _wait_until_4am():
         now = datetime.now()
-        target = now.replace(hour=6, minute=0, second=0, microsecond=0)
+        target = now.replace(hour=4, minute=0, second=0, microsecond=0)
         if now >= target:
             from datetime import timedelta
             target += timedelta(days=1)
@@ -197,7 +200,7 @@ def run_labor_news_scheduler(app):
         print(f"[LABOR_NEWS_SCHEDULER] 다음 수집까지 {wait_sec/3600:.1f}시간 대기")
         time.sleep(wait_sec)
 
-    _wait_until_6am()
+    _wait_until_4am()
     while True:
         try:
             with app.app_context():
@@ -210,10 +213,10 @@ def run_labor_news_scheduler(app):
 
 
 def run_kr_yp_news_scheduler(app):
-    """매일 자정에 10개 주요 언론사 대한민국·양평 뉴스 자동 수집 (새벽 3시까지, 4시 정리)"""
-    def _wait_until_midnight():
+    """매일 새벽 2시에 10개 주요 언론사 대한민국·양평 뉴스 자동 수집"""
+    def _wait_until_2am():
         now = datetime.now()
-        target = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        target = now.replace(hour=2, minute=0, second=0, microsecond=0)
         if now >= target:
             from datetime import timedelta
             target += timedelta(days=1)
@@ -221,7 +224,7 @@ def run_kr_yp_news_scheduler(app):
         print(f"[KR_YP_NEWS_SCHEDULER] 다음 수집까지 {wait_sec/3600:.1f}시간 대기")
         time.sleep(wait_sec)
 
-    _wait_until_midnight()
+    _wait_until_2am()
     while True:
         try:
             with app.app_context():
@@ -270,7 +273,8 @@ def main():
     threading.Thread(target=run_cache_scheduler, args=(app,), daemon=True).start()
     threading.Thread(target=run_notification_scheduler, args=(app,), daemon=True).start()
     threading.Thread(target=run_route_recalc_scheduler, args=(app,), daemon=True).start()
-    threading.Thread(target=run_rag_rebuild, args=(app,), daemon=True).start()
+    # RAG 재구축은 yp_rag 서버 시작 시 자체 수행하므로 중복 제거 (타임아웃 오류 해결)
+    # threading.Thread(target=run_rag_rebuild, args=(app,), daemon=True).start()
     threading.Thread(target=run_monthly_payout, args=(app,), daemon=True).start()
     threading.Thread(target=run_labor_news_scheduler, args=(app,), daemon=True).start()
     threading.Thread(target=run_kr_yp_news_scheduler, args=(app,), daemon=True).start()

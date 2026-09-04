@@ -13,9 +13,11 @@ DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql://yp_dev:yp_dev_pass_2026@l
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import threading
     print("[RAG SERVICE] Starting up...")
-    rebuild_index(db_url=DATABASE_URL)
-    print("[RAG SERVICE] Ready.")
+    # 시작 시 전체 재구축을 백그라운드로 실행 (블로킹 방지 - 타임아웃 오류 해결)
+    threading.Thread(target=rebuild_index, kwargs={'db_url': DATABASE_URL}, daemon=True).start()
+    print("[RAG SERVICE] Ready (rebuild running in background).")
     yield
     print("[RAG SERVICE] Shutting down.")
 

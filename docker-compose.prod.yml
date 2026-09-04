@@ -38,6 +38,8 @@ services:
     env_file: .env
     environment:
       - RAG_URL=http://yp_rag:8001
+      - TZ=Asia/Seoul
+      - PYTHONUNBUFFERED=1
     command: ["python", "scheduler.py"]
     depends_on:
       postgres:

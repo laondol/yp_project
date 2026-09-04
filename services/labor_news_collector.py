@@ -172,6 +172,9 @@ def collect_kr_yp_news():
 
     total_new = 0
     seen_urls = set()
+    skipped_existing = 0
+    api_calls_ok = 0
+    api_calls_fail = 0
     now = datetime.now()
 
     search_queries = [
@@ -192,10 +195,13 @@ def collect_kr_yp_news():
                     headers=headers, params=params, timeout=10
                 )
                 if res.status_code != 200:
-                    print(f"[KR_YP_NEWS] {source['name']}: Naver API 오류 {res.status_code}")
+                    api_calls_fail += 1
+                    print(f"[KR_YP_NEWS] {source['name']}: Naver API 오류 {res.status_code} (query: {query[:30]})")
                     continue
+                api_calls_ok += 1
 
                 items = res.json().get('items', [])
+                print(f"[KR_YP_NEWS] {source['name']} + '{sq}': {len(items)}건 수신")
                 for item in items:
                     url = item.get('link', '')
                     if not url or url in seen_urls:
@@ -209,6 +215,7 @@ def collect_kr_yp_news():
 
                     existing = NewsArticle.query.filter_by(source_url=url).first()
                     if existing:
+                        skipped_existing += 1
                         continue
 
                     is_yp = any(kw in title + desc for kw in ["양평", "경기도"])
@@ -231,10 +238,11 @@ def collect_kr_yp_news():
                 db.session.commit()
 
             except Exception as e:
+                api_calls_fail += 1
                 print(f"[KR_YP_NEWS] {source['name']} 수집 오류: {e}")
                 continue
 
-    print(f"[KR_YP_NEWS] 자동 수집 완료: {total_new}건 신규 등록")
+    print(f"[KR_YP_NEWS] 자동 수집 완료: 신규 {total_new}건, 기존 스킵 {skipped_existing}건 (API 성공 {api_calls_ok}/실패 {api_calls_fail})")
     return total_new
 
 
