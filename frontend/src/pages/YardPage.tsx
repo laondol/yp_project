@@ -1,41 +1,29 @@
 import { useEffect, useState } from 'react'
 import { formatKST } from '../utils/format'
 
+interface YardExtraSchedule {
+  id: number; display: string
+  event_start_iso?: string; event_end_iso?: string; is_allday?: boolean
+}
+
 interface YardItem {
   id: string; db_id: number; kind: 'post' | 'event'
   title: string; content: string
   source_type?: string; platform?: string
-  source_url?: string; author_name?: string
+  source_url?: string; reserve_url?: string; author_name?: string
   like_count?: number; dislike_count?: number
-  event_date?: string; created_at: string
+  event_date?: string; event_date_display?: string; event_date_iso?: string; event_end_iso?: string
+  event_place?: string
+  apply_display?: string
+  extra_schedules?: YardExtraSchedule[]
+  distance_km?: number | null
+  created_at: string
 }
 
-interface YardDetail extends YardItem {
-  embed_url?: string
-  comments?: {
-    id: number; user_id: number; author_name: string; content: string
-    image_path?: string; link_url?: string
-    like_count?: number; dislike_count?: number; created_at: string
-  }[]
-}
-
-const platformBadge: Record<string, { label: string; cls: string }> = {
-  facebook: { label: '📘 페이스북', cls: 'bg-primary' },
-  kakao: { label: '💛 카카오', cls: 'bg-warning text-dark' },
-  naverblog: { label: '📝 네이버블로그', cls: 'bg-success' },
-  navercafe: { label: '💬 네이버카페', cls: 'bg-success' },
-  event: { label: '🌾 마을행사', cls: 'bg-success' },
-  manual: { label: '📢 직접 등록', cls: 'bg-secondary' },
-  web: { label: '🌐 웹', cls: 'bg-info' },
-}
-
-function platformIcon(p?: string): string {
-  if (p === 'facebook') return '📘'
-  if (p === 'kakao') return '💛'
-  if (p === 'naverblog') return '📝'
-  if (p === 'navercafe') return '💬'
-  if (p === 'event') return '🌾'
-  return '📢'
+interface YardComment {
+  id: number; user_id: number; author_name: string; content: string
+  image_path?: string; link_url?: string
+  like_count?: number; dislike_count?: number; created_at: string
 }
 
 export default function YardPage() {
@@ -44,16 +32,20 @@ export default function YardPage() {
   const [filter, setFilter] = useState('all')
   const [me, setMe] = useState<{ id: number } | null>(null)
 
-  // 모달 상세
-  const [detail, setDetail] = useState<YardDetail | null>(null)
+  // 댓글 모달
+  const [commentPost, setCommentPost] = useState<YardItem | null>(null)
+  const [comments, setComments] = useState<YardComment[]>([])
+  const [commentsLoading, setCommentsLoading] = useState(false)
   const [commentText, setCommentText] = useState('')
   const [commentLink, setCommentLink] = useState('')
   const [commentImage, setCommentImage] = useState<File | null>(null)
   const [sending, setSending] = useState(false)
+  const [addedSchedule, setAddedSchedule] = useState<Record<string, boolean>>({})
 
-  const load = () => {
+  const load = (lat?: number, lng?: number) => {
     setLoading(true)
-    fetch('/api/yard')
+    const qs = lat && lng ? `?lat=${lat}&lng=${lng}` : ''
+    fetch(`/api/yard${qs}`)
       .then(r => r.json())
       .then(d => setItems(d.items || []))
       .catch(() => {})
@@ -62,18 +54,18 @@ export default function YardPage() {
   useEffect(() => { load() }, [])
   useEffect(() => {
     fetch('/api/me').then(r => r.json()).then(d => { if (d.id) setMe({ id: d.id }) }).catch(() => {})
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        pos => { load(pos.coords.latitude, pos.coords.longitude) },
+        () => {},
+        { enableHighAccuracy: true, timeout: 10000 }
+      )
+    }
   }, [])
 
   const filtered = items.filter(i =>
     filter === 'all' ? true : filter === 'event' ? i.kind === 'event' : i.kind === 'post' && i.platform === filter
   )
-
-  const openDetail = (dbId: number) => {
-    fetch(`/api/yard/${dbId}`)
-      .then(r => r.json())
-      .then(d => setDetail(d))
-      .catch(() => {})
-  }
 
   const vote = (it: YardItem, v: 'like' | 'dislike') => {
     if (!me) { alert('로그인 후 이용하세요.'); return }
@@ -92,8 +84,20 @@ export default function YardPage() {
       .catch(() => alert('오류가 발생했습니다.'))
   }
 
+  // 댓글 모달 열기
+  const openComments = (it: YardItem) => {
+    setCommentPost(it)
+    setCommentsLoading(true)
+    fetch(`/api/yard/${it.db_id}`)
+      .then(r => r.json())
+      .then(d => setComments(d.comments || []))
+      .catch(() => {})
+      .finally(() => setCommentsLoading(false))
+  }
+
   const submitComment = async () => {
     if (!me) { alert('로그인 후 이용하세요.'); return }
+    if (!commentPost) return
     if (!commentText.trim() && !commentImage && !commentLink.trim()) return
     setSending(true)
     try {
@@ -101,12 +105,11 @@ export default function YardPage() {
       if (commentText.trim()) fd.append('content', commentText.trim())
       if (commentLink.trim()) fd.append('link_url', commentLink.trim())
       if (commentImage) fd.append('image', commentImage)
-      const res = await fetch(`/api/yard/${detail?.db_id}/comment`, { method: 'POST', body: fd })
+      const res = await fetch(`/api/yard/${commentPost.db_id}/comment`, { method: 'POST', body: fd })
       const data = await res.json()
       if (data.status === 'success') {
         setCommentText(''); setCommentLink(''); setCommentImage(null)
-        // 댓글 목록 갱신
-        setDetail(prev => prev ? { ...prev, comments: [...(prev.comments || []), data.comment] } : prev)
+        setComments(prev => [...prev, data.comment])
       } else alert(data.msg || '등록 실패')
     } catch { alert('댓글 등록 오류') }
     setSending(false)
@@ -114,11 +117,39 @@ export default function YardPage() {
 
   const deleteComment = async (cid: number) => {
     if (!confirm('댓글을 삭제하시겠습니까?')) return
-    const res = await fetch(`/api/yard/comment/${cid}`, { method: 'DELETE' })
-    const data = await res.json()
-    if (data.status === 'success') {
-      setDetail(prev => prev ? { ...prev, comments: (prev.comments || []).filter(c => c.id !== cid) } : prev)
-    } else alert(data.msg || '삭제 실패')
+    try {
+      const res = await fetch(`/api/yard/comment/${cid}`, { method: 'DELETE' })
+      const data = await res.json()
+      if (data.status === 'success') {
+        setComments(prev => prev.filter(c => c.id !== cid))
+      } else alert(data.msg || '삭제 실패')
+    } catch { alert('삭제 오류') }
+  }
+
+  // 내일정에 추가 (TongBotSchedule 연동) - 일정 수만큼 버튼 표시
+  const addToSchedule = async (key: string, title: string, startIso: string, endIso: string, place: string, allday: boolean) => {
+    if (!me) { alert('로그인 후 이용하세요.'); return }
+    if (!startIso) { alert('행사 일시 정보가 없습니다.'); return }
+    try {
+      const res = await fetch('/api/bot/schedule', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title,
+          description: `[마당] ${place || ''} 소식`,
+          event_date: startIso,
+          end_date: endIso || '',
+          location: place || '',
+          is_allday: allday,
+        }),
+      })
+      const data = await res.json()
+      if (res.status === 401) { alert('로그인 후 이용하세요.'); return }
+      if (data.id || data.status === 'success') {
+        setAddedSchedule(prev => ({ ...prev, [key]: true }))
+        alert('✅ 내 일정에 추가되었습니다. (내 일정 페이지에서 확인)')
+      } else alert(data.error || data.msg || '추가 실패')
+    } catch { alert('오류가 발생했습니다.') }
   }
 
   return (
@@ -134,11 +165,6 @@ export default function YardPage() {
         {[
           { key: 'all', label: '전체' },
           { key: 'event', label: '🌾 마을행사' },
-          { key: 'naverblog', label: '📝 블로그' },
-          { key: 'navercafe', label: '💬 카페' },
-          { key: 'facebook', label: '📘 페이스북' },
-          { key: 'kakao', label: '💛 카카오' },
-          { key: 'manual', label: '📢 소식' },
         ].map(f => (
           <button key={f.key} className={`btn btn-sm ${filter === f.key ? 'btn-success' : 'btn-outline-success'}`}
             onClick={() => setFilter(f.key)}>{f.label}</button>
@@ -155,26 +181,66 @@ export default function YardPage() {
       ) : (
         <div className="row g-3 flex-nowrap flex-sm-wrap" style={{ overflowX: 'auto', paddingBottom: 4 }}>
           {filtered.map(it => {
-            const badge = platformBadge[it.platform || ''] || platformBadge.manual
             return (
               <div key={it.id} className="col-12 col-md-6 col-lg-4" style={{ minWidth: 340 }}>
-                <div className="card border-0 shadow-sm h-100" style={{ borderRadius: 16, overflow: 'hidden' }}>
-                  <div className="bg-light d-flex align-items-center justify-content-center" style={{ height: 120 }}>
-                    <span style={{ fontSize: '2.5rem' }}>{platformIcon(it.kind === 'event' ? 'event' : it.platform)}</span>
-                  </div>
+                <div className="card border-0 shadow-sm h-100" style={{ borderRadius: 16 }}>
                   <div className="card-body p-3 d-flex flex-column">
-                    <div className="d-flex gap-1 flex-wrap mb-2">
-                      <span className={`badge ${badge.cls}`}>{badge.label}</span>
-                      {it.kind === 'event' && it.event_date && (
-                        <span className="badge bg-success">📅 {it.event_date}</span>
-                      )}
-                    </div>
-                    <h6 className="fw-bold mb-2" style={{ cursor: 'pointer' }}
-                      onClick={() => { if (it.kind === 'post') openDetail(it.db_id); else if (it.source_url) window.location.href = it.source_url }}>
-                      {it.title}
-                    </h6>
-                    <p className="small text-muted flex-grow-1 mb-2">{(it.content || '').substring(0, 120)}</p>
-                    <div className="d-flex justify-content-between align-items-center mt-auto pt-2 border-top">
+                    {/* 제목 (맨위) */}
+                    <h6 className="fw-bold mb-2">{it.title}</h6>
+
+                    {/* 1차 일정 + 내일정 버튼 */}
+                    {it.event_date_display && (
+                      <div className="small mb-1 d-flex justify-content-between align-items-center">
+                        <span>📅 {it.event_date_display}</span>
+                        {it.kind === 'post' && it.event_date_iso && !addedSchedule[it.id] && (
+                          <button className="btn btn-sm btn-outline-warning py-0" style={{ fontSize: '0.7rem' }}
+                            onClick={() => addToSchedule(it.id, it.title, it.event_date_iso!, it.event_end_iso || '', it.event_place || '', !!(it as any).is_allday)}>
+                            📅 내일정 추가
+                          </button>
+                        )}
+                        {addedSchedule[it.id] && <span className="text-success" style={{ fontSize: '0.7rem' }}>✅ 추가됨</span>}
+                      </div>
+                    )}
+
+                    {/* 추가 일정 (1차 일정 바로 밑, 일정 수만큼 내일정 버튼) */}
+                    {(it.extra_schedules || []).map(s => (
+                      <div key={`s${s.id}`} className="small mb-1 d-flex justify-content-between align-items-center">
+                        <span>📅 {s.display}</span>
+                        {s.event_start_iso && !addedSchedule[`s${s.id}`] && (
+                          <button className="btn btn-sm btn-outline-warning py-0" style={{ fontSize: '0.7rem' }}
+                            onClick={() => addToSchedule(`s${s.id}`, it.title, s.event_start_iso!, s.event_end_iso || '', it.event_place || '', !!s.is_allday)}>
+                            📅 내일정 추가
+                          </button>
+                        )}
+                        {addedSchedule[`s${s.id}`] && <span className="text-success" style={{ fontSize: '0.7rem' }}>✅ 추가됨</span>}
+                      </div>
+                    ))}
+
+                    {/* 장소 */}
+                    {it.event_place && <div className="small mb-1">📍 {it.event_place}</div>}
+
+                    {/* 신청기간 + 예약/신청 바로가기 */}
+                    {(it.apply_display || it.reserve_url) && (
+                      <div className="small mb-1 p-2 bg-light rounded">
+                        {it.apply_display && <div>🗓️ 신청기간: {it.apply_display}</div>}
+                        {it.reserve_url && (
+                          <div>🎟️ <a href={it.reserve_url} target="_blank" rel="noopener noreferrer" className="text-success fw-bold">
+                            예약/신청 바로가기
+                          </a></div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* 메모 (스크롤로 전체 내용 확인) */}
+                    {it.content && (
+                      <div className="small text-muted mb-2 p-2 bg-light rounded"
+                        style={{ maxHeight: 110, overflowY: 'auto', whiteSpace: 'pre-wrap' }}>
+                        {it.content}
+                      </div>
+                    )}
+
+                    {/* 좋아요/나빠요 (목록 자체) */}
+                    <div className="d-flex justify-content-between align-items-center pt-2 border-top">
                       <small className="text-muted">👤 {it.author_name || '관리자'}</small>
                       {it.kind === 'post' && (
                         <div className="d-flex gap-1">
@@ -183,13 +249,23 @@ export default function YardPage() {
                         </div>
                       )}
                     </div>
-                    <div className="d-flex justify-content-between align-items-center mt-1">
-                      <small className="text-muted">{it.created_at ? formatKST(it.created_at, { year: 'numeric', month: '2-digit', day: '2-digit' }) : ''}</small>
+
+                    {/* 액션 버튼 */}
+                    <div className="d-flex gap-1 flex-wrap mt-2">
+                      {it.source_url && (
+                        <a href={it.source_url} target="_blank" rel="noopener noreferrer"
+                          className="btn btn-sm btn-outline-primary py-0">
+                          자세히 보기 →
+                        </a>
+                      )}
                       {it.kind === 'post' && (
-                        <a className="small text-primary text-decoration-none" style={{ cursor: 'pointer' }}
-                          onClick={() => openDetail(it.db_id)}>자세히 보기 →</a>
+                        <button className="btn btn-sm btn-outline-secondary py-0" onClick={() => openComments(it)}>
+                          💬 댓글
+                        </button>
                       )}
                     </div>
+
+                    <div className="small text-muted mt-1">{it.created_at ? formatKST(it.created_at, { year: 'numeric', month: '2-digit', day: '2-digit' }) : ''}</div>
                   </div>
                 </div>
               </div>
@@ -198,65 +274,36 @@ export default function YardPage() {
         </div>
       )}
 
-      {/* 상세 모달 */}
-      {detail && (
+      {/* 댓글 모달 */}
+      {commentPost && (
         <div className="modal fade show d-block" tabIndex={-1} style={{ background: 'rgba(0,0,0,0.5)' }}>
           <div className="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
             <div className="modal-content" style={{ borderRadius: 18 }}>
               <div className="modal-header">
                 <div>
-                  {detail.platform === 'facebook' && <span className="badge bg-primary me-1">📘 페이스북</span>}
-                  {detail.platform === 'kakao' && <span className="badge bg-warning text-dark me-1">💛 카카오</span>}
-                  {detail.platform === 'naverblog' && <span className="badge bg-success me-1">📝 네이버블로그</span>}
-                  {detail.platform === 'navercafe' && <span className="badge bg-success me-1">💬 네이버카페</span>}
-                  {detail.platform === 'web' && <span className="badge bg-info me-1">🌐 웹</span>}
-                  <small className="text-muted ms-1">{detail.created_at ? formatKST(detail.created_at) : ''}</small>
+                  <h6 className="fw-bold mb-0">{commentPost.title}</h6>
+                  {commentPost.source_url && (
+                    <a href={commentPost.source_url} target="_blank" rel="noopener noreferrer" className="small text-primary">
+                      🔗 {commentPost.author_name || '원문'} 게시물 바로가기
+                    </a>
+                  )}
                 </div>
-                <button type="button" className="btn-close" onClick={() => setDetail(null)} />
+                <button type="button" className="btn-close" onClick={() => setCommentPost(null)} />
               </div>
               <div className="modal-body">
-                <h5 className="fw-bold">{detail.title}</h5>
-                {detail.author_name && <div className="small text-muted mb-2">👤 {detail.author_name}</div>}
-
-                {detail.content && <div className="mb-3" style={{ whiteSpace: 'pre-wrap', lineHeight: 1.8 }}>{detail.content}</div>}
-
-                {/* SNS 공개 게시물 임베드 (인스타 제외 - 페이스북만 임베드 지원) */}
-                {detail.embed_url ? (
-                  <div className="d-flex justify-content-center my-3">
-                    <iframe src={detail.embed_url} style={{ border: 'none', width: '100%', maxWidth: 500, height: 640, overflow: 'hidden' }}
-                      scrolling="no" allowFullScreen title="SNS 게시물" />
-                  </div>
-                ) : null}
-
-                {/* 원문/앱 바로가기 */}
-                {detail.source_url && (
-                  <div className="d-flex gap-2 my-3 flex-wrap">
-                    <a href={detail.source_url} target="_blank" rel="noopener noreferrer" className="btn btn-success btn-lg px-4">
-                      ↗ {(detail.platform === 'naverblog' || detail.platform === 'navercafe') ? '게시물에서 보기' : '페이지에서 보기'}
-                    </a>
-                    {(detail.platform === 'facebook' || detail.platform === 'instagram' || detail.platform === 'kakao') && (
-                      <a href={detail.source_url} target="_blank" rel="noopener noreferrer" className="btn btn-outline-success btn-lg px-4">
-                        📱 앱으로 열기
-                      </a>
-                    )}
-                  </div>
-                )}
-
-                <hr />
-
-                {/* 댓글 */}
-                <h6 className="fw-bold mb-3">💬 의견 ({detail.comments?.length || 0})</h6>
-                {(detail.comments?.length || 0) === 0 ? (
+                {commentsLoading ? (
+                  <div className="text-center py-4"><div className="spinner-border" /></div>
+                ) : comments.length === 0 ? (
                   <p className="text-center text-muted small py-3">아직 의견이 없습니다. 첫 의견을 남겨보세요.</p>
                 ) : (
                   <div className="mb-3">
-                    {detail.comments!.map(c => (
+                    {comments.map(c => (
                       <div key={c.id} className="border-bottom pb-2 mb-2">
                         <div className="d-flex justify-content-between">
                           <strong className="small">{c.author_name || '익명'}</strong>
                           <div className="d-flex align-items-center gap-1">
                             <small className="text-muted">{c.created_at ? formatKST(c.created_at, { month: '2-digit', day: '2-digit' }) : ''}</small>
-                            {(c.user_id === me?.id) && (
+                            {c.user_id === me?.id && (
                               <button className="btn btn-sm btn-link text-danger p-0" style={{ fontSize: '0.75rem' }}
                                 onClick={() => deleteComment(c.id)}>삭제</button>
                             )}
@@ -285,7 +332,7 @@ export default function YardPage() {
                       <input type="url" className="form-control form-control-sm" placeholder="링크 (선택)"
                         value={commentLink} onChange={e => setCommentLink(e.target.value)} style={{ maxWidth: 220 }} />
                       <button type="submit" className="btn btn-sm btn-success" disabled={sending}>
-                        {sending ? '⏳ 등록 중...' : '등록'}
+                        {sending ? '⏳ 등록 중...' : '💬 댓글 등록'}
                       </button>
                     </div>
                     {commentImage && <small className="text-success">📷 {commentImage.name}</small>}
@@ -295,7 +342,7 @@ export default function YardPage() {
                 )}
               </div>
               <div className="modal-footer">
-                <button className="btn btn-sm btn-secondary" onClick={() => setDetail(null)}>닫기</button>
+                <button className="btn btn-sm btn-secondary" onClick={() => setCommentPost(null)}>닫기</button>
               </div>
             </div>
           </div>

@@ -5,7 +5,10 @@ interface YardAdminItem {
   id: string; db_id: number
   title: string; content: string
   source_type?: string; platform?: string
-  source_url?: string; author_name?: string
+  source_url?: string; reserve_url?: string; author_name?: string
+  contact?: string
+  event_date_display?: string
+  event_date_iso?: string; event_end_iso?: string; event_place?: string
   is_approved: boolean; is_active: boolean
   created_at: string
 }
@@ -15,23 +18,12 @@ interface YardOrgItem {
   platform: string; is_active: boolean; created_at: string
 }
 
-const platformLabel: Record<string, string> = {
-  facebook: '📘 페이스북', kakao: '💛 카카오', naverblog: '📝 블로그',
-  navercafe: '💬 카페', instagram: '📸 인스타그램', web: '🌐 웹', '': '📢 직접 등록',
-}
-
 export default function AdminYard() {
   const [items, setItems] = useState<YardAdminItem[]>([])
   const [orgs, setOrgs] = useState<YardOrgItem[]>([])
   const [loading, setLoading] = useState(true)
   const [msg, setMsg] = useState('')
   const [msgOk, setMsgOk] = useState(false)
-
-  const [title, setTitle] = useState('')
-  const [content, setContent] = useState('')
-  const [sourceUrl, setSourceUrl] = useState('')
-  const [authorName, setAuthorName] = useState('')
-  const [saving, setSaving] = useState(false)
 
   const [orgName, setOrgName] = useState('')
   const [orgUrl, setOrgUrl] = useState('')
@@ -51,6 +43,21 @@ export default function AdminYard() {
       .finally(() => setLoading(false))
   }
   useEffect(() => { load() }, [])
+
+  // 독립 편집창 저장 시 목록 갱신
+  useEffect(() => {
+    const onMsg = (e: MessageEvent) => { if (e.data === 'yard-updated') load() }
+    window.addEventListener('message', onMsg)
+    return () => window.removeEventListener('message', onMsg)
+  }, [])
+
+  const openCreate = () => {
+    window.open('/yard/edit', 'yardEdit', 'width=620,height=900')
+  }
+
+  const openEdit = (it: YardAdminItem) => {
+    window.open(`/yard/edit?id=${it.db_id}`, 'yardEdit', 'width=620,height=900')
+  }
 
   const handleOrgCreate = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -72,23 +79,6 @@ export default function AdminYard() {
     const data = await res.json()
     setOrgMsg(data.msg || ''); setOrgMsgOk(data.status === 'success')
     if (data.status === 'success') load()
-  }
-
-  const handleCreate = async () => {
-    if (!title.trim()) return
-    setSaving(true)
-    try {
-      const res = await fetch('/api/yard', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: title.trim(), content: content.trim(), source_url: sourceUrl.trim(), author_name: authorName.trim() }),
-      })
-      const data = await res.json()
-      setMsg(data.msg || (data.status === 'success' ? '등록 완료' : '실패'))
-      setMsgOk(data.status === 'success')
-      if (data.status === 'success') { setTitle(''); setContent(''); setSourceUrl(''); setAuthorName(''); load() }
-    } catch { setMsg('오류가 발생했습니다.'); setMsgOk(false) }
-    setSaving(false)
   }
 
   const handleApprove = async (fid: string) => {
@@ -152,23 +142,16 @@ export default function AdminYard() {
         )}
       </div>
 
-      {/* 등록 폼 */}
-      <div className="card border-0 shadow-sm mb-4 p-4" style={{ borderRadius: 16 }}>
-        <h6 className="fw-bold mb-3">✏️ 직접 등록 <small className="text-muted fw-normal">(등록 즉시 공개)</small></h6>
-        <form onSubmit={e => { e.preventDefault(); handleCreate() }}>
-          <input className="form-control mb-2" placeholder="제목 (필수)"
-            value={title} onChange={e => setTitle(e.target.value)} required />
-          <input className="form-control mb-2" placeholder="단체명/출처 (예: 양평군청, ○○마을회)"
-            value={authorName} onChange={e => setAuthorName(e.target.value)} />
-          <textarea className="form-control mb-2" rows={3} placeholder="내용"
-            value={content} onChange={e => setContent(e.target.value)} />
-          <input className="form-control mb-2" placeholder="SNS 공지 URL (선택 — 페이스북 공개 게시물은 상세페이지에 원문 표시)"
-            value={sourceUrl} onChange={e => setSourceUrl(e.target.value)} />
-          <button type="submit" className="btn btn-success" disabled={saving || !title.trim()}>
-            {saving ? '⏳ 등록 중...' : '✅ 마당에 등록'}
-          </button>
-          <span className={`ms-2 small ${msgOk ? 'text-success' : 'text-danger'}`}>{msg}</span>
-        </form>
+      {/* 등록 버튼 */}
+      <div className="card border-0 shadow-sm mb-4 p-3" style={{ borderRadius: 16 }}>
+        <div className="d-flex justify-content-between align-items-center flex-wrap gap-2">
+          <div>
+            <h6 className="fw-bold mb-0">✏️ 소식 등록/편집</h6>
+            <small className="text-muted">독립창에서 편집하며 원문 페이지를 나란히 열어두고 내용을 입력하세요.</small>
+          </div>
+          <button className="btn btn-success btn-lg px-4" onClick={openCreate}>✏️ 새 소식 등록</button>
+        </div>
+        <span className={`small mt-1 d-block ${msgOk ? 'text-success' : 'text-danger'}`}>{msg}</span>
       </div>
 
       {/* 승인 대기 */}
@@ -179,27 +162,42 @@ export default function AdminYard() {
         ) : pending.length === 0 ? (
           <div className="text-center text-muted small py-2">승인 대기 중인 소식이 없습니다.</div>
         ) : (
-          <div className="table-responsive">
-            <table className="table table-hover align-middle mb-0">
-              <thead><tr><th>제목</th><th>출처</th><th>플랫폼</th><th>수집일</th><th></th></tr></thead>
-              <tbody>
-                {pending.map(p => (
-                  <tr key={p.id}>
-                    <td style={{ maxWidth: 280 }}>
-                      <strong>{p.title}</strong>
-                      {p.source_url && <div className="small text-muted" style={{ fontSize: '0.75rem' }}>{p.source_url}</div>}
-                    </td>
-                    <td className="small">{p.author_name || '-'}</td>
-                    <td className="small">{platformLabel[p.platform || ''] || p.platform}</td>
-                    <td className="small">{formatKST(p.created_at, { month: '2-digit', day: '2-digit' })}</td>
-                    <td className="text-end text-nowrap">
-                      <button className="btn btn-sm btn-success me-1" onClick={() => handleApprove(p.id)}>✅ 승인</button>
-                      <button className="btn btn-sm btn-outline-danger" onClick={() => handleDelete(p.id)}>삭제</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="row g-3">
+            {pending.map(p => (
+              <div key={p.id} className="col-12 col-md-6 col-lg-4" style={{ minWidth: 320 }}>
+                <div className="card border-0 shadow-sm h-100" style={{ borderRadius: 16 }}>
+                  <div className="card-body p-3 d-flex flex-column">
+                    <div className="small text-muted mb-1">#{p.db_id}</div>
+                    <h6 className="fw-bold mb-2">{p.title}</h6>
+                    {p.event_date_display && <div className="small mb-1">📅 {p.event_date_display}</div>}
+                    {p.event_place && <div className="small mb-1">📍 {p.event_place}</div>}
+                    {p.reserve_url && (
+                      <a href={p.reserve_url} target="_blank" rel="noopener noreferrer" className="small mb-1 text-success">
+                        🎟️ 예약/신청 바로가기
+                      </a>
+                    )}
+                    {p.content && (
+                      <div className="small text-muted mb-2 p-2 bg-light rounded"
+                        style={{ maxHeight: 90, overflowY: 'auto', whiteSpace: 'pre-wrap' }}>
+                        {p.content}
+                      </div>
+                    )}
+                    <div className="small text-muted mb-1">👤 {p.author_name || '관리자'}</div>
+                    {p.source_url && (
+                      <a href={p.source_url} target="_blank" rel="noopener noreferrer" className="small text-primary mb-2">
+                        🔗 자세히 보기 (원문) →
+                      </a>
+                    )}
+                    <div className="d-flex gap-1 flex-wrap mt-auto pt-2 border-top">
+                      <button className="btn btn-sm btn-outline-primary" onClick={() => openEdit(p)}>✏️ 수정</button>
+                      <button className="btn btn-sm btn-success" onClick={() => handleApprove(p.id)}>✅ 승인</button>
+                      <button className="btn btn-sm btn-outline-danger" onClick={() => handleDelete(p.id)}>🗑️ 삭제</button>
+                    </div>
+                    <div className="small text-muted mt-1">{formatKST(p.created_at, { month: '2-digit', day: '2-digit' })}</div>
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>
@@ -212,27 +210,42 @@ export default function AdminYard() {
         ) : approved.length === 0 ? (
           <div className="text-center text-muted small py-2">공개 중인 소식이 없습니다.</div>
         ) : (
-          <div className="table-responsive">
-            <table className="table table-hover align-middle mb-0">
-              <thead><tr><th>제목</th><th>출처</th><th>플랫폼</th><th>등록일</th><th></th></tr></thead>
-              <tbody>
-                {approved.map(p => (
-                  <tr key={p.id}>
-                    <td style={{ maxWidth: 280 }}>
-                      <strong>{p.title}</strong>
-                      {p.source_url && <div className="small text-muted" style={{ fontSize: '0.75rem' }}>{p.source_url}</div>}
-                    </td>
-                    <td className="small">{p.author_name || '-'}</td>
-                    <td className="small">{platformLabel[p.platform || ''] || p.platform}</td>
-                    <td className="small">{formatKST(p.created_at, { month: '2-digit', day: '2-digit' })}</td>
-                    <td className="text-end text-nowrap">
-                      <button className="btn btn-sm btn-outline-secondary me-1" title="비공개로 전환" onClick={() => handleApprove(p.id)}>숨기기</button>
-                      <button className="btn btn-sm btn-outline-danger" onClick={() => handleDelete(p.id)}>삭제</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="row g-3">
+            {approved.map(p => (
+              <div key={p.id} className="col-12 col-md-6 col-lg-4" style={{ minWidth: 320 }}>
+                <div className="card border-0 shadow-sm h-100" style={{ borderRadius: 16 }}>
+                  <div className="card-body p-3 d-flex flex-column">
+                    <div className="small text-muted mb-1">#{p.db_id}</div>
+                    <h6 className="fw-bold mb-2">{p.title}</h6>
+                    {p.event_date_display && <div className="small mb-1">📅 {p.event_date_display}</div>}
+                    {p.event_place && <div className="small mb-1">📍 {p.event_place}</div>}
+                    {p.reserve_url && (
+                      <a href={p.reserve_url} target="_blank" rel="noopener noreferrer" className="small mb-1 text-success">
+                        🎟️ 예약/신청 바로가기
+                      </a>
+                    )}
+                    {p.content && (
+                      <div className="small text-muted mb-2 p-2 bg-light rounded"
+                        style={{ maxHeight: 90, overflowY: 'auto', whiteSpace: 'pre-wrap' }}>
+                        {p.content}
+                      </div>
+                    )}
+                    <div className="small text-muted mb-1">👤 {p.author_name || '관리자'}</div>
+                    {p.source_url && (
+                      <a href={p.source_url} target="_blank" rel="noopener noreferrer" className="small text-primary mb-2">
+                        🔗 자세히 보기 (원문) →
+                      </a>
+                    )}
+                    <div className="d-flex gap-1 flex-wrap mt-auto pt-2 border-top">
+                      <button className="btn btn-sm btn-outline-primary" onClick={() => openEdit(p)}>✏️ 수정</button>
+                      <button className="btn btn-sm btn-outline-secondary" title="비공개로 전환" onClick={() => handleApprove(p.id)}>숨기기</button>
+                      <button className="btn btn-sm btn-outline-danger" onClick={() => handleDelete(p.id)}>🗑️ 삭제</button>
+                    </div>
+                    <div className="small text-muted mt-1">{formatKST(p.created_at, { month: '2-digit', day: '2-digit' })}</div>
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>

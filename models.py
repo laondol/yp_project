@@ -388,10 +388,20 @@ class YardPost(db.Model):
     content = db.Column(db.Text)
     source_type = db.Column(db.String(20), default='manual')  # manual(직접), sns(SNS URL), sns_auto(자동수집), village_event(마을행사 링크)
     platform = db.Column(db.String(20), default='')  # instagram, facebook, kakao, naverblog, navercafe, web, ''
-    source_url = db.Column(db.String(500))
+    source_url = db.Column(db.String(500))          # 출처링크 (원문)
+    reserve_url = db.Column(db.String(500))         # 예약/신청 사이트 링크 (참여 신청용)
+    contact = db.Column(db.String(100))             # 연락처 (전화/신청방법)
     author_name = db.Column(db.String(100))         # 단체명/작성자
     like_count = db.Column(db.Integer, default=0)
     dislike_count = db.Column(db.Integer, default=0)
+    event_date = db.Column(db.DateTime)             # 행사 시작 일시 (AI 추출, 정렬/지난 행사 필터용)
+    event_end = db.Column(db.DateTime)              # 행사 종료 일시
+    is_allday = db.Column(db.Boolean, default=False)  # 종일 행사
+    event_place = db.Column(db.String(200))         # 행사 장소 (AI 추출)
+    apply_start = db.Column(db.DateTime)            # 신청기간 시작
+    apply_end = db.Column(db.DateTime)              # 신청기간 종료
+    latitude = db.Column(db.Float)                  # 행사 장소 좌표 (지오코딩, 거리 정렬용)
+    longitude = db.Column(db.Float)
     is_approved = db.Column(db.Boolean, default=False)  # 관리자 승인 후 공개 (자동수집건)
     is_active = db.Column(db.Boolean, default=True)
     created_by = db.Column(db.Integer, db.ForeignKey('user.id'))
@@ -423,6 +433,17 @@ class YardOrg(db.Model):
     platform = db.Column(db.String(20), default='')    # naverblog, navercafe, facebook, kakao, instagram, band
     is_active = db.Column(db.Boolean, default=True)
     created_by = db.Column(db.Integer, db.ForeignKey('user.id'))
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+
+class YardSchedule(db.Model):
+    """마당 소식의 추가 일정 (한 소식에 여러 일정 지원)"""
+    __tablename__ = 'yard_schedule'
+    id = db.Column(db.Integer, primary_key=True)
+    post_id = db.Column(db.Integer, db.ForeignKey('yard_post.id'), nullable=False)
+    event_start = db.Column(db.DateTime, nullable=False)
+    event_end = db.Column(db.DateTime)
+    is_allday = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.now)
 
 

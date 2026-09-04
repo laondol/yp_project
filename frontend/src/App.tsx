@@ -39,6 +39,7 @@ import AdminUsers from './pages/AdminUsers'
 import AdminNews from './pages/AdminNews'
 import YardPage from './pages/YardPage'
 import YardDetail from './pages/YardDetail'
+import YardEditPage from './pages/YardEditPage'
 import AdminYard from './pages/AdminYard'
 import AdminShareReports from './pages/AdminShareReports'
 import AdminStores from './pages/AdminStores'
@@ -158,6 +159,7 @@ export default function App() {
             <Route path="/share" element={<ShareList />} />
             <Route path="/yard" element={<YardPage />} />
             <Route path="/yard/:id" element={<YardDetail />} />
+            <Route path="/yard/edit" element={<ProtectedRoute><YardEditPage /></ProtectedRoute>} />
             <Route path="/admin/yard" element={<ProtectedRoute><AdminYard /></ProtectedRoute>} />
             <Route path="/share/detail/:id" element={<ShareDetail />} />
             <Route path="/share/report" element={<ShareReport />} />

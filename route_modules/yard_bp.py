@@ -1,10 +1,86 @@
 """마당 — 양평 단체 SNS 공지 + 관리자 직접 등록 + 마을행사 연동 + 댓글"""
 import os
+import re
 from flask import Blueprint, request, jsonify, session, current_app
-from models import db, YardPost, YardComment, YardOrg, VillageEvent, User
+from models import db, YardPost, YardComment, YardOrg, YardSchedule, VillageEvent, User
 from datetime import datetime
 
 yard_bp = Blueprint('yard_bp', __name__)
+
+_WEEKDAYS_KR = ['월', '화', '수', '목', '금', '토', '일']
+
+
+def _parse_dt(s):
+    """YYYY-MM-DD 또는 YYYY-MM-DDTHH:MM → datetime. 실패 시 None"""
+    s = (s or '').strip()
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(s)
+    except ValueError:
+        try:
+            return datetime.strptime(s, '%Y-%m-%d')
+        except ValueError:
+            return None
+
+
+def _event_display(p):
+    """행사 일시 표시: 09/20(일) 10:00~16:00 또는 09/20(일) 종일"""
+    if not p.event_date:
+        return ''
+    kr = _WEEKDAYS_KR[p.event_date.weekday()]
+    disp = p.event_date.strftime(f'%m/%d({kr})')
+    if p.is_allday:
+        disp += ' 종일'
+    elif p.event_date.hour or p.event_date.minute:
+        disp += ' ' + p.event_date.strftime('%H:%M')
+        if p.event_end:
+            disp += '~' + p.event_end.strftime('%H:%M')
+    return disp
+
+
+def _apply_display(p):
+    """신청기간 표시: 09/01 ~ 09/15 (시간 있으면 포함)"""
+    if not p.apply_start:
+        return ''
+    s = p.apply_start.strftime('%m/%d')
+    if p.apply_start.hour or p.apply_start.minute:
+        s += ' ' + p.apply_start.strftime('%H:%M')
+    e = ''
+    if p.apply_end:
+        e = p.apply_end.strftime('%m/%d')
+        if p.apply_end.hour or p.apply_end.minute:
+            e += ' ' + p.apply_end.strftime('%H:%M')
+    return f"{s} ~ {e}" if e else s
+
+
+def _sched_display(s):
+    """추가 일정 표시"""
+    if not s.event_start:
+        return ''
+    kr = _WEEKDAYS_KR[s.event_start.weekday()]
+    disp = s.event_start.strftime(f'%m/%d({kr})')
+    if s.is_allday:
+        disp += ' 종일'
+    elif s.event_start.hour or s.event_start.minute:
+        disp += ' ' + s.event_start.strftime('%H:%M')
+        if s.event_end:
+            disp += '~' + s.event_end.strftime('%H:%M')
+    return disp
+
+
+def _post_schedules(post_id):
+    """소식의 추가 일정 목록 (날짜순)"""
+    out = []
+    for s in YardSchedule.query.filter_by(post_id=post_id).order_by(YardSchedule.event_start.asc()).all():
+        out.append({
+            'id': s.id,
+            'display': _sched_display(s),
+            'event_start_iso': s.event_start.isoformat() if s.event_start else '',
+            'event_end_iso': s.event_end.isoformat() if s.event_end else '',
+            'is_allday': bool(s.is_allday),
+        })
+    return out
 
 
 def _detect_platform(url):
@@ -35,17 +111,46 @@ def _embed_url(platform, url):
 
 @yard_bp.route('/api/yard', methods=['GET'])
 def api_yard_list():
-    """마당 목록(일반 회원): 관리자 승인된 소식 + 마을행사 통합 최신순"""
+    """마당 목록(일반 회원): 승인된 소식 + 마을행사.
+    - 행사 일시가 지난 글은 숨기고, 임박한 행사부터 먼저 정렬
+    - GPS(lat/lng) 제공 시: 좌표 있는 행사는 가까운 순 우선 정렬"""
+    from datetime import datetime as _dt
+    from services.geocode import haversine
+    now = _dt.now()
+    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    gps_lat = request.args.get('lat', type=float)
+    gps_lng = request.args.get('lng', type=float)
+    has_gps = bool(gps_lat and gps_lng)
+
     items = []
     for p in YardPost.query.filter_by(is_active=True, is_approved=True).order_by(YardPost.created_at.desc()).limit(100).all():
+        # 지난 행사는 목록에서 자동 숨김
+        if p.event_date and p.event_date < today:
+            continue
+        dist_km = None
+        if has_gps and p.latitude and p.longitude:
+            try:
+                dist_km = round(haversine(gps_lat, gps_lng, p.latitude, p.longitude), 1)
+            except Exception:
+                dist_km = None
         items.append({
             'id': f'p{p.id}', 'db_id': p.id,
             'kind': 'post',
             'title': p.title, 'content': p.content or '',
             'source_type': p.source_type, 'platform': p.platform,
             'source_url': p.source_url or '',
+            'reserve_url': p.reserve_url or '',
             'author_name': p.author_name or '',
             'like_count': p.like_count or 0, 'dislike_count': p.dislike_count or 0,
+            'event_date_display': _event_display(p),
+            'event_place': p.event_place or '',
+            'contact': p.contact or '',
+            'is_allday': bool(p.is_allday),
+            'event_date_iso': p.event_date.isoformat() if p.event_date else '',
+            'event_end_iso': p.event_end.isoformat() if p.event_end else '',
+            'extra_schedules': _post_schedules(p.id),
+            'distance_km': dist_km,
             'created_at': p.created_at.isoformat() if p.created_at else '',
         })
     # 마을지기 마을행사 (진행 예정/진행중)
@@ -55,8 +160,12 @@ def api_yard_list():
             u = User.query.get(ev.created_by)
             author = (u.name or u.username) if u else ''
         ev_dt = ''
+        ev_iso = ''
+        dist_km = None
         if ev.event_date:
             ev_dt = ev.event_date.strftime('%m/%d %H:%M')
+            ev_iso = ev.event_date.isoformat()
+        # 마을행사 위치: 마을 면/리 이름으로 지오코딩 캐시가 없어 좌표 없음 → 거리 미계산
         items.append({
             'id': f'e{ev.id}', 'db_id': ev.id,
             'kind': 'event',
@@ -66,9 +175,37 @@ def api_yard_list():
             'source_url': f'/village/event/{ev.id}',
             'author_name': f'{ev.myeon or ""} {ev.ri or ""} 마을지기'.strip() or '마을지기',
             'event_date': ev_dt,
+            'event_date_iso': ev_iso,
+            'distance_km': dist_km,
             'created_at': str(ev.created_at),
         })
-    items.sort(key=lambda x: x.get('created_at') or '', reverse=True)
+
+    # 정렬
+    def _upcoming(x):
+        iso = x.get('event_date_iso') or ''
+        try:
+            d = _dt.fromisoformat(iso)
+            return d >= today
+        except Exception:
+            return False
+
+    if has_gps:
+        # GPS 있음: 좌표 있는 소식은 가까운 순 → 좌표 없는 임박 행사는 빠른 날짜순 → 나머지 최신순
+        geo = [x for x in items if x.get('distance_km') is not None]
+        dated_nogeo = [x for x in items if x.get('distance_km') is None and _upcoming(x)]
+        undated = [x for x in items if x.get('distance_km') is None and not _upcoming(x)]
+        geo.sort(key=lambda x: x['distance_km'])
+        dated_nogeo.sort(key=lambda x: x.get('event_date_iso') or '')
+        undated.sort(key=lambda x: x.get('created_at') or '', reverse=True)
+        items = geo + dated_nogeo + undated
+    else:
+        # GPS 없음: 임박한 행사순 → 날짜 없는 소식 최신순
+        dated = [x for x in items if _upcoming(x)]
+        undated = [x for x in items if not _upcoming(x)]
+        dated.sort(key=lambda x: x.get('event_date_iso') or '')
+        undated.sort(key=lambda x: x.get('created_at') or '', reverse=True)
+        items = dated + undated
+
     return jsonify({'items': items})
 
 
@@ -78,32 +215,116 @@ def _require_admin():
 
 @yard_bp.route('/api/yard', methods=['POST'])
 def api_yard_create():
-    """관리자/마을지기: 직접 입력 또는 SNS 공지 URL 등록"""
+    """관리자/마을지기: 직접 등록 (통일 형식: 제목·년월일시·장소·메모·링크·연락처)"""
     if not _require_admin():
         return jsonify({"status": "error", "msg": "권한 없음"}), 403
-    data = request.get_json(silent=True) or {}
-    title = (data.get('title') or '').strip()
-    if not title:
-        return jsonify({"status": "error", "msg": "제목을 입력하세요."}), 400
-    source_url = (data.get('source_url') or '').strip()
-    source_type = 'sns' if source_url else 'manual'
-    platform = _detect_platform(source_url) if source_url else 'web'
-    created_by = session.get('user_id')
-    if created_by and not User.query.get(created_by):
-        created_by = None
-    p = YardPost(
-        title=title[:300],
-        content=(data.get('content') or '').strip(),
-        source_type=source_type,
-        platform=platform,
-        source_url=source_url[:500],
-        author_name=(data.get('author_name') or '').strip()[:100],
-        is_approved=True,  # 관리자 직접 등록은 즉시 공개
-        created_by=created_by,
-    )
+    f = request.get_json(silent=True) or {}
+    saved = _save_yard(f, None)
+    return jsonify({"status": "success", "id": saved.id, "msg": "✅ 마당에 등록되었습니다."})
+
+
+@yard_bp.route('/api/yard/<int:post_id>', methods=['PUT'])
+def api_yard_update(post_id):
+    """관리자: 자동수집/등록 건 편집 (같은 통일 형식)"""
+    if not _require_admin():
+        return jsonify({"status": "error", "msg": "권한 없음"}), 403
+    p = YardPost.query.get(post_id)
+    if not p:
+        return jsonify({"status": "error", "msg": "없는 글입니다."}), 404
+    f = request.get_json(silent=True) or {}
+    _save_yard(f, p)
+    return jsonify({"status": "success", "id": p.id, "msg": "✅ 편집 내용이 저장되었습니다."})
+
+
+def _save_yard(f, p):
+    """생성(p=None)/편집(p=기존객체) 공통 저장. 통일 형식 필드 처리."""
+    title = (str(f.get('title') or '')).strip()
+    if p is None and not title:
+        raise ValueError("제목을 입력하세요.")
+    source_url = (str(f.get('source_url') or '')).strip()[:500]
+    reserve_url = (str(f.get('reserve_url') or '')).strip()[:500]
+    event_place = (str(f.get('event_place') or '')).strip()[:200]
+    memo = (str(f.get('content') or '')).strip()
+    author_name = (str(f.get('author_name') or '')).strip()[:100]
+    contact = (str(f.get('contact') or '')).strip()[:100]
+    apply_start = _parse_dt(str(f.get('apply_start') or ''))
+    apply_end = _parse_dt(str(f.get('apply_end') or ''))
+
+    # 일정과 동일 형식: 시작일시(YYYY-MM-DDTHH:MM) / 종료일시 / 종일
+    event_dt = event_end = None
+    is_allday = bool(f.get('is_allday'))
+    es = (str(f.get('event_start') or '')).strip()
+    ee = (str(f.get('event_end') or '')).strip()
+    # 시간 미입력(YYYY-MM-DD만) 또는 00:00이면 종일로 자동 인식
+    if es and ('T' not in es or es.endswith('T00:00')):
+        is_allday = True
+    if es:
+        try:
+            event_dt = datetime.fromisoformat(es)
+        except ValueError:
+            event_dt = None
+    if ee:
+        try:
+            event_end = datetime.fromisoformat(ee)
+        except ValueError:
+            event_end = None
+    # 구형식 fallback (수집기 호환: event_date + start_time/end_time)
+    date_str = (str(f.get('event_date') or '')).strip()
+    if not event_dt and date_str:
+        st = (str(f.get('start_time') or '')).strip()
+        et = (str(f.get('end_time') or '')).strip()
+        try:
+            d = datetime.strptime(date_str, '%Y-%m-%d')
+            event_dt = d
+            m1 = re.match(r'^(\d{1,2}):(\d{2})$', st)
+            if m1:
+                event_dt = datetime.combine(d.date(), datetime.strptime(f"{int(m1.group(1)):02d}:{m1.group(2)}", '%H:%M').time())
+            m2 = re.match(r'^(\d{1,2}):(\d{2})$', et)
+            if m2:
+                event_end = datetime.combine(d.date(), datetime.strptime(f"{int(m2.group(1)):02d}:{m2.group(2)}", '%H:%M').time())
+        except ValueError:
+            raise ValueError("날짜 형식이 올바르지 않습니다.")
+    if is_allday:
+        if event_dt:
+            event_dt = event_dt.replace(hour=0, minute=0)
+        if event_end:
+            event_end = event_end.replace(hour=23, minute=59)
+        elif event_dt:
+            event_end = event_dt.replace(hour=23, minute=59)
+
+    if p is None:
+        created_by = session.get('user_id')
+        if created_by and not User.query.get(created_by):
+            created_by = None
+        p = YardPost(
+            source_type='manual',
+            platform=_detect_platform(source_url) if source_url else 'web',
+            is_approved=True,  # 관리자 직접 등록은 즉시 공개
+            created_by=created_by,
+        )
+    p.title = title[:300] if title else p.title
+    p.content = memo
+    p.source_url = source_url
+    p.reserve_url = reserve_url or None
+    p.author_name = author_name
+    p.contact = contact
+    p.event_date = event_dt
+    p.event_end = event_end
+    p.is_allday = is_allday
+    p.event_place = event_place or None
+    p.apply_start = apply_start
+    p.apply_end = apply_end
+    # 장소 지오코딩 (거리 정렬용)
+    if event_place:
+        try:
+            from services.geocode import geocode_text
+            lat, lng = geocode_text(event_place)
+            p.latitude, p.longitude = lat, lng
+        except Exception:
+            pass
     db.session.add(p)
     db.session.commit()
-    return jsonify({"status": "success", "id": p.id, "msg": "✅ 마당에 등록되었습니다."})
+    return p
 
 
 @yard_bp.route('/api/yard/<string:fid>', methods=['DELETE'])
@@ -143,9 +364,15 @@ def api_yard_admin_list():
     for p in YardPost.query.order_by(YardPost.created_at.desc()).limit(300).all():
         out.append({
             'id': f'p{p.id}', 'db_id': p.id,
-            'title': p.title, 'content': (p.content or '')[:200],
+            'title': p.title, 'content': p.content or '',
             'source_type': p.source_type, 'platform': p.platform,
-            'source_url': p.source_url or '', 'author_name': p.author_name or '',
+            'source_url': p.source_url or '', 'reserve_url': p.reserve_url or '', 'author_name': p.author_name or '',
+            'contact': p.contact or '', 'is_allday': bool(p.is_allday),
+            'apply_display': _apply_display(p),
+            'event_date_display': _event_display(p),
+            'event_date_iso': p.event_date.isoformat() if p.event_date else '',
+            'event_end_iso': p.event_end.isoformat() if p.event_end else '',
+            'event_place': p.event_place or '',
             'is_approved': bool(p.is_approved), 'is_active': bool(p.is_active),
             'created_at': p.created_at.isoformat() if p.created_at else '',
         })
@@ -224,6 +451,48 @@ def api_yard_org_delete(org_id):
     return jsonify({"status": "success", "msg": "단체 등록이 삭제되었습니다."})
 
 
+@yard_bp.route('/api/yard/<int:post_id>/schedules', methods=['POST'])
+def api_yard_schedule_add(post_id):
+    """관리자: 추가 일정 등록 (한 소식에 여러 일정)"""
+    if not _require_admin():
+        return jsonify({"status": "error", "msg": "권한 없음"}), 403
+    p = YardPost.query.get(post_id)
+    if not p:
+        return jsonify({"status": "error", "msg": "없는 글입니다."}), 404
+    f = request.get_json(silent=True) or {}
+    try:
+        start = datetime.fromisoformat((str(f.get('event_start') or ''))[:16])
+    except ValueError:
+        return jsonify({"status": "error", "msg": "시작일시 형식이 올바르지 않습니다."}), 400
+    end = None
+    try:
+        ee = (str(f.get('event_end') or ''))[:16]
+        if ee:
+            end = datetime.fromisoformat(ee)
+    except ValueError:
+        end = None
+    is_allday = bool(f.get('is_allday'))
+    if is_allday:
+        start = start.replace(hour=0, minute=0)
+        end = (end or start).replace(hour=23, minute=59)
+    s = YardSchedule(post_id=post_id, event_start=start, event_end=end, is_allday=is_allday)
+    db.session.add(s)
+    db.session.commit()
+    return jsonify({"status": "success", "id": s.id, "display": _sched_display(s), "msg": "✅ 추가 일정이 등록되었습니다."})
+
+
+@yard_bp.route('/api/yard/schedules/<int:sid>', methods=['DELETE'])
+def api_yard_schedule_delete(sid):
+    if not _require_admin():
+        return jsonify({"status": "error", "msg": "권한 없음"}), 403
+    s = YardSchedule.query.get(sid)
+    if not s:
+        return jsonify({"status": "error", "msg": "없는 일정입니다."}), 404
+    db.session.delete(s)
+    db.session.commit()
+    return jsonify({"status": "success", "msg": "추가 일정이 삭제되었습니다."})
+
+
 @yard_bp.route('/api/yard/<int:post_id>', methods=['GET'])
 def api_yard_get(post_id):
     p = YardPost.query.get(post_id)
@@ -243,7 +512,14 @@ def api_yard_get(post_id):
     return jsonify({
         'id': p.id, 'title': p.title, 'content': p.content or '',
         'source_type': p.source_type, 'platform': p.platform,
-        'source_url': p.source_url or '', 'author_name': p.author_name or '',
+        'source_url': p.source_url or '', 'reserve_url': p.reserve_url or '', 'author_name': p.author_name or '',
+        'contact': p.contact or '', 'is_allday': bool(p.is_allday),
+        'apply_display': _apply_display(p),
+        'event_date_display': _event_display(p),
+        'extra_schedules': _post_schedules(p.id),
+        'event_place': p.event_place or '',
+        'event_date_iso': p.event_date.isoformat() if p.event_date else '',
+        'event_end_iso': p.event_end.isoformat() if p.event_end else '',
         'like_count': p.like_count or 0, 'dislike_count': p.dislike_count or 0,
         'embed_url': _embed_url(p.platform, p.source_url) if p.platform in ('instagram', 'facebook') else '',
         'comments': comments,
