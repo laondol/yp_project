@@ -1,5 +1,6 @@
 import requests
 import re
+import time
 import xml.etree.ElementTree as ET
 from datetime import datetime
 
@@ -144,6 +145,7 @@ def collect_labor_news():
                 total_new += 1
 
             db.session.commit()
+            time.sleep(0.3)  # Naver 429 방지 (요청 간격)
 
         except Exception as e:
             api_calls_fail += 1
@@ -335,6 +337,7 @@ def collect_kr_yp_news():
     for source in KR_YP_SOURCES:
         for sq in search_queries[:2]:
             try:
+                time.sleep(0.3)  # Naver 429 방지 (요청 간격)
                 query = f"{source['query']} {sq}"
                 params = {"query": query, "display": 5, "sort": "date"}
                 res = requests.get(
