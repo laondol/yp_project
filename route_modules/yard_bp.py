@@ -145,6 +145,7 @@ def api_yard_list():
             'like_count': p.like_count or 0, 'dislike_count': p.dislike_count or 0,
             'event_date_display': _event_display(p),
             'event_place': p.event_place or '',
+            'apply_display': _apply_display(p),
             'contact': p.contact or '',
             'is_allday': bool(p.is_allday),
             'event_date_iso': p.event_date.isoformat() if p.event_date else '',
