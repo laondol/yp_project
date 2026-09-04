@@ -39,7 +39,6 @@ export default function AdminNews() {
   const [importMsgOk, setImportMsgOk] = useState(false)
   const [cleaning, setCleaning] = useState(false)
   const [collecting, setCollecting] = useState(false)
-  const [collectingWorld, setCollectingWorld] = useState(false)
 
   const fetchNews = async () => {
     setLoading(true)
@@ -130,24 +129,6 @@ export default function AdminNews() {
       alert('오류가 발생했습니다.')
     } finally {
       setCollecting(false)
-    }
-  }
-
-  const handleCollectWorld = async () => {
-    setCollectingWorld(true)
-    try {
-      const res = await fetch('/admin/news/collect-world', { method: 'POST' })
-      const data = await res.json()
-      if (data.status === 'success' || data.success) {
-        alert(data.msg || `✅ ${data.count}건 수집 완료`)
-        fetchNews()
-      } else {
-        alert(data.msg || data.message || '수집 실패')
-      }
-    } catch {
-      alert('오류가 발생했습니다.')
-    } finally {
-      setCollectingWorld(false)
     }
   }
 
@@ -245,9 +226,6 @@ export default function AdminNews() {
             </button>
             <button className="btn btn-outline-info btn-sm ms-1" onClick={handleCollect} disabled={collecting}>
               {collecting ? '⏳ 수집 중...' : '📰 대한민국·양평 자동 수집'}
-            </button>
-            <button className="btn btn-outline-primary btn-sm ms-1" onClick={handleCollectWorld} disabled={collectingWorld}>
-              {collectingWorld ? '⏳ 수집 중...' : '🌐 세계뉴스 자동 수집'}
             </button>
             <small className="text-muted ms-2">
               {tab === 'world' ? '🌐 영문 검색 → 해외 기사 중심' : '🇰🇷 국내 검색 → 한국 뉴스 중심'} (자동 가져오기)
