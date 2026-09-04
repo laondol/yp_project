@@ -10,6 +10,11 @@ interface YardAdminItem {
   created_at: string
 }
 
+interface YardOrgItem {
+  id: number; name: string; url: string
+  platform: string; is_active: boolean; created_at: string
+}
+
 const platformLabel: Record<string, string> = {
   facebook: '📘 페이스북', kakao: '💛 카카오', naverblog: '📝 블로그',
   navercafe: '💬 카페', instagram: '📸 인스타그램', web: '🌐 웹', '': '📢 직접 등록',
@@ -17,6 +22,7 @@ const platformLabel: Record<string, string> = {
 
 export default function AdminYard() {
   const [items, setItems] = useState<YardAdminItem[]>([])
+  const [orgs, setOrgs] = useState<YardOrgItem[]>([])
   const [loading, setLoading] = useState(true)
   const [msg, setMsg] = useState('')
   const [msgOk, setMsgOk] = useState(false)
@@ -27,15 +33,46 @@ export default function AdminYard() {
   const [authorName, setAuthorName] = useState('')
   const [saving, setSaving] = useState(false)
 
+  const [orgName, setOrgName] = useState('')
+  const [orgUrl, setOrgUrl] = useState('')
+  const [orgMsg, setOrgMsg] = useState('')
+  const [orgMsgOk, setOrgMsgOk] = useState(false)
+
   const load = () => {
     setLoading(true)
-    fetch('/api/yard/admin')
-      .then(r => r.json())
-      .then(d => setItems(d.items || []))
-      .catch(() => {})
+    Promise.all([
+      fetch('/api/yard/admin').then(r => r.json()).catch(() => ({})),
+      fetch('/api/yard/orgs').then(r => r.json()).catch(() => ({})),
+    ])
+      .then(([yardData, orgData]) => {
+        setItems(yardData.items || [])
+        setOrgs(orgData.orgs || [])
+      })
       .finally(() => setLoading(false))
   }
   useEffect(() => { load() }, [])
+
+  const handleOrgCreate = async (e: React.FormEvent) => {
+    e.preventDefault()
+    try {
+      const res = await fetch('/api/yard/orgs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: orgName.trim(), url: orgUrl.trim() }),
+      })
+      const data = await res.json()
+      setOrgMsg(data.msg || '등록'); setOrgMsgOk(data.status === 'success')
+      if (data.status === 'success') { setOrgName(''); setOrgUrl(''); load() }
+    } catch { setOrgMsg('오류'); setOrgMsgOk(false) }
+  }
+
+  const handleOrgDelete = async (orgId: number) => {
+    if (!confirm('단체 등록을 삭제하시겠습니까? (자동수집이 중단됩니다)')) return
+    const res = await fetch(`/api/yard/orgs/${orgId}`, { method: 'DELETE' })
+    const data = await res.json()
+    setOrgMsg(data.msg || ''); setOrgMsgOk(data.status === 'success')
+    if (data.status === 'success') load()
+  }
 
   const handleCreate = async () => {
     if (!title.trim()) return
@@ -79,6 +116,41 @@ export default function AdminYard() {
   return (
     <div className="container mt-4">
       <h3 className="fw-bold mb-4">🌾 마당 관리</h3>
+
+      {/* 단체 등록 (자동수집) */}
+      <div className="card border-0 shadow-sm mb-4 p-4" style={{ borderRadius: 16, borderLeft: '4px solid #20c997' }}>
+        <h6 className="fw-bold mb-2">🏢 자동수집 단체 등록</h6>
+        <p className="small text-muted mb-2">
+          네이버 블로그 주소를 등록하면 <strong>최신 글을 매일 자동으로 수집</strong>합니다 (승인 후 공개).
+          페이스북·카카오·밴드는 자동수집이 불가하여 게시물 URL을 "직접 등록"으로 올려 주세요.
+        </p>
+        <form onSubmit={handleOrgCreate}>
+          <div className="d-flex gap-2 mb-2 flex-wrap">
+            <input className="form-control" style={{ maxWidth: 220 }} placeholder="단체명 (예: 두물붙농부시장)"
+              value={orgName} onChange={e => setOrgName(e.target.value)} required />
+            <input className="form-control" style={{ maxWidth: 320 }} placeholder="블로그 주소 (예: https://blog.naver.com/fromnature2019)"
+              value={orgUrl} onChange={e => setOrgUrl(e.target.value)} required />
+            <button type="submit" className="btn btn-success">➕ 단체 등록</button>
+          </div>
+          <span className={`small ${orgMsgOk ? 'text-success' : 'text-danger'}`}>{orgMsg}</span>
+        </form>
+        {orgs.length > 0 && (
+          <div className="mt-2">
+            {orgs.map(o => (
+              <div key={o.id} className="d-flex justify-content-between align-items-center border rounded p-2 mb-1">
+                <div className="small">
+                  <strong>{o.name}</strong>
+                  <span className={`badge ms-2 ${o.platform === 'naverblog' ? 'bg-success' : 'bg-secondary'}`}>
+                    {o.platform === 'naverblog' ? '자동수집 ON' : '참고용 (자동수집 불가)'}
+                  </span>
+                  <div className="text-muted" style={{ fontSize: '0.75rem' }}>{o.url}</div>
+                </div>
+                <button className="btn btn-sm btn-outline-danger" onClick={() => handleOrgDelete(o.id)}>삭제</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* 등록 폼 */}
       <div className="card border-0 shadow-sm mb-4 p-4" style={{ borderRadius: 16 }}>

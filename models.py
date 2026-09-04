@@ -414,6 +414,18 @@ class YardComment(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.now)
 
 
+class YardOrg(db.Model):
+    """마당 — 자동수집 대상 단체 등록 (블로그/카페 주소)"""
+    __tablename__ = 'yard_org'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)   # 단체명 (검색어로 사용)
+    url = db.Column(db.String(500))                    # 블로그/카페 주소 (참고용)
+    platform = db.Column(db.String(20), default='')    # naverblog, navercafe, facebook, kakao, instagram, band
+    is_active = db.Column(db.Boolean, default=True)
+    created_by = db.Column(db.Integer, db.ForeignKey('user.id'))
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+
 class VillageAlert(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(200), nullable=False)

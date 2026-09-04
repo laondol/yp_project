@@ -1,7 +1,7 @@
 """마당 — 양평 단체 SNS 공지 + 관리자 직접 등록 + 마을행사 연동 + 댓글"""
 import os
 from flask import Blueprint, request, jsonify, session, current_app
-from models import db, YardPost, YardComment, VillageEvent, User
+from models import db, YardPost, YardComment, YardOrg, VillageEvent, User
 from datetime import datetime
 
 yard_bp = Blueprint('yard_bp', __name__)
@@ -166,6 +166,62 @@ def api_yard_approve(fid):
     db.session.commit()
     return jsonify({"status": "success", "is_approved": p.is_approved,
                     "msg": "✅ 승인 — 마당에 공개되었습니다." if p.is_approved else "승인 해제 — 비공개로 전환했습니다."})
+
+
+@yard_bp.route('/api/yard/orgs', methods=['GET'])
+def api_yard_orgs():
+    """관리자: 자동수집 대상 단체 목록"""
+    if not _require_admin():
+        return jsonify({"status": "error", "msg": "권한 없음"}), 403
+    orgs = []
+    for o in YardOrg.query.order_by(YardOrg.created_at.desc()).all():
+        orgs.append({
+            'id': o.id, 'name': o.name, 'url': o.url or '',
+            'platform': o.platform or '', 'is_active': bool(o.is_active),
+            'created_at': o.created_at.isoformat() if o.created_at else '',
+        })
+    return jsonify({'orgs': orgs})
+
+
+@yard_bp.route('/api/yard/orgs', methods=['POST'])
+def api_yard_org_create():
+    """관리자: 단체 등록 (단체명 + 블로그/카페 주소). 블로그/카페만 자동수집 가능"""
+    if not _require_admin():
+        return jsonify({"status": "error", "msg": "권한 없음"}), 403
+    data = request.get_json(silent=True) or {}
+    name = (data.get('name') or '').strip()[:100]
+    if not name:
+        return jsonify({"status": "error", "msg": "단체명을 입력하세요."}), 400
+    url = (data.get('url') or '').strip()[:500]
+    if not url:
+        return jsonify({"status": "error", "msg": "블로그 또는 카페 주소를 입력하세요."}), 400
+    # 네이버 블로그/카페 우선 판별 (자동수집 가능 플랫폼)
+    u = url.lower()
+    if 'blog.naver.com' in u:
+        platform = 'naverblog'
+    elif 'cafe.naver.com' in u or 'm.cafe.naver.com' in u:
+        platform = 'navercafe'
+    else:
+        platform = _detect_platform(url)
+    if YardOrg.query.filter_by(name=name).first():
+        return jsonify({"status": "error", "msg": "이미 등록된 단체명입니다."}), 400
+    o = YardOrg(name=name, url=url[:500], platform=platform, created_by=session.get('user_id'))
+    db.session.add(o)
+    db.session.commit()
+    auto_note = ' → 자동수집 대상에 포함됩니다.' if platform in ('naverblog', 'navercafe') else ' → 이 플랫폼은 자동수집이 불가하여 관리자 직접 등록용으로 참고 저장됩니다.'
+    return jsonify({"status": "success", "id": o.id, "platform": platform, "msg": f"✅ 단체 등록 완료{auto_note}"})
+
+
+@yard_bp.route('/api/yard/orgs/<int:org_id>', methods=['DELETE'])
+def api_yard_org_delete(org_id):
+    if not _require_admin():
+        return jsonify({"status": "error", "msg": "권한 없음"}), 403
+    o = YardOrg.query.get(org_id)
+    if not o:
+        return jsonify({"status": "error", "msg": "없는 단체입니다."}), 404
+    db.session.delete(o)
+    db.session.commit()
+    return jsonify({"status": "success", "msg": "단체 등록이 삭제되었습니다."})
 
 
 @yard_bp.route('/api/yard/<int:post_id>', methods=['GET'])
