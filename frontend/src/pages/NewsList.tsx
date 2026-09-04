@@ -130,6 +130,11 @@ export default function NewsList() {
               <div className="modal-body" style={{ lineHeight: 1.8 }}>{content.content}</div>
               <div className="modal-footer">
                 <small className="text-muted">{content.category}</small>
+                {content.content.includes('관련 공사 현안') && (
+                  <button className="btn btn-sm btn-outline-warning" onClick={() => { setContent(null); navigate('/construction?tab=building') }}>
+                    🚧 공사현안 지도에서 보기
+                  </button>
+                )}
                 <button className="btn btn-sm btn-secondary" onClick={() => setContent(null)}>닫기</button>
               </div>
             </div>

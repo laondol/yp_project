@@ -589,7 +589,7 @@ export default function ConstructionPage() {
                           <div className="d-flex gap-3 flex-wrap small text-muted">
                             {n.start_date && <span>📅 시작: {formatKST(n.start_date, { year: 'numeric', month: '2-digit', day: '2-digit' })}</span>}
                             {n.end_date && <span>➡ 종료: {formatKST(n.end_date, { year: 'numeric', month: '2-digit', day: '2-digit' })}</span>}
-                            {n.source && <span>🔗 {{ gg_traffic: '경기교통정보', cals: '건설CALS', yp_gov: '양평군청' }[n.source] || n.source}</span>}
+                            {n.source && <span>🔗 {{ gg_traffic: '경기교통정보', cals: '건설CALS', yp_gov: '양평군청', news: '뉴스현안' }[n.source] || n.source}</span>}
                             {n.distance_km != null && <span>📏 {n.distance_km}km</span>}
                           </div>
                           {n.latitude && n.longitude && (

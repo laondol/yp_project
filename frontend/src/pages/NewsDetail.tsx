@@ -102,6 +102,14 @@ export default function NewsDetail() {
           <div className="" style={{ fontSize: '1.05rem', lineHeight: 1.8 }}>
             {article.content || article.summary || ''}
           </div>
+          {(article.content || '').includes('관련 공사 현안') && (
+            <button
+              className="btn btn-outline-warning btn-sm mt-3"
+              onClick={() => navigate('/construction?tab=building')}
+            >
+              🚧 관련 공사현안 지도에서 보기
+            </button>
+          )}
           <hr className="my-4" />
           <div className="d-flex flex-wrap align-items-center gap-3">
             <div className="d-flex gap-2">
