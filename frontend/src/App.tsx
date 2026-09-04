@@ -37,6 +37,9 @@ import SchedulePage from './pages/SchedulePage'
 import AdminDashboard from './pages/AdminDashboard'
 import AdminUsers from './pages/AdminUsers'
 import AdminNews from './pages/AdminNews'
+import YardPage from './pages/YardPage'
+import YardDetail from './pages/YardDetail'
+import AdminYard from './pages/AdminYard'
 import AdminShareReports from './pages/AdminShareReports'
 import AdminStores from './pages/AdminStores'
 import AdminAlerts from './pages/AdminAlerts'
@@ -153,6 +156,9 @@ export default function App() {
             <Route path="/terms" element={<TermsPage />} />
             <Route path="/charter" element={<CharterPage />} />
             <Route path="/share" element={<ShareList />} />
+            <Route path="/yard" element={<YardPage />} />
+            <Route path="/yard/:id" element={<YardDetail />} />
+            <Route path="/admin/yard" element={<ProtectedRoute><AdminYard /></ProtectedRoute>} />
             <Route path="/share/detail/:id" element={<ShareDetail />} />
             <Route path="/share/report" element={<ShareReport />} />
             <Route path="/share/edit/:id" element={<ShareEdit />} />

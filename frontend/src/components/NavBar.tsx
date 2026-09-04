@@ -309,6 +309,7 @@ export default function NavBar() {
                 <li style={{ fontSize: '0.7rem', fontWeight: 700, color: '#27ae60', textTransform: 'uppercase', letterSpacing: 1, padding: '6px 16px 2px' }}>소식</li>
                 <li><a className="dropdown-item" href="/kr-yp-news">대한민국과양평</a></li>
                 <li><a className="dropdown-item" href="/world-news">세계와양평</a></li>
+                <li><a className="dropdown-item" href="/yard">🌾 마당</a></li>
                 <li><a className="dropdown-item" href="/share">공유마당</a></li>
                 <li><a className="dropdown-item" href="/construction">📍 위치기반안내</a></li>
               </ul>

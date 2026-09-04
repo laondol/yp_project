@@ -380,6 +380,22 @@ class ConstructionNotice(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now)
 
+class YardPost(db.Model):
+    """마당 — 양평 단체 SNS 공지 + 관리자 직접 등록 소식"""
+    __tablename__ = 'yard_post'
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(300), nullable=False)
+    content = db.Column(db.Text)
+    source_type = db.Column(db.String(20), default='manual')  # manual(직접), sns(SNS URL), village_event(마을행사 링크)
+    platform = db.Column(db.String(20), default='')  # instagram, facebook, kakao, web, ''
+    source_url = db.Column(db.String(500))
+    author_name = db.Column(db.String(100))         # 단체명/작성자
+    is_active = db.Column(db.Boolean, default=True)
+    created_by = db.Column(db.Integer, db.ForeignKey('user.id'))
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+
 class VillageAlert(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(200), nullable=False)
