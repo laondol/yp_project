@@ -25,6 +25,15 @@ def _is_korean_source(url):
             return True
     return False
 
+def _is_junk_title(title):
+    """자기 참조 정크 제목 제거 (예: '중부시사신문 - 중부시사신문')"""
+    t = (title or '').strip()
+    if ' - ' in t:
+        left, _, right = t.rpartition(' - ')
+        if left.strip() and left.strip() == right.strip():
+            return True
+    return False
+
 LABOR_SOURCES = [
     {"name": "매일노동뉴스", "domain": "labortoday.co.kr", "query": "site:labortoday.co.kr"},
     {"name": "참세상", "domain": "pressian.com", "query": "site:pressian.com"},
@@ -49,6 +58,18 @@ KR_YP_SOURCES = [
     {"name": "한겨레", "domain": "hani.co.kr", "query": "site:hani.co.kr"},
     {"name": "JTBC", "domain": "jtbc.joins.com", "query": "site:jtbc.joins.com"},
     {"name": "동아일보", "domain": "donga.com", "query": "site:donga.com"},
+]
+
+# 양평 지역 전문 언론 (API 키 불필요, Google News RSS로 항상 수집)
+LOCAL_MEDIA_SOURCES = [
+    {"name": "양평백운신문", "domain": "ypnews.kr"},
+    {"name": "경기문화신문", "domain": "kgmunwha.com"},
+    {"name": "뉴스팍", "domain": "newspak.co.kr"},
+    {"name": "누리일보", "domain": "nuriilbo.com"},
+    {"name": "광흥타임즈", "domain": "ghtimes.kr"},
+    {"name": "정도일보", "domain": "jungdoilbo.com"},
+    {"name": "비전21뉴스", "domain": "vision21.kr"},
+    {"name": "경기인뉴스", "domain": "gninews.co.kr"},
 ]
 
 WORLD_SOURCES = [
@@ -298,6 +319,79 @@ def collect_kr_yp_news_rss():
     return total_new, 'rss'
 
 
+def collect_kr_yp_local_rss():
+    """양평 지역 전문 언론(백운신문 등)을 Google News RSS로 수집 (API 키 불필요, 항상 실행)"""
+    from models import db, NewsArticle
+
+    total_new = 0
+    seen_urls = set()
+    now = datetime.now()
+
+    for source in LOCAL_MEDIA_SOURCES:
+        try:
+            res = requests.get(
+                "https://news.google.com/rss/search",
+                params={'q': f"site:{source['domain']}", 'hl': 'ko', 'gl': 'KR', 'ceid': 'KR:ko'},
+                headers={'User-Agent': 'Mozilla/5.0'}, timeout=15
+            )
+            if res.status_code != 200:
+                print(f"[KR_YP_LOCAL] {source['name']}: Google RSS 오류 {res.status_code}")
+                continue
+
+            root = ET.fromstring(res.content)
+            items = root.findall('.//item')
+            saved_cnt = 0
+
+            for item in items[:5]:
+                title = (item.findtext('title', '') or '').strip()
+                link = (item.findtext('link', '') or '').strip()
+                desc = (item.findtext('description', '') or '').strip()
+
+                if not title or not link or link in seen_urls:
+                    continue
+                seen_urls.add(link)
+
+                title = re.sub(r'<[^>]+>', '', title)
+                desc = re.sub(r'<[^>]+>', '', desc)
+                if len(title) < 5:
+                    continue
+
+                # 지역 매체 기사는 양평 관련만 저장 (타 지역 소식 제거)
+                if not any(kw in title + desc for kw in KR_YP_KEYWORDS):
+                    continue
+
+                if _is_junk_title(title):
+                    continue
+
+                existing = NewsArticle.query.filter_by(source_url=link).first()
+                if existing:
+                    continue
+
+                article = NewsArticle(
+                    title=title,
+                    summary=desc[:200],
+                    content=f"<p>{desc[:1000]}</p>",
+                    source_url=link,
+                    category="양평소식",
+                    is_selected=False,
+                    is_ai_generated=True,
+                    kr_yp_ai_approved=True,
+                    ai_reason=f"자동수집(RSS·지역언론): {source['name']} ({now.strftime('%m/%d')})",
+                )
+                db.session.add(article)
+                total_new += 1
+                saved_cnt += 1
+
+            db.session.commit()
+            print(f"[KR_YP_LOCAL] {source['name']}: {len(items)}건 수신, 신규 {saved_cnt}건 저장")
+
+        except Exception as e:
+            print(f"[KR_YP_LOCAL] {source['name']} 수집 오류: {e}")
+            continue
+
+    return total_new
+
+
 def collect_kr_yp_news():
     """10개 주요 언론사에서 대한민국·양평 관련 뉴스를 자동 수집하여 DB에 저장"""
     from flask import current_app
@@ -327,77 +421,82 @@ def collect_kr_yp_news():
     now = datetime.now()
 
     search_queries = [
-        "양평군 뉴스",
-        "경기도 양평",
-        "양평 한강",
-        "대한민국 정책 뉴스",
-        "국내 경제 뉴스",
+        "물가 인상", "정부 지원금", "농산물 가격", "복지 지원",
+        "의료 정책", "고용 정책", "귀농 귀촌", "전원주택",
+        "대중교통", "국내 경제",
     ]
 
-    for source in KR_YP_SOURCES:
-        for sq in search_queries[:2]:
-            try:
-                time.sleep(0.3)  # Naver 429 방지 (요청 간격)
-                query = f"{source['query']} {sq}"
-                params = {"query": query, "display": 5, "sort": "date"}
-                res = requests.get(
-                    "https://openapi.naver.com/v1/search/news.json",
-                    headers=headers, params=params, timeout=10
-                )
-                if res.status_code != 200:
-                    api_calls_fail += 1
-                    print(f"[KR_YP_NEWS] {source['name']}: Naver API 오류 {res.status_code} (query: {query[:30]})")
-                    continue
-                api_calls_ok += 1
-
-                items = res.json().get('items', [])
-                print(f"[KR_YP_NEWS] {source['name']} + '{sq}': {len(items)}건 수신")
-                for item in items:
-                    url = item.get('link', '')
-                    if not url or url in seen_urls:
-                        continue
-                    seen_urls.add(url)
-
-                    title = re.sub(r'<[^>]+>', '', item.get('title', ''))
-                    desc = re.sub(r'<[^>]+>', '', item.get('description', ''))
-                    if not title or len(title) < 5:
-                        continue
-
-                    existing = NewsArticle.query.filter_by(source_url=url).first()
-                    if existing:
-                        skipped_existing += 1
-                        continue
-
-                    is_yp = any(kw in title + desc for kw in ["양평", "경기도"])
-                    category = "양평소식" if is_yp else "대한민국뉴스"
-
-                    article = NewsArticle(
-                        title=f"[{source['name']}] {title}",
-                        summary=desc[:200],
-                        content=f"<p>{desc[:1000]}</p>",
-                        source_url=url,
-                        category=category,
-                        is_selected=False,
-                        is_ai_generated=True,
-                        kr_yp_ai_approved=True,
-                        ai_reason=f"자동수집: {source['name']} ({now.strftime('%m/%d')})",
-                    )
-                    db.session.add(article)
-                    total_new += 1
-
-                db.session.commit()
-
-            except Exception as e:
+    for sq in search_queries:
+        try:
+            time.sleep(0.3)  # Naver 429 방지 (요청 간격)
+            params = {"query": sq, "display": 5, "sort": "date"}
+            res = requests.get(
+                "https://openapi.naver.com/v1/search/news.json",
+                headers=headers, params=params, timeout=10
+            )
+            if res.status_code != 200:
                 api_calls_fail += 1
-                print(f"[KR_YP_NEWS] {source['name']} 수집 오류: {e}")
+                print(f"[KR_YP_NEWS] '{sq}': Naver API 오류 {res.status_code}")
                 continue
+            api_calls_ok += 1
+
+            items = res.json().get('items', [])
+            saved_cnt = 0
+            for item in items:
+                url = item.get('link', '')
+                if not url or url in seen_urls:
+                    continue
+                seen_urls.add(url)
+                if not _is_korean_source(url):
+                    continue
+
+                title = re.sub(r'<[^>]+>', '', item.get('title', ''))
+                desc = re.sub(r'<[^>]+>', '', item.get('description', ''))
+                if not title or len(title) < 5:
+                    continue
+
+                existing = NewsArticle.query.filter_by(source_url=url).first()
+                if existing:
+                    skipped_existing += 1
+                    continue
+
+                is_yp = any(kw in title + desc for kw in ["양평", "경기도"])
+                category = "양평소식" if is_yp else "대한민국뉴스"
+
+                article = NewsArticle(
+                    title=title,
+                    summary=desc[:200],
+                    content=f"<p>{desc[:1000]}</p>",
+                    source_url=url,
+                    category=category,
+                    is_selected=False,
+                    is_ai_generated=True,
+                    kr_yp_ai_approved=True,
+                    ai_reason=f"자동수집: {sq} ({now.strftime('%m/%d')})",
+                )
+                db.session.add(article)
+                total_new += 1
+                saved_cnt += 1
+
+            db.session.commit()
+            print(f"[KR_YP_NEWS] '{sq}': {len(items)}건 수신, 신규 {saved_cnt}건 저장")
+
+        except Exception as e:
+            api_calls_fail += 1
+            print(f"[KR_YP_NEWS] '{sq}' 수집 오류: {e}")
+            continue
+
+    # 2) 지역 전문 언론(백운신문 등) — Naver API와 무관하게 항상 Google News RSS로 병행
+    local_new = collect_kr_yp_local_rss()
+    total_new += local_new
 
     # Naver API 전체 실패 시 Google News RSS로 fallback (API 키 불필요)
     if api_calls_ok == 0 and api_calls_fail > 0:
         print("[KR_YP_NEWS] Naver API 전체 실패 - Google News RSS fallback 사용")
-        return collect_kr_yp_news_rss()
+        rss_new, mode = collect_kr_yp_news_rss()
+        return rss_new + local_new, mode
 
-    print(f"[KR_YP_NEWS] 자동 수집 완료: 신규 {total_new}건, 기존 스킵 {skipped_existing}건 (API 성공 {api_calls_ok}/실패 {api_calls_fail})")
+    print(f"[KR_YP_NEWS] 자동 수집 완료: 신규 {total_new}건 (전국 주제 + 지역언론 {local_new}건), 기존 스킵 {skipped_existing}건 (API 성공 {api_calls_ok}/실패 {api_calls_fail})")
     return total_new, 'naver'
 
 
