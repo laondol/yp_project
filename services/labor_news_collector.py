@@ -84,8 +84,8 @@ def collect_labor_news():
         return 0
 
     if not client_id or not client_secret:
-        print("[LABOR_NEWS] Naver API 키 없음")
-        return 0
+        print("[LABOR_NEWS] Naver API 키 없음 - Google News RSS fallback 사용")
+        return collect_labor_news_rss()
 
     headers = {
         "X-Naver-Client-Id": client_id,
@@ -94,6 +94,8 @@ def collect_labor_news():
 
     total_new = 0
     seen_urls = set()
+    api_calls_ok = 0
+    api_calls_fail = 0
     now = datetime.now()
 
     for source in LABOR_SOURCES:
@@ -105,8 +107,10 @@ def collect_labor_news():
                 headers=headers, params=params, timeout=10
             )
             if res.status_code != 200:
+                api_calls_fail += 1
                 print(f"[LABOR_NEWS] {source['name']}: Naver API 오류 {res.status_code}")
                 continue
+            api_calls_ok += 1
 
             items = res.json().get('items', [])
             for item in items:
@@ -142,11 +146,84 @@ def collect_labor_news():
             db.session.commit()
 
         except Exception as e:
+            api_calls_fail += 1
             print(f"[LABOR_NEWS] {source['name']} 수집 오류: {e}")
             continue
 
-    print(f"[LABOR_NEWS] 자동 수집 완료: {total_new}건 신규 등록")
-    return total_new
+    # Naver API 전체 실패 시 Google News RSS로 fallback (API 키 불필요)
+    if api_calls_ok == 0 and api_calls_fail > 0:
+        print("[LABOR_NEWS] Naver API 전체 실패 - Google News RSS fallback 사용")
+        return collect_labor_news_rss()
+
+    print(f"[LABOR_NEWS] 자동 수집 완료: {total_new}건 신규 등록 (API 성공 {api_calls_ok}/실패 {api_calls_fail})")
+    return total_new, 'naver'
+
+
+def collect_labor_news_rss():
+    """Naver API 실패 시 Google News RSS로 노동뉴스 수집 (API 키 불필요)"""
+    from models import db, LaborNewsArticle
+
+    total_new = 0
+    seen_urls = set()
+    now = datetime.now()
+
+    for source in LABOR_SOURCES:
+        try:
+            q = f"{source['query']} 노동"
+            res = requests.get(
+                "https://news.google.com/rss/search",
+                params={'q': q, 'hl': 'ko', 'gl': 'KR', 'ceid': 'KR:ko'},
+                headers={'User-Agent': 'Mozilla/5.0'}, timeout=15
+            )
+            if res.status_code != 200:
+                print(f"[LABOR_RSS] {source['name']}: Google RSS 오류 {res.status_code}")
+                continue
+
+            root = ET.fromstring(res.content)
+            items = root.findall('.//item')
+            print(f"[LABOR_RSS] {source['name']}: {len(items)}건 수신")
+
+            for item in items[:5]:
+                title = (item.findtext('title', '') or '').strip()
+                link = (item.findtext('link', '') or '').strip()
+                desc = (item.findtext('description', '') or '').strip()
+
+                if not title or not link or link in seen_urls:
+                    continue
+                seen_urls.add(link)
+
+                title = re.sub(r'<[^>]+>', '', title)
+                desc = re.sub(r'<[^>]+>', '', desc)
+                if len(title) < 5:
+                    continue
+
+                existing = LaborNewsArticle.query.filter_by(source_url=link).first()
+                if existing:
+                    continue
+
+                article = LaborNewsArticle(
+                    title=f"[{source['name']}] {title}",
+                    summary=desc[:200],
+                    content=f"<p>{desc[:1000]}</p>",
+                    source_url=link,
+                    source_name=source['name'],
+                    category="정책정보",
+                    is_selected=False,
+                    is_ai_generated=True,
+                    ai_reason=f"자동 수집(RSS): {source['name']} ({now.strftime('%m/%d')})",
+                    created_by=None,
+                )
+                db.session.add(article)
+                total_new += 1
+
+            db.session.commit()
+
+        except Exception as e:
+            print(f"[LABOR_RSS] {source['name']} 수집 오류: {e}")
+            continue
+
+    print(f"[LABOR_RSS] RSS 수집 완료: {total_new}건 신규 등록")
+    return total_new, 'rss'
 
 
 def collect_kr_yp_news_rss():
@@ -216,7 +293,7 @@ def collect_kr_yp_news_rss():
                 continue
 
     print(f"[KR_YP_RSS] RSS 수집 완료: {total_new}건 신규 등록")
-    return total_new
+    return total_new, 'rss'
 
 
 def collect_kr_yp_news():
@@ -318,7 +395,7 @@ def collect_kr_yp_news():
         return collect_kr_yp_news_rss()
 
     print(f"[KR_YP_NEWS] 자동 수집 완료: 신규 {total_new}건, 기존 스킵 {skipped_existing}건 (API 성공 {api_calls_ok}/실패 {api_calls_fail})")
-    return total_new
+    return total_new, 'naver'
 
 
 def collect_world_news():

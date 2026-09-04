@@ -229,8 +229,8 @@ def run_labor_news_scheduler(app):
         try:
             with app.app_context():
                 from services.labor_news_collector import collect_labor_news
-                count = collect_labor_news()
-                print(f"[LABOR_NEWS_SCHEDULER] 수집 완료: {count}건")
+                count, mode = collect_labor_news()
+                print(f"[LABOR_NEWS_SCHEDULER] 수집 완료: {count}건 (경로: {mode})")
         except Exception as e:
             print(f"[LABOR_NEWS_SCHEDULER] 오류: {e}")
         time.sleep(86400)
@@ -253,8 +253,8 @@ def run_kr_yp_news_scheduler(app):
         try:
             with app.app_context():
                 from services.labor_news_collector import collect_kr_yp_news
-                count = collect_kr_yp_news()
-                print(f"[KR_YP_NEWS_SCHEDULER] 자동 수집 완료: {count}건")
+                count, mode = collect_kr_yp_news()
+                print(f"[KR_YP_NEWS_SCHEDULER] 자동 수집 완료: {count}건 (경로: {mode})")
         except Exception as e:
             print(f"[KR_YP_NEWS_SCHEDULER] 수집 오류: {e}")
         time.sleep(86400)

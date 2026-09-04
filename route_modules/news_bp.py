@@ -984,8 +984,12 @@ def admin_labor_news_collect():
         return jsonify({"status": "error", "msg": "권한 없음"}), 403
     try:
         from services.labor_news_collector import collect_labor_news
-        count = collect_labor_news()
-        return jsonify({"status": "success", "count": count, "msg": f"✅ {count}건의 노동뉴스를 수집했습니다."})
+        count, mode = collect_labor_news()
+        if mode == 'rss':
+            msg = f"⚠️ Naver API 실패 - Google News RSS로 {count}건의 노동뉴스를 수집했습니다."
+        else:
+            msg = f"✅ {count}건의 노동뉴스를 수집했습니다."
+        return jsonify({"status": "success", "count": count, "mode": mode, "msg": msg})
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -997,8 +1001,12 @@ def admin_news_collect():
         return jsonify({"status": "error", "msg": "권한 없음"}), 403
     try:
         from services.labor_news_collector import collect_kr_yp_news
-        count = collect_kr_yp_news()
-        return jsonify({"status": "success", "count": count, "msg": f"✅ {count}건의 대한민국·양평 뉴스를 수집했습니다."})
+        count, mode = collect_kr_yp_news()
+        if mode == 'rss':
+            msg = f"⚠️ Naver API 실패 - Google News RSS로 {count}건의 대한민국·양평 뉴스를 수집했습니다."
+        else:
+            msg = f"✅ {count}건의 대한민국·양평 뉴스를 수집했습니다."
+        return jsonify({"status": "success", "count": count, "mode": mode, "msg": msg})
     except Exception as e:
         import traceback
         traceback.print_exc()
