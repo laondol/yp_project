@@ -386,14 +386,31 @@ class YardPost(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(300), nullable=False)
     content = db.Column(db.Text)
-    source_type = db.Column(db.String(20), default='manual')  # manual(직접), sns(SNS URL), village_event(마을행사 링크)
-    platform = db.Column(db.String(20), default='')  # instagram, facebook, kakao, web, ''
+    source_type = db.Column(db.String(20), default='manual')  # manual(직접), sns(SNS URL), sns_auto(자동수집), village_event(마을행사 링크)
+    platform = db.Column(db.String(20), default='')  # instagram, facebook, kakao, naverblog, navercafe, web, ''
     source_url = db.Column(db.String(500))
     author_name = db.Column(db.String(100))         # 단체명/작성자
+    like_count = db.Column(db.Integer, default=0)
+    dislike_count = db.Column(db.Integer, default=0)
     is_active = db.Column(db.Boolean, default=True)
     created_by = db.Column(db.Integer, db.ForeignKey('user.id'))
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+
+class YardComment(db.Model):
+    """마당 게시물 댓글 (사진/링크 첨부 지원)"""
+    __tablename__ = 'yard_comment'
+    id = db.Column(db.Integer, primary_key=True)
+    post_id = db.Column(db.Integer, db.ForeignKey('yard_post.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+    author_name = db.Column(db.String(50))
+    content = db.Column(db.Text)
+    image_path = db.Column(db.String(300))
+    link_url = db.Column(db.String(500))
+    like_count = db.Column(db.Integer, default=0)
+    dislike_count = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.now)
 
 
 class VillageAlert(db.Model):

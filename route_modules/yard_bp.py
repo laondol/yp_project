@@ -1,6 +1,7 @@
-"""마당 — 양평 단체 SNS 공지 + 관리자 직접 등록 + 마을행사 연동"""
+"""마당 — 양평 단체 SNS 공지 + 관리자 직접 등록 + 마을행사 연동 + 댓글"""
+import os
 from flask import Blueprint, request, jsonify, session, current_app
-from models import db, YardPost, VillageEvent, User
+from models import db, YardPost, YardComment, VillageEvent, User
 from datetime import datetime
 
 yard_bp = Blueprint('yard_bp', __name__)
@@ -44,6 +45,7 @@ def api_yard_list():
             'source_type': p.source_type, 'platform': p.platform,
             'source_url': p.source_url or '',
             'author_name': p.author_name or '',
+            'like_count': p.like_count or 0, 'dislike_count': p.dislike_count or 0,
             'created_at': p.created_at.isoformat() if p.created_at else '',
         })
     # 마을지기 마을행사 (진행 예정/진행중)
@@ -136,10 +138,105 @@ def api_yard_get(post_id):
     p = YardPost.query.get(post_id)
     if not p or not p.is_active:
         return jsonify({"status": "error", "msg": "없거나 숨긴 글입니다."}), 404
+    comments = []
+    for c in YardComment.query.filter_by(post_id=p.id).order_by(YardComment.created_at.asc()).all():
+        user = User.query.get(c.user_id) if c.user_id else None
+        uname = (user.name or user.username) if user else (c.author_name or '익명')
+        comments.append({
+            'id': c.id, 'user_id': c.user_id, 'author_name': uname or '익명',
+            'content': c.content or '', 'image_path': c.image_path or '',
+            'link_url': c.link_url or '',
+            'like_count': c.like_count or 0, 'dislike_count': c.dislike_count or 0,
+            'created_at': c.created_at.isoformat() if c.created_at else '',
+        })
     return jsonify({
         'id': p.id, 'title': p.title, 'content': p.content or '',
         'source_type': p.source_type, 'platform': p.platform,
         'source_url': p.source_url or '', 'author_name': p.author_name or '',
+        'like_count': p.like_count or 0, 'dislike_count': p.dislike_count or 0,
         'embed_url': _embed_url(p.platform, p.source_url) if p.platform in ('instagram', 'facebook') else '',
+        'comments': comments,
         'created_at': str(p.created_at),
     })
+
+
+@yard_bp.route('/api/yard/<int:post_id>/vote', methods=['POST'])
+def api_yard_vote(post_id):
+    """마당 글 좋아요/싫어요 (로그인 필요)"""
+    if not session.get('user_id'):
+        return jsonify({"status": "error", "msg": "로그인 후 이용하세요."}), 401
+    p = YardPost.query.get(post_id)
+    if not p:
+        return jsonify({"status": "error", "msg": "없는 글입니다."}), 404
+    if request.is_json:
+        vote = (request.get_json(silent=True) or {}).get('vote', '')
+    else:
+        vote = request.form.get('vote', '')
+    if vote == 'like':
+        p.like_count = (p.like_count or 0) + 1
+    elif vote == 'dislike':
+        p.dislike_count = (p.dislike_count or 0) + 1
+    else:
+        return jsonify({"status": "error", "msg": "잘못된 요청"}), 400
+    db.session.commit()
+    return jsonify({"status": "success", "like_count": p.like_count, "dislike_count": p.dislike_count})
+
+
+@yard_bp.route('/api/yard/<int:post_id>/comment', methods=['POST'])
+def api_yard_comment(post_id):
+    """댓글 등록 (사진·링크 첨부 가능, 로그인 필요)"""
+    if not session.get('user_id'):
+        return jsonify({"status": "error", "msg": "로그인 후 이용하세요."}), 401
+    p = YardPost.query.get(post_id)
+    if not p:
+        return jsonify({"status": "error", "msg": "없는 글입니다."}), 404
+
+    content = (request.form.get('content') or '').strip()
+    link_url = (request.form.get('link_url') or '').strip()[:500]
+    image_path = ''
+    file = request.files.get('image')
+    if file and file.filename:
+        from services.security import secure_save
+        upload_dir = os.path.join(current_app.root_path, 'static', 'uploads', 'yard_comments')
+        try:
+            image_path = secure_save(file, upload_dir, max_mb=10)
+        except ValueError as e:
+            return jsonify({"status": "error", "msg": str(e)[:80]}), 400
+
+    if not content and not image_path and not link_url:
+        return jsonify({"status": "error", "msg": "내용/사진/링크 중 하나는 입력하세요."}), 400
+
+    user = User.query.get(session.get('user_id'))
+    uid = session.get('user_id')
+    if uid and not user:
+        uid = None
+    c = YardComment(
+        post_id=p.id,
+        user_id=uid,
+        author_name=(user.name or user.username) if user else '회원',
+        content=content[:2000],
+        image_path=image_path,
+        link_url=link_url,
+    )
+    db.session.add(c)
+    db.session.commit()
+    return jsonify({
+        "status": "success", "id": c.id,
+        "comment": {'id': c.id, 'user_id': c.user_id, 'author_name': c.author_name,
+                    'content': c.content, 'image_path': c.image_path, 'link_url': c.link_url,
+                    'like_count': 0, 'dislike_count': 0,
+                    'created_at': c.created_at.isoformat() if c.created_at else ''},
+        "msg": "댓글이 등록되었습니다.",
+    })
+
+
+@yard_bp.route('/api/yard/comment/<int:comment_id>', methods=['DELETE'])
+def api_yard_comment_delete(comment_id):
+    c = YardComment.query.get(comment_id)
+    if not c:
+        return jsonify({"status": "error", "msg": "없는 댓글입니다."}), 404
+    if session.get('user_id') != c.user_id and session.get('role') not in ['admin', 'leader']:
+        return jsonify({"status": "error", "msg": "권한 없음"}), 403
+    db.session.delete(c)
+    db.session.commit()
+    return jsonify({"status": "success", "msg": "댓글이 삭제되었습니다."})

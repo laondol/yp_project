@@ -97,6 +97,30 @@ def run_construction_extract_scheduler(app):
             time.sleep(3600)
 
 
+def run_yard_collect_scheduler(app):
+    """마당 소식 자동 수집 (네이버 블로그/카페 양평 단체 공지) - 기동 2분 후 1회, 이후 매일 08:00"""
+    time.sleep(120)
+    while True:
+        try:
+            with app.app_context():
+                from services.yard_collector import collect_yard_notices
+                n = collect_yard_notices()
+                print(f"[YARD_COLLECT] 마당 소식 수집: {n}건")
+        except Exception as e:
+            print(f"[YARD_COLLECT] 오류: {e}")
+        try:
+            now = datetime.now()
+            target = now.replace(hour=8, minute=0, second=0, microsecond=0)
+            if now >= target:
+                from datetime import timedelta
+                target += timedelta(days=1)
+            wait_sec = (target - now).total_seconds()
+            print(f"[YARD_COLLECT] 다음 수집까지 {wait_sec/3600:.1f}시간 대기")
+            time.sleep(wait_sec)
+        except Exception:
+            time.sleep(3600)
+
+
 def run_monthly_payout(app):
     time.sleep(30)
     while True:
@@ -301,6 +325,7 @@ def main():
     # threading.Thread(target=run_rag_rebuild, args=(app,), daemon=True).start()
     threading.Thread(target=run_monthly_payout, args=(app,), daemon=True).start()
     threading.Thread(target=run_construction_extract_scheduler, args=(app,), daemon=True).start()
+    threading.Thread(target=run_yard_collect_scheduler, args=(app,), daemon=True).start()
     threading.Thread(target=run_labor_news_scheduler, args=(app,), daemon=True).start()
     threading.Thread(target=run_kr_yp_news_scheduler, args=(app,), daemon=True).start()
     threading.Thread(target=run_world_news_scheduler, args=(app,), daemon=True).start()
