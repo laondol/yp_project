@@ -92,6 +92,13 @@ JSON으로만 출력:
             if d:
                 event_start_iso = (start_dt or datetime.combine(d.date(), datetime.min.time())).strftime('%Y-%m-%dT%H:%M')
                 event_end_iso = end_dt.strftime('%Y-%m-%dT%H:%M') if end_dt else event_start_iso
+            else:
+                # 행사인데 날짜 정보가 아예 없으면 수집 제외 (일정 없는 단순 홍보)
+                return {'is_event': False, 'event_date': '', 'event_place': '', 'event_date_obj': None,
+                        'event_end_obj': None, 'start_time': '', 'end_time': '',
+                        'event_start': '', 'event_end': '', 'is_allday': False,
+                        'contact': str(result.get('contact') or '')[:100],
+                        'reserve_url': str(result.get('reserve_url') or '')[:500]}
             return {
                 'is_event': bool(result.get('is_event')),
                 'event_date': str(result.get('event_date') or '')[:60],

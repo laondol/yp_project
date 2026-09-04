@@ -25,12 +25,16 @@ def _parse_dt(s):
 
 
 def _event_display(p):
-    """행사 일시 표시: 09/20(일) 10:00~16:00 또는 09/20(일) 종일"""
+    """행사 일시 표시: 09/20(일) 10:00~16:00, 09/20(일)~09/22(화) 종일 등"""
     if not p.event_date:
         return ''
     kr = _WEEKDAYS_KR[p.event_date.weekday()]
     disp = p.event_date.strftime(f'%m/%d({kr})')
     if p.is_allday:
+        # 종일: 종료일이 시작일과 다르면 기간 표시
+        if p.event_end and p.event_end.date() != p.event_date.date():
+            ke = _WEEKDAYS_KR[p.event_end.weekday()]
+            disp += '~' + p.event_end.strftime(f'%m/%d({ke})')
         disp += ' 종일'
     elif p.event_date.hour or p.event_date.minute:
         disp += ' ' + p.event_date.strftime('%H:%M')
@@ -450,6 +454,103 @@ def api_yard_org_delete(org_id):
     db.session.delete(o)
     db.session.commit()
     return jsonify({"status": "success", "msg": "단체 등록이 삭제되었습니다."})
+
+
+@yard_bp.route('/api/yard/import-link', methods=['POST'])
+def api_yard_import_link():
+    """관리자: 링크로 추가하기 — 원문 페이지를 읽어 AI로 항목을 채운 초안 생성"""
+    if not _require_admin():
+        return jsonify({"status": "error", "msg": "권한 없음"}), 403
+    f = request.get_json(silent=True) or {}
+    url = (str(f.get('url') or '')).strip()
+    if not url.startswith('http'):
+        return jsonify({"status": "error", "msg": "URL을 입력하세요."}), 400
+
+    # 1) 페이지 가져오기 (뉴스 import-url과 동일한 정제 방식)
+    import requests as _requests
+    fetch_url = url
+    # 네이버 블로그: iframe 구조라 본문이 안 잡힘 → PostView 본문 주소로 변환
+    m_blog = re.search(r'blog\.naver\.com/([A-Za-z0-9_-]+)/(\d+)', url)
+    if m_blog:
+        fetch_url = f"https://blog.naver.com/PostView.naver?blogId={m_blog.group(1)}&logNo={m_blog.group(2)}"
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        resp = _requests.get(fetch_url, headers=headers, timeout=15)
+        resp.encoding = 'utf-8'
+        html = resp.text
+    except Exception as e:
+        return jsonify({"status": "error", "msg": f"페이지를 가져올 수 없습니다: {str(e)[:80]}"}), 400
+    try:
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(html, 'html.parser')
+        for tag in soup(['script', 'style', 'nav', 'footer', 'header', 'aside', 'iframe', 'noscript', 'form', 'button']):
+            tag.decompose()
+        raw_text = soup.get_text(separator='\n', strip=True)
+        lines = [l for l in raw_text.split('\n') if len(l.strip()) >= 3]
+        body_text = '\n'.join(lines)[:3000]
+    except Exception:
+        body_text = html[:2000]
+
+    # 2) AI 항목 추출
+    from services.news_service import _motif_text
+    result = _motif_text(
+        "당신은 양평 지역 소식 편집자입니다. 웹페이지 내용에서 행사/모임/모집 정보를 추출해 구조화합니다. JSON으로만 답하며, 없는 정보는 빈 문자열로 둡니다. 추측하지 마세요.",
+        f"""오늘 날짜: {datetime.now().strftime('%Y-%m-%d (%A)')}
+
+다음 웹페이지 내용에서 마당 소식 항목을 추출하세요. 연도는 오늘 날짜 기준으로 판단하세요.
+JSON으로만 출력:
+{{"title": "제목 (필수, 웹페이지의 실제 제목)", "event_date_iso": "행사 시작날짜 YYYY-MM-DD (행사가 아니면 빈 문자열)", "start_time": "시작시간 HH:MM (없으면 빈 문자열)", "end_time": "종료시간 HH:MM (없으면 빈 문자열)", "event_place": "장소", "apply_start": "신청기간 시작 YYYY-MM-DD", "apply_end": "신청기간 종료 YYYY-MM-DD", "contact": "연락처(전화번호)", "reserve_url": "본문 속 예약/신청 페이지 링크(http)", "memo": "행사 내용 요약 3~5문장"}}
+
+웹페이지 제목: {soup.title.string[:100] if soup.title and soup.title.string else url}
+웹페이지 내용:
+{body_text[:2500]}""",
+        format_json=True,
+    )
+    if not isinstance(result, dict) or not result.get('title'):
+        return jsonify({"status": "error", "msg": "페이지에서 항목을 추출하지 못했습니다. ✏️ 새 소식 등록으로 직접 입력해 주세요."}), 400
+
+    # 3) 초안 생성 (관리자 등록이므로 즉시 공개, 이후 편집창에서 보완)
+    def _dt(date_s, time_s):
+        try:
+            d = datetime.strptime(str(date_s)[:10], '%Y-%m-%d')
+            m = re.match(r'^(\d{1,2}):(\d{2})$', str(time_s or '').strip())
+            if m:
+                return datetime.combine(d.date(), datetime.strptime(f"{int(m.group(1)):02d}:{m.group(2)}", '%H:%M').time())
+            return d
+        except ValueError:
+            return None
+
+    created_by = session.get('user_id')
+    if created_by and not User.query.get(created_by):
+        created_by = None
+    p = YardPost(
+        title=str(result.get('title') or '')[:300],
+        content=str(result.get('memo') or '')[:2000],
+        source_type='manual',
+        platform=_detect_platform(url),
+        source_url=url[:500],
+        reserve_url=(str(result.get('reserve_url') or ''))[:500] or None,
+        contact=(str(result.get('contact') or ''))[:100] or None,
+        author_name=soup.title.string[:100].strip() if soup.title and soup.title.string else '',
+        event_date=_dt(result.get('event_date_iso'), result.get('start_time')),
+        event_end=_dt(result.get('event_date_iso'), result.get('end_time')) if result.get('end_time') else None,
+        event_place=(str(result.get('event_place') or ''))[:200] or None,
+        apply_start=_parse_dt(str(result.get('apply_start') or '')),
+        apply_end=_parse_dt(str(result.get('apply_end') or '')),
+        is_allday=not str(result.get('start_time') or '').strip(),
+        is_approved=True,
+        created_by=created_by,
+    )
+    if p.event_place:
+        try:
+            from services.geocode import geocode_text
+            lat, lng = geocode_text(p.event_place)
+            p.latitude, p.longitude = lat, lng
+        except Exception:
+            pass
+    db.session.add(p)
+    db.session.commit()
+    return jsonify({"status": "success", "id": p.id, "msg": "✅ 초안이 생성되었습니다. 편집창에서 내용을 확인·보완 후 저장하세요."})
 
 
 @yard_bp.route('/api/yard/<int:post_id>/schedules', methods=['POST'])

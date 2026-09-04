@@ -59,6 +59,30 @@ export default function AdminYard() {
     window.open(`/yard/edit?id=${it.db_id}`, 'yardEdit', 'width=620,height=900')
   }
 
+  // 링크로 추가하기: 페이지를 읽어 AI로 초안 생성 후 편집창 오픈
+  const [impUrl, setImpUrl] = useState('')
+  const [importing, setImporting] = useState(false)
+
+  const handleImportLink = async () => {
+    if (!impUrl.trim()) return
+    setImporting(true)
+    try {
+      const res = await fetch('/api/yard/import-link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: impUrl.trim() }),
+      })
+      const data = await res.json()
+      setMsg(data.msg || ''); setMsgOk(data.status === 'success')
+      if (data.status === 'success' && data.id) {
+        setImpUrl('')
+        load()
+        window.open(`/yard/edit?id=${data.id}`, 'yardEdit', 'width=620,height=900')
+      }
+    } catch { setMsg('가져오기 오류'); setMsgOk(false) }
+    setImporting(false)
+  }
+
   const handleOrgCreate = async (e: React.FormEvent) => {
     e.preventDefault()
     try {
@@ -149,7 +173,16 @@ export default function AdminYard() {
             <h6 className="fw-bold mb-0">✏️ 소식 등록/편집</h6>
             <small className="text-muted">독립창에서 편집하며 원문 페이지를 나란히 열어두고 내용을 입력하세요.</small>
           </div>
-          <button className="btn btn-success btn-lg px-4" onClick={openCreate}>✏️ 새 소식 등록</button>
+          <div className="d-flex gap-2 flex-wrap">
+            <div className="d-flex gap-1">
+              <input type="url" className="form-control" style={{ width: 280 }} placeholder="링크로 추가 (블로그·카페·SNS 주소)"
+                value={impUrl} onChange={e => setImpUrl(e.target.value)} />
+              <button className="btn btn-outline-success text-nowrap" onClick={handleImportLink} disabled={importing || !impUrl.trim()}>
+                {importing ? '⏳ 가져오는 중...' : '🔗 링크로 추가'}
+              </button>
+            </div>
+            <button className="btn btn-success btn-lg px-4" onClick={openCreate}>✏️ 새 소식 등록</button>
+          </div>
         </div>
         <span className={`small mt-1 d-block ${msgOk ? 'text-success' : 'text-danger'}`}>{msg}</span>
       </div>
