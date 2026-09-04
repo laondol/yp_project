@@ -8,7 +8,9 @@ interface YardAdminItem {
   source_url?: string; reserve_url?: string; author_name?: string
   contact?: string
   event_date_display?: string
+  apply_display?: string; apply_allday?: boolean
   event_date_iso?: string; event_end_iso?: string; event_place?: string
+  extra_schedules?: { id: number; display: string }[]
   is_approved: boolean; is_active: boolean
   created_at: string
 }
@@ -197,24 +199,43 @@ export default function AdminYard() {
         ) : (
           <div className="row g-3">
             {pending.map(p => (
-              <div key={p.id} className="col-12 col-md-6 col-lg-4" style={{ minWidth: 320 }}>
+              <div key={p.id} className="col-12 col-md-6 col-lg-4" style={{ minWidth: 340 }}>
                 <div className="card border-0 shadow-sm h-100" style={{ borderRadius: 16 }}>
                   <div className="card-body p-3 d-flex flex-column">
-                    <div className="small text-muted mb-1">#{p.db_id}</div>
+                    <div className="small text-muted mb-1">#{p.db_id} · 수집 {formatKST(p.created_at, { month: '2-digit', day: '2-digit' })}</div>
+                    {/* 제목 (맨위) */}
                     <h6 className="fw-bold mb-2">{p.title}</h6>
+
+                    {/* 1차 일정 */}
                     {p.event_date_display && <div className="small mb-1">📅 {p.event_date_display}</div>}
+                    {/* 추가 일정 */}
+                    {(p.extra_schedules || []).map((s: any) => (
+                      <div key={s.id} className="small mb-1">📅 {s.display}</div>
+                    ))}
+
                     {p.event_place && <div className="small mb-1">📍 {p.event_place}</div>}
-                    {p.reserve_url && (
-                      <a href={p.reserve_url} target="_blank" rel="noopener noreferrer" className="small mb-1 text-success">
-                        🎟️ 예약/신청 바로가기
-                      </a>
+
+                    {/* 신청기간 + 예약/신청 바로가기 + 연락처 */}
+                    {(p.apply_display || p.reserve_url || p.contact) && (
+                      <div className="small mb-1 p-2 bg-light rounded">
+                        {p.apply_display && <div>🗓️ 신청기간: {p.apply_display}</div>}
+                        {p.reserve_url && (
+                          <div>🎟️ <a href={p.reserve_url} target="_blank" rel="noopener noreferrer" className="text-success fw-bold">
+                            예약/신청 바로가기
+                          </a></div>
+                        )}
+                        {p.contact && <div>📞 {p.contact}</div>}
+                      </div>
                     )}
+
+                    {/* 메모 (스크롤로 전체 내용 확인) */}
                     {p.content && (
                       <div className="small text-muted mb-2 p-2 bg-light rounded"
-                        style={{ maxHeight: 90, overflowY: 'auto', whiteSpace: 'pre-wrap' }}>
+                        style={{ maxHeight: 110, overflowY: 'auto', whiteSpace: 'pre-wrap' }}>
                         {p.content}
                       </div>
                     )}
+
                     <div className="small text-muted mb-1">👤 {p.author_name || '관리자'}</div>
                     {p.source_url && (
                       <a href={p.source_url} target="_blank" rel="noopener noreferrer" className="small text-primary mb-2">
@@ -226,7 +247,6 @@ export default function AdminYard() {
                       <button className="btn btn-sm btn-success" onClick={() => handleApprove(p.id)}>✅ 승인</button>
                       <button className="btn btn-sm btn-outline-danger" onClick={() => handleDelete(p.id)}>🗑️ 삭제</button>
                     </div>
-                    <div className="small text-muted mt-1">{formatKST(p.created_at, { month: '2-digit', day: '2-digit' })}</div>
                   </div>
                 </div>
               </div>
@@ -245,24 +265,43 @@ export default function AdminYard() {
         ) : (
           <div className="row g-3">
             {approved.map(p => (
-              <div key={p.id} className="col-12 col-md-6 col-lg-4" style={{ minWidth: 320 }}>
+              <div key={p.id} className="col-12 col-md-6 col-lg-4" style={{ minWidth: 340 }}>
                 <div className="card border-0 shadow-sm h-100" style={{ borderRadius: 16 }}>
                   <div className="card-body p-3 d-flex flex-column">
-                    <div className="small text-muted mb-1">#{p.db_id}</div>
+                    <div className="small text-muted mb-1">#{p.db_id} · 등록 {formatKST(p.created_at, { month: '2-digit', day: '2-digit' })}</div>
+                    {/* 제목 (맨위) */}
                     <h6 className="fw-bold mb-2">{p.title}</h6>
+
+                    {/* 1차 일정 */}
                     {p.event_date_display && <div className="small mb-1">📅 {p.event_date_display}</div>}
+                    {/* 추가 일정 */}
+                    {(p.extra_schedules || []).map((s: any) => (
+                      <div key={s.id} className="small mb-1">📅 {s.display}</div>
+                    ))}
+
                     {p.event_place && <div className="small mb-1">📍 {p.event_place}</div>}
-                    {p.reserve_url && (
-                      <a href={p.reserve_url} target="_blank" rel="noopener noreferrer" className="small mb-1 text-success">
-                        🎟️ 예약/신청 바로가기
-                      </a>
+
+                    {/* 신청기간 + 예약/신청 바로가기 + 연락처 */}
+                    {(p.apply_display || p.reserve_url || p.contact) && (
+                      <div className="small mb-1 p-2 bg-light rounded">
+                        {p.apply_display && <div>🗓️ 신청기간: {p.apply_display}</div>}
+                        {p.reserve_url && (
+                          <div>🎟️ <a href={p.reserve_url} target="_blank" rel="noopener noreferrer" className="text-success fw-bold">
+                            예약/신청 바로가기
+                          </a></div>
+                        )}
+                        {p.contact && <div>📞 {p.contact}</div>}
+                      </div>
                     )}
+
+                    {/* 메모 (스크롤로 전체 내용 확인) */}
                     {p.content && (
                       <div className="small text-muted mb-2 p-2 bg-light rounded"
-                        style={{ maxHeight: 90, overflowY: 'auto', whiteSpace: 'pre-wrap' }}>
+                        style={{ maxHeight: 110, overflowY: 'auto', whiteSpace: 'pre-wrap' }}>
                         {p.content}
                       </div>
                     )}
+
                     <div className="small text-muted mb-1">👤 {p.author_name || '관리자'}</div>
                     {p.source_url && (
                       <a href={p.source_url} target="_blank" rel="noopener noreferrer" className="small text-primary mb-2">
@@ -274,7 +313,6 @@ export default function AdminYard() {
                       <button className="btn btn-sm btn-outline-secondary" title="비공개로 전환" onClick={() => handleApprove(p.id)}>숨기기</button>
                       <button className="btn btn-sm btn-outline-danger" onClick={() => handleDelete(p.id)}>🗑️ 삭제</button>
                     </div>
-                    <div className="small text-muted mt-1">{formatKST(p.created_at, { month: '2-digit', day: '2-digit' })}</div>
                   </div>
                 </div>
               </div>

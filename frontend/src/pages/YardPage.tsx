@@ -11,6 +11,7 @@ interface YardItem {
   title: string; content: string
   source_type?: string; platform?: string
   source_url?: string; reserve_url?: string; author_name?: string
+  contact?: string
   like_count?: number; dislike_count?: number
   event_date?: string; event_date_display?: string; event_date_iso?: string; event_end_iso?: string
   event_place?: string
@@ -219,8 +220,8 @@ export default function YardPage() {
                     {/* 장소 */}
                     {it.event_place && <div className="small mb-1">📍 {it.event_place}</div>}
 
-                    {/* 신청기간 + 예약/신청 바로가기 */}
-                    {(it.apply_display || it.reserve_url) && (
+                    {/* 신청기간 + 예약/신청 바로가기 + 연락처 */}
+                    {(it.apply_display || it.reserve_url || it.contact) && (
                       <div className="small mb-1 p-2 bg-light rounded">
                         {it.apply_display && <div>🗓️ 신청기간: {it.apply_display}</div>}
                         {it.reserve_url && (
@@ -228,6 +229,7 @@ export default function YardPage() {
                             예약/신청 바로가기
                           </a></div>
                         )}
+                        {it.contact && <div>📞 {it.contact}</div>}
                       </div>
                     )}
 

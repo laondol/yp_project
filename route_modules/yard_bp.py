@@ -392,6 +392,7 @@ def api_yard_admin_list():
             'event_date_display': _event_display(p),
             'event_date_iso': p.event_date.isoformat() if p.event_date else '',
             'event_end_iso': p.event_end.isoformat() if p.event_end else '',
+            'extra_schedules': _post_schedules(p.id),
             'event_place': p.event_place or '',
             'is_approved': bool(p.is_approved), 'is_active': bool(p.is_active),
             'created_at': p.created_at.isoformat() if p.created_at else '',
