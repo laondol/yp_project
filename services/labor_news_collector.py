@@ -149,6 +149,76 @@ def collect_labor_news():
     return total_new
 
 
+def collect_kr_yp_news_rss():
+    """Naver API 실패 시 Google News RSS로 대한민국·양평 뉴스 수집 (API 키 불필요)"""
+    from models import db, NewsArticle
+
+    total_new = 0
+    seen_urls = set()
+    now = datetime.now()
+
+    search_queries = ["양평", "경기도 양평"]
+
+    for source in KR_YP_SOURCES:
+        for sq in search_queries:
+            try:
+                q = f"site:{source['domain']} {sq}"
+                res = requests.get(
+                    "https://news.google.com/rss/search",
+                    params={'q': q, 'hl': 'ko', 'gl': 'KR', 'ceid': 'KR:ko'},
+                    headers={'User-Agent': 'Mozilla/5.0'}, timeout=15
+                )
+                if res.status_code != 200:
+                    print(f"[KR_YP_RSS] {source['name']}: Google RSS 오류 {res.status_code}")
+                    continue
+
+                root = ET.fromstring(res.content)
+                items = root.findall('.//item')
+                print(f"[KR_YP_RSS] {source['name']} + '{sq}': {len(items)}건 수신")
+
+                for item in items[:5]:
+                    title = (item.findtext('title', '') or '').strip()
+                    link = (item.findtext('link', '') or '').strip()
+                    desc = (item.findtext('description', '') or '').strip()
+
+                    if not title or not link or link in seen_urls:
+                        continue
+                    seen_urls.add(link)
+
+                    title = re.sub(r'<[^>]+>', '', title)
+                    desc = re.sub(r'<[^>]+>', '', desc)
+                    if len(title) < 5:
+                        continue
+
+                    existing = NewsArticle.query.filter_by(source_url=link).first()
+                    if existing:
+                        continue
+
+                    is_yp = any(kw in title + desc for kw in ["양평", "경기도"])
+                    article = NewsArticle(
+                        title=f"[{source['name']}] {title}",
+                        summary=desc[:200],
+                        content=f"<p>{desc[:1000]}</p>",
+                        source_url=link,
+                        category="양평소식" if is_yp else "대한민국뉴스",
+                        is_selected=False,
+                        is_ai_generated=True,
+                        kr_yp_ai_approved=True,
+                        ai_reason=f"자동수집(RSS): {source['name']} ({now.strftime('%m/%d')})",
+                    )
+                    db.session.add(article)
+                    total_new += 1
+
+                db.session.commit()
+
+            except Exception as e:
+                print(f"[KR_YP_RSS] {source['name']} 수집 오류: {e}")
+                continue
+
+    print(f"[KR_YP_RSS] RSS 수집 완료: {total_new}건 신규 등록")
+    return total_new
+
+
 def collect_kr_yp_news():
     """10개 주요 언론사에서 대한민국·양평 관련 뉴스를 자동 수집하여 DB에 저장"""
     from flask import current_app
@@ -162,8 +232,8 @@ def collect_kr_yp_news():
         return 0
 
     if not client_id or not client_secret:
-        print("[KR_YP_NEWS] Naver API 키 없음")
-        return 0
+        print("[KR_YP_NEWS] Naver API 키 없음 - Google News RSS fallback 사용")
+        return collect_kr_yp_news_rss()
 
     headers = {
         "X-Naver-Client-Id": client_id,
@@ -241,6 +311,11 @@ def collect_kr_yp_news():
                 api_calls_fail += 1
                 print(f"[KR_YP_NEWS] {source['name']} 수집 오류: {e}")
                 continue
+
+    # Naver API 전체 실패 시 Google News RSS로 fallback (API 키 불필요)
+    if api_calls_ok == 0 and api_calls_fail > 0:
+        print("[KR_YP_NEWS] Naver API 전체 실패 - Google News RSS fallback 사용")
+        return collect_kr_yp_news_rss()
 
     print(f"[KR_YP_NEWS] 자동 수집 완료: 신규 {total_new}건, 기존 스킵 {skipped_existing}건 (API 성공 {api_calls_ok}/실패 {api_calls_fail})")
     return total_new
