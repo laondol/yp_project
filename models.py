@@ -392,6 +392,7 @@ class YardPost(db.Model):
     author_name = db.Column(db.String(100))         # 단체명/작성자
     like_count = db.Column(db.Integer, default=0)
     dislike_count = db.Column(db.Integer, default=0)
+    is_approved = db.Column(db.Boolean, default=False)  # 관리자 승인 후 공개 (자동수집건)
     is_active = db.Column(db.Boolean, default=True)
     created_by = db.Column(db.Integer, db.ForeignKey('user.id'))
     created_at = db.Column(db.DateTime, default=datetime.now)

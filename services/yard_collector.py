@@ -81,6 +81,7 @@ def collect_yard_notices():
                     platform=platform,
                     source_url=url[:500],
                     author_name=author,
+                    is_approved=False,  # 관리자 승인 후 공개
                     created_at=now,
                 )
                 db.session.add(p)
@@ -92,6 +93,19 @@ def collect_yard_notices():
         except Exception as e:
             print(f'[YARD] {q} 수집 오류: {e}')
             continue
+
+    # 오래된 자동수집건 정리 (30일 초과)
+    from datetime import timedelta
+    cutoff = datetime.now() - timedelta(days=30)
+    old = YardPost.query.filter(
+        YardPost.source_type == 'sns_auto',
+        YardPost.created_at < cutoff,
+    )
+    old_cnt = old.count()
+    if old_cnt:
+        old.delete(synchronize_session=False)
+        db.session.commit()
+        print(f'[YARD] 30일 경과 자동수집건 {old_cnt}건 삭제')
 
     print(f'[YARD] 마당 소식 자동 수집 완료: 신규 {total_new}건')
     return total_new

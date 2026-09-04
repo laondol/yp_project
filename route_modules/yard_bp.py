@@ -35,9 +35,9 @@ def _embed_url(platform, url):
 
 @yard_bp.route('/api/yard', methods=['GET'])
 def api_yard_list():
-    """마당 목록: 등록 소식(SNS+직접) + 마을행사(VillageEvent) 통합 최신순"""
+    """마당 목록(일반 회원): 관리자 승인된 소식 + 마을행사 통합 최신순"""
     items = []
-    for p in YardPost.query.filter_by(is_active=True).order_by(YardPost.created_at.desc()).limit(100).all():
+    for p in YardPost.query.filter_by(is_active=True, is_approved=True).order_by(YardPost.created_at.desc()).limit(100).all():
         items.append({
             'id': f'p{p.id}', 'db_id': p.id,
             'kind': 'post',
@@ -98,6 +98,7 @@ def api_yard_create():
         platform=platform,
         source_url=source_url[:500],
         author_name=(data.get('author_name') or '').strip()[:100],
+        is_approved=True,  # 관리자 직접 등록은 즉시 공개
         created_by=created_by,
     )
     db.session.add(p)
@@ -131,6 +132,40 @@ def api_yard_toggle(fid):
     p.is_active = not p.is_active
     db.session.commit()
     return jsonify({"status": "success", "is_active": p.is_active, "msg": f"{'표시' if p.is_active else '숨김'}으로 변경"})
+
+
+@yard_bp.route('/api/yard/admin', methods=['GET'])
+def api_yard_admin_list():
+    """관리자: 승인 대기 + 승인됨 전체 목록"""
+    if not _require_admin():
+        return jsonify({"status": "error", "msg": "권한 없음"}), 403
+    out = []
+    for p in YardPost.query.order_by(YardPost.created_at.desc()).limit(300).all():
+        out.append({
+            'id': f'p{p.id}', 'db_id': p.id,
+            'title': p.title, 'content': (p.content or '')[:200],
+            'source_type': p.source_type, 'platform': p.platform,
+            'source_url': p.source_url or '', 'author_name': p.author_name or '',
+            'is_approved': bool(p.is_approved), 'is_active': bool(p.is_active),
+            'created_at': p.created_at.isoformat() if p.created_at else '',
+        })
+    return jsonify({'items': out})
+
+
+@yard_bp.route('/api/yard/<string:fid>/approve', methods=['POST'])
+def api_yard_approve(fid):
+    """관리자 승인/승인해제"""
+    if not _require_admin():
+        return jsonify({"status": "error", "msg": "권한 없음"}), 403
+    if not fid.startswith('p'):
+        return jsonify({"status": "error", "msg": "마을행사는 승인 대상이 아닙니다."}), 400
+    p = YardPost.query.get(int(fid[1:]))
+    if not p:
+        return jsonify({"status": "error", "msg": "없는 글입니다."}), 404
+    p.is_approved = not bool(p.is_approved)
+    db.session.commit()
+    return jsonify({"status": "success", "is_approved": p.is_approved,
+                    "msg": "✅ 승인 — 마당에 공개되었습니다." if p.is_approved else "승인 해제 — 비공개로 전환했습니다."})
 
 
 @yard_bp.route('/api/yard/<int:post_id>', methods=['GET'])
