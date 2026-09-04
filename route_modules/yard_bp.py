@@ -44,15 +44,20 @@ def _event_display(p):
 
 
 def _apply_display(p):
-    """신청기간 표시: 09/01 ~ 09/15 (시간 있으면 포함)"""
+    """신청기간 표시: 09/05 ~ 09/15 (종일이면 시간 제외)"""
     if not p.apply_start:
         return ''
-    s = p.apply_start.strftime('%m/%d')
+    kr = _WEEKDAYS_KR[p.apply_start.weekday()]
+    s = p.apply_start.strftime(f'%m/%d({kr})')
+    if p.apply_allday:
+        e = p.apply_end.strftime('%m/%d') if p.apply_end and p.apply_end.date() != p.apply_start.date() else ''
+        return f"{s} ~ {e} 종일" if e else f"{s} 종일"
     if p.apply_start.hour or p.apply_start.minute:
         s += ' ' + p.apply_start.strftime('%H:%M')
     e = ''
     if p.apply_end:
-        e = p.apply_end.strftime('%m/%d')
+        ke = _WEEKDAYS_KR[p.apply_end.weekday()]
+        e = p.apply_end.strftime(f'%m/%d({ke})')
         if p.apply_end.hour or p.apply_end.minute:
             e += ' ' + p.apply_end.strftime('%H:%M')
     return f"{s} ~ {e}" if e else s
@@ -150,6 +155,7 @@ def api_yard_list():
             'event_date_display': _event_display(p),
             'event_place': p.event_place or '',
             'apply_display': _apply_display(p),
+            'apply_allday': bool(p.apply_allday),
             'contact': p.contact or '',
             'is_allday': bool(p.is_allday),
             'event_date_iso': p.event_date.isoformat() if p.event_date else '',
@@ -254,6 +260,14 @@ def _save_yard(f, p):
     contact = (str(f.get('contact') or '')).strip()[:100]
     apply_start = _parse_dt(str(f.get('apply_start') or ''))
     apply_end = _parse_dt(str(f.get('apply_end') or ''))
+    # 신청기간도 시간 미입력 시 종일로 자동 인식
+    apply_allday = False
+    as_raw = (str(f.get('apply_start') or '')).strip()
+    if apply_start and ('T' not in as_raw or as_raw.endswith('T00:00')):
+        apply_allday = True
+    if apply_allday:
+        apply_start = apply_start.replace(hour=0, minute=0)
+        apply_end = (apply_end or apply_start).replace(hour=23, minute=59)
 
     # 일정과 동일 형식: 시작일시(YYYY-MM-DDTHH:MM) / 종료일시 / 종일
     event_dt = event_end = None
@@ -319,6 +333,7 @@ def _save_yard(f, p):
     p.event_place = event_place or None
     p.apply_start = apply_start
     p.apply_end = apply_end
+    p.apply_allday = apply_allday
     # 장소 지오코딩 (거리 정렬용)
     if event_place:
         try:
@@ -373,7 +388,7 @@ def api_yard_admin_list():
             'source_type': p.source_type, 'platform': p.platform,
             'source_url': p.source_url or '', 'reserve_url': p.reserve_url or '', 'author_name': p.author_name or '',
             'contact': p.contact or '', 'is_allday': bool(p.is_allday),
-            'apply_display': _apply_display(p),
+            'apply_display': _apply_display(p), 'apply_allday': bool(p.apply_allday),
             'event_date_display': _event_display(p),
             'event_date_iso': p.event_date.isoformat() if p.event_date else '',
             'event_end_iso': p.event_end.isoformat() if p.event_end else '',
@@ -616,7 +631,7 @@ def api_yard_get(post_id):
         'source_type': p.source_type, 'platform': p.platform,
         'source_url': p.source_url or '', 'reserve_url': p.reserve_url or '', 'author_name': p.author_name or '',
         'contact': p.contact or '', 'is_allday': bool(p.is_allday),
-        'apply_display': _apply_display(p),
+        'apply_display': _apply_display(p), 'apply_allday': bool(p.apply_allday),
         'event_date_display': _event_display(p),
         'extra_schedules': _post_schedules(p.id),
         'event_place': p.event_place or '',

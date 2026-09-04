@@ -140,9 +140,9 @@ export default function YardEditPage() {
           {/* 1차 일정 */}
           <div className="row g-2 mb-2">
             <div className="col-6">
-              <label className="small text-muted mb-1">📅 시작년월일시 (시간 미입력 시 종일)</label>
+              <label className="small text-muted mb-1" title="시간을 입력하지 않으면 종일로 자동 표시됩니다">📅 시작년월일시</label>
               <input type="datetime-local" className="form-control" value={fStartDt}
-                onChange={e => setFStartDt(e.target.value)} />
+                onChange={e => setFStartDt(e.target.value)} title="시간을 입력하지 않으면 종일로 자동 표시됩니다" />
             </div>
             <div className="col-6">
               <label className="small text-muted mb-1">📅 종료년월일시</label>
@@ -169,9 +169,10 @@ export default function YardEditPage() {
             <div key={row.key} className="border rounded p-2 mb-2 bg-light">
               <div className="row g-2 mb-1">
                 <div className="col-6">
-                  <label className="small text-muted mb-1">📅 시작년월일시 (시간 미입력 시 종일)</label>
+                  <label className="small text-muted mb-1" title="시간을 입력하지 않으면 종일로 자동 표시됩니다">📅 시작년월일시</label>
                   <input type="datetime-local" className="form-control form-control-sm" value={row.start}
-                    onChange={e => setNewRows(prev => prev.map(r => r.key === row.key ? { ...r, start: e.target.value } : r))} />
+                    onChange={e => setNewRows(prev => prev.map(r => r.key === row.key ? { ...r, start: e.target.value } : r))}
+                    title="시간을 입력하지 않으면 종일로 자동 표시됩니다" />
                 </div>
                 <div className="col-6">
                   <label className="small text-muted mb-1">📅 종료년월일시</label>
@@ -192,9 +193,9 @@ export default function YardEditPage() {
             value={fPlace} onChange={e => setFPlace(e.target.value)} />
           <div className="row g-2 mb-2">
             <div className="col-6">
-              <label className="small text-muted mb-1">🗓️ 신청기간 시작</label>
+              <label className="small text-muted mb-1" title="시간을 입력하지 않으면 종일로 자동 표시됩니다">🗓️ 신청기간 시작</label>
               <input type="datetime-local" className="form-control" value={fApplyStart}
-                onChange={e => setFApplyStart(e.target.value)} />
+                onChange={e => setFApplyStart(e.target.value)} title="시간을 입력하지 않으면 종일로 자동 표시됩니다" />
             </div>
             <div className="col-6">
               <label className="small text-muted mb-1">🗓️ 신청기간 종료</label>

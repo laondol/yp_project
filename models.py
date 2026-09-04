@@ -400,6 +400,7 @@ class YardPost(db.Model):
     event_place = db.Column(db.String(200))         # 행사 장소 (AI 추출)
     apply_start = db.Column(db.DateTime)            # 신청기간 시작
     apply_end = db.Column(db.DateTime)              # 신청기간 종료
+    apply_allday = db.Column(db.Boolean, default=False)  # 신청기간 종일 (시간 미입력 시)
     latitude = db.Column(db.Float)                  # 행사 장소 좌표 (지오코딩, 거리 정렬용)
     longitude = db.Column(db.Float)
     is_approved = db.Column(db.Boolean, default=False)  # 관리자 승인 후 공개 (자동수집건)
