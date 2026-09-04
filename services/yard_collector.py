@@ -67,8 +67,14 @@ def collect_yard_notices():
                 if '양평' not in title + desc:
                     continue
 
+                # URL 중복 차단
                 existing = YardPost.query.filter_by(source_url=url).first()
                 if existing:
+                    continue
+
+                # 제목 중복 차단 (다른 URL이라도 같은 제목이면 스킵)
+                norm_title = re.sub(r'\s+', ' ', title).strip()
+                if YardPost.query.filter_by(title=norm_title).first():
                     continue
 
                 platform = 'navercafe' if api == 'cafearticle' else 'naverblog'
