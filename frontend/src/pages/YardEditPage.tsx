@@ -23,6 +23,12 @@ export default function YardEditPage() {
   const [fAuthor, setFAuthor] = useState('')
   const [fStartDt, setFStartDt] = useState('')   // 1차 일정: 시작년월일시
   const [fEndDt, setFEndDt] = useState('')       // 1차 일정: 종료년월일시
+  const [fRepeatType, setFRepeatType] = useState('')   // '' | weekly | monthly_week | monthly_day | tbd
+  const [fRepeatDays, setFRepeatDays] = useState<number[]>([])  // 요일 인덱스 (0=월)
+  const [fRepeatWeeks, setFRepeatWeeks] = useState<number[]>([])   // 0=매주, 1~5=N째주 (다중 선택)
+  const [fRepeatDates, setFRepeatDates] = useState('')  // 월별 날짜 "1,6"
+  const [fRepStart, setFRepStart] = useState('')   // 반복 시작시간 HH:MM
+  const [fRepEnd, setFRepEnd] = useState('')       // 반복 종료시간 HH:MM
   const [fPlace, setFPlace] = useState('')
   const [fApplyStart, setFApplyStart] = useState('')
   const [fApplyEnd, setFApplyEnd] = useState('')
@@ -53,6 +59,13 @@ export default function YardEditPage() {
         setFPlace(d.event_place || '')
         setFApplyStart(d.apply_start_iso ? d.apply_start_iso.slice(0, 16) : '')
         setFApplyEnd(d.apply_end_iso ? d.apply_end_iso.slice(0, 16) : '')
+        setFRepeatType(d.repeat_type || '')
+        setFRepeatDates(d.repeat_days || '')
+        setFRepeatWeeks((d.repeat_weeks || '0').split(',').filter(Boolean).map(Number))
+        setFRepStart(d.repeat_start || '')
+        setFRepEnd(d.repeat_end || '')
+        const mask = d.repeat_weekdays || 0
+        setFRepeatDays([0, 1, 2, 3, 4, 5, 6].filter(i => mask & (1 << i)))
         setFContent(d.content || '')
         setFLink(d.source_url || '')
         setFContact(d.contact || '')
@@ -87,9 +100,13 @@ export default function YardEditPage() {
     if (!fTitle.trim()) { alert('제목을 입력하세요.'); return }
     setSaving(true)
     try {
+      const weekdaysMask = fRepeatDays.reduce((m, i) => m | (1 << i), 0)
       const payload: any = {
         title: fTitle.trim(), author_name: fAuthor.trim(),
         event_start: fStartDt, event_end: fEndDt, is_allday: isAlldayValue(fStartDt),
+        repeat_type: fRepeatType, repeat_weekdays: weekdaysMask,
+        repeat_weeks: fRepeatWeeks.join(','), repeat_week_of_month: fRepeatWeeks[0] || 0, repeat_days: fRepeatDates,
+        repeat_start_time: fRepStart, repeat_end_time: fRepEnd,
         event_place: fPlace.trim(), apply_start: fApplyStart, apply_end: fApplyEnd,
         content: fContent.trim(),
         source_url: fLink.trim(), reserve_url: fReserve.trim(), contact: fContact.trim(),
@@ -202,6 +219,71 @@ export default function YardEditPage() {
               <input type="datetime-local" className="form-control" value={fApplyEnd}
                 onChange={e => setFApplyEnd(e.target.value)} />
             </div>
+          </div>
+          {/* 🔁 반복 일정 */}
+          <div className="mb-2 p-2 border rounded">
+            <label className="small fw-bold text-muted mb-1">🔁 반복 일정 (매주·정기 행사)</label>
+            <select className="form-select form-select-sm mb-1" value={fRepeatType}
+              onChange={e => setFRepeatType(e.target.value)}>
+              <option value="">단일 일정 (특정 날짜)</option>
+              <option value="weekly">🔁 매주 반복</option>
+              <option value="monthly_week">🔁 매월 N째주 반복 (예: 첫째·셋째주 토요일)</option>
+              <option value="monthly_day">🔁 매월 날짜 반복 (정기장: 1,6일 등)</option>
+              <option value="tbd">⏳ 일시 미정</option>
+            </select>
+            {(fRepeatType === 'weekly' || fRepeatType === 'monthly_week') && (
+              <div className="d-flex gap-1 flex-wrap mb-1">
+                {['월', '화', '수', '목', '금', '토', '일'].map((d, i) => (
+                  <button type="button" key={d}
+                    className={`btn btn-sm ${fRepeatDays.includes(i) ? 'btn-success' : 'btn-outline-secondary'} py-0 px-2`}
+                    onClick={() => setFRepeatDays(prev => prev.includes(i) ? prev.filter(x => x !== i) : [...prev, i])}>{d}</button>
+                ))}
+              </div>
+            )}
+            {fRepeatType === 'monthly_week' && (
+              <div className="d-flex gap-1 flex-wrap mb-1">
+                {['매주', '첫째주', '둘째주', '셋째주', '넷째주', '다섯째주'].map((wk, idx) => (
+                  <button type="button" key={wk}
+                    className={`btn btn-sm py-0 px-2 ${fRepeatWeeks.includes(idx) ? 'btn-success' : 'btn-outline-secondary'}`}
+                    onClick={() => setFRepeatWeeks(prev => prev.includes(idx) ? prev.filter(x => x !== idx) : [...prev, idx])}>{wk}</button>
+                ))}
+              </div>
+            )}
+            {fRepeatType === 'monthly_day' && (
+              <div className="d-flex flex-wrap gap-1 mb-1">
+                {Array.from({ length: 31 }, (_, i) => i + 1).map(d => {
+                  const selected = fRepeatDates.split(',').filter(Boolean).map(Number).includes(d)
+                  return (
+                    <button type="button" key={d}
+                      className={`btn btn-sm py-0 px-1 ${selected ? 'btn-success' : 'btn-outline-secondary'}`}
+                      style={{ width: 34, fontSize: '0.75rem' }}
+                      onClick={() => {
+                        const nums = new Set(fRepeatDates.split(',').filter(Boolean).map(Number))
+                        if (nums.has(d)) nums.delete(d); else nums.add(d)
+                        setFRepeatDates([...nums].sort((a, b) => a - b).join(','))
+                      }}>{d}</button>
+                  )
+                })}
+              </div>
+            )}
+            {(fRepeatType === 'weekly' || fRepeatType === 'monthly_week' || fRepeatType === 'monthly_day') && (
+              <div className="row g-2">
+                <div className="col-6">
+                  <label className="small text-muted mb-1">🕒 시작시간 (미입력 시 종일)</label>
+                  <input type="time" className="form-control form-control-sm" value={fRepStart}
+                    onChange={e => setFRepStart(e.target.value)} />
+                </div>
+                <div className="col-6">
+                  <label className="small text-muted mb-1">🕔 종료시간</label>
+                  <input type="time" className="form-control form-control-sm" value={fRepEnd}
+                    onChange={e => setFRepEnd(e.target.value)} />
+                </div>
+              </div>
+            )}
+            {fRepeatType === 'tbd' && (
+              <small className="text-muted">날짜가 정해지면 저장 후 ✏️ 수정으로 입력하세요.</small>
+            )}
+            <small className="text-muted d-block mt-1">저장 시 카드에 🔁 {fRepeatType ? '반복 일정으로 표시되고, 내일정 추가 시 반복 일정으로 등록됩니다' : ''}</small>
           </div>
           <textarea className="form-control mb-2" rows={5} placeholder="📝 메모 (행사 내용 등)"
             value={fContent} onChange={e => setFContent(e.target.value)} />

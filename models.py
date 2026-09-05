@@ -398,6 +398,15 @@ class YardPost(db.Model):
     event_end = db.Column(db.DateTime)              # 행사 종료 일시
     is_allday = db.Column(db.Boolean, default=False)  # 종일 행사
     event_place = db.Column(db.String(200))         # 행사 장소 (AI 추출)
+    # 반복 일정 (매주/매월 N째주/정기장 등)
+    repeat_type = db.Column(db.String(20))          # 'weekly' | 'monthly_week' | 'monthly_day' | 'tbd'
+    repeat_weekdays = db.Column(db.Integer)         # 요일 비트마스크 (월=1<<0 ... 일=1<<6)
+    repeat_week_of_month = db.Column(db.Integer)    # 0=매주, 1~5=N째주 (monthly_week 전용, 대표값)
+    repeat_weeks = db.Column(db.String(50))         # 복수 주 "1,3" (첫째주+셋째주 등)
+    repeat_days = db.Column(db.String(50))          # 월별 날짜 "1,6" (monthly_day 전용)
+    repeat_start_time = db.Column(db.Time)          # 반복 일정 시작시간
+    repeat_end_time = db.Column(db.Time)            # 반복 일정 종료시간
+    repeat_text = db.Column(db.String(150))         # 표시용 텍스트 (예: 매월 1·3째주 토요일)
     apply_start = db.Column(db.DateTime)            # 신청기간 시작
     apply_end = db.Column(db.DateTime)              # 신청기간 종료
     apply_allday = db.Column(db.Boolean, default=False)  # 신청기간 종일 (시간 미입력 시)

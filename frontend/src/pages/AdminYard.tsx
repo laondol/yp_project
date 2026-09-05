@@ -9,6 +9,8 @@ interface YardAdminItem {
   contact?: string
   event_date_display?: string
   apply_display?: string; apply_allday?: boolean
+  repeat_text?: string; repeat_type?: string
+  repeat_weekdays?: number; repeat_week_of_month?: number; repeat_weeks?: string; repeat_days?: string
   event_date_iso?: string; event_end_iso?: string; event_place?: string
   extra_schedules?: { id: number; display: string }[]
   is_approved: boolean; is_active: boolean
@@ -83,6 +85,51 @@ export default function AdminYard() {
       }
     } catch { setMsg('가져오기 오류'); setMsgOk(false) }
     setImporting(false)
+  }
+
+  // 🔁 반복일정 빠른 등록
+  const [rTitle, setRTitle] = useState('')
+  const [rAuthor, setRAuthor] = useState('')
+  const [rPlace, setRPlace] = useState('')
+  const [rType, setRType] = useState('')           // weekly | monthly_week | monthly_day | tbd
+  const [rDays, setRDays] = useState<number[]>([]) // 요일 인덱스 (0=월)
+  const [rWeeks, setRWeeks] = useState<number[]>([])  // 0=매주, 1~5=N째주 (다중 선택)
+  const [rDates, setRDates] = useState('')         // 월별 날짜 "1,6"
+  const [rStart, setRStart] = useState('')
+  const [rEnd, setREnd] = useState('')
+  const [rContact, setRContact] = useState('')
+  const [rLink, setRLink] = useState('')
+  const [rSaving, setRSaving] = useState(false)
+  const [rMsg, setRMsg] = useState('')
+  const [rMsgOk, setRMsgOk] = useState(false)
+
+  const handleRepeatCreate = async () => {
+    if (!rTitle.trim()) { alert('제목을 입력하세요.'); return }
+    setRSaving(true)
+    try {
+      const weekdaysMask = rDays.reduce((m, i) => m | (1 << i), 0)
+      const res = await fetch('/api/yard', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: rTitle.trim(), author_name: rAuthor.trim(),
+          event_place: rPlace.trim(), contact: rContact.trim(),
+          source_url: rLink.trim(),
+          repeat_type: rType, repeat_weekdays: weekdaysMask,
+          repeat_weeks: rWeeks.join(','), repeat_week_of_month: rWeeks[0] || 0, repeat_days: rDates,
+          repeat_start_time: rStart, repeat_end_time: rEnd,
+          is_allday: !rStart,
+        }),
+      })
+      const data = await res.json()
+      setRMsg(data.msg || (data.status === 'success' ? '등록 완료' : '실패'))
+      setRMsgOk(data.status === 'success')
+      if (data.status === 'success') {
+        setRTitle(''); setRAuthor(''); setRPlace(''); setRContact(''); setRLink('')
+        load()
+      }
+    } catch { setRMsg('오류가 발생했습니다.'); setRMsgOk(false) }
+    setRSaving(false)
   }
 
   const handleOrgCreate = async (e: React.FormEvent) => {
@@ -189,6 +236,90 @@ export default function AdminYard() {
         <span className={`small mt-1 d-block ${msgOk ? 'text-success' : 'text-danger'}`}>{msg}</span>
       </div>
 
+      {/* 🔁 반복일정 빠른 등록 */}
+      <div className="card border-0 shadow-sm mb-4 p-4" style={{ borderRadius: 16, borderLeft: '4px solid #20c997' }}>
+        <h6 className="fw-bold mb-2">🔁 반복일정 빠른 등록</h6>
+        <p className="small text-muted mb-2">매주·정기 반복되는 행사(정기장 등)를 등록합니다. 시간을 입력하지 않으면 종일로 표시됩니다.</p>
+        <input className="form-control mb-2" placeholder="제목 (필수, 예: 양수리 정기장)"
+          value={rTitle} onChange={e => setRTitle(e.target.value)} />
+        <div className="d-flex gap-2 mb-2 flex-wrap">
+          <input className="form-control" style={{ maxWidth: 200 }} placeholder="단체명/출처"
+            value={rAuthor} onChange={e => setRAuthor(e.target.value)} />
+          <input className="form-control" style={{ maxWidth: 240 }} placeholder="📍 장소"
+            value={rPlace} onChange={e => setRPlace(e.target.value)} />
+        </div>
+        <select className="form-select form-select-sm mb-1" value={rType}
+          onChange={e => setRType(e.target.value)}>
+          <option value="">반복 유형 선택</option>
+          <option value="weekly">🔁 매주 반복</option>
+          <option value="monthly_week">🔁 매월 N째주 반복 (예: 첫째·셋째주 토요일)</option>
+          <option value="monthly_day">🔁 매월 날짜 반복 (정기장: 1,6일 등)</option>
+          <option value="tbd">⏳ 일시 미정</option>
+        </select>
+        {(rType === 'weekly' || rType === 'monthly_week') && (
+          <div className="d-flex gap-1 flex-wrap mb-1">
+            {['월', '화', '수', '목', '금', '토', '일'].map((d, i) => (
+              <button type="button" key={d}
+                className={`btn btn-sm ${rDays.includes(i) ? 'btn-success' : 'btn-outline-secondary'} py-0 px-2`}
+                onClick={() => setRDays(prev => prev.includes(i) ? prev.filter(x => x !== i) : [...prev, i])}>{d}</button>
+            ))}
+          </div>
+        )}
+        {rType === 'monthly_week' && (
+          <div className="d-flex gap-1 flex-wrap mb-1">
+            {['매주', '첫째주', '둘째주', '셋째주', '넷째주', '다섯째주'].map((wk, idx) => (
+              <button type="button" key={wk}
+                className={`btn btn-sm py-0 px-2 ${rWeeks.includes(idx) ? 'btn-success' : 'btn-outline-secondary'}`}
+                onClick={() => setRWeeks(prev => prev.includes(idx) ? prev.filter(x => x !== idx) : [...prev, idx])}>{wk}</button>
+            ))}
+          </div>
+        )}
+        {rType === 'monthly_day' && (
+          <div className="d-flex flex-wrap gap-1 mb-1">
+            {Array.from({ length: 31 }, (_, i) => i + 1).map(d => {
+              const selected = rDates.split(',').filter(Boolean).map(Number).includes(d)
+              return (
+                <button type="button" key={d}
+                  className={`btn btn-sm py-0 px-1 ${selected ? 'btn-success' : 'btn-outline-secondary'}`}
+                  style={{ width: 34, fontSize: '0.75rem' }}
+                  onClick={() => {
+                    const nums = new Set(rDates.split(',').filter(Boolean).map(Number))
+                    if (nums.has(d)) nums.delete(d); else nums.add(d)
+                    setRDates([...nums].sort((a, b) => a - b).join(','))
+                  }}>{d}</button>
+              )
+            })}
+          </div>
+        )}
+        {(rType === 'weekly' || rType === 'monthly_week' || rType === 'monthly_day') && (
+          <div className="row g-2 mb-2" style={{ maxWidth: 420 }}>
+            <div className="col-6">
+              <label className="small text-muted mb-1">🕒 시작시간 (미입력 시 종일)</label>
+              <input type="time" className="form-control form-control-sm" value={rStart}
+                onChange={e => setRStart(e.target.value)} />
+            </div>
+            <div className="col-6">
+              <label className="small text-muted mb-1">🕔 종료시간</label>
+              <input type="time" className="form-control form-control-sm" value={rEnd}
+                onChange={e => setREnd(e.target.value)} />
+            </div>
+          </div>
+        )}
+        {rType === 'tbd' && (
+          <small className="text-muted d-block mb-2">날짜가 정해지면 목록의 ✏️ 수정으로 입력하세요.</small>
+        )}
+        <div className="d-flex gap-2 mb-2 flex-wrap">
+          <input className="form-control" style={{ maxWidth: 240 }} placeholder="📞 연락처 (선택)"
+            value={rContact} onChange={e => setRContact(e.target.value)} />
+          <input type="url" className="form-control" style={{ maxWidth: 280 }} placeholder="🔗 링크 (선택)"
+            value={rLink} onChange={e => setRLink(e.target.value)} />
+        </div>
+        <button className="btn btn-success" onClick={handleRepeatCreate} disabled={rSaving || !rTitle.trim() || !rType}>
+          {rSaving ? '⏳ 등록 중...' : '✅ 반복일정 등록'}
+        </button>
+        <span className={`small mt-1 d-block ${rMsgOk ? 'text-success' : 'text-danger'}`}>{rMsg}</span>
+      </div>
+
       {/* 승인 대기 */}
       <div className="card border-0 shadow-sm mb-4 p-3" style={{ borderRadius: 16, borderLeft: '4px solid #f0ad4e' }}>
         <h6 className="fw-bold mb-3">⏳ 승인 대기 (자동수집) <span className="badge bg-warning text-dark">{pending.length}</span></h6>
@@ -205,6 +336,9 @@ export default function AdminYard() {
                     <div className="small text-muted mb-1">#{p.db_id} · 수집 {formatKST(p.created_at, { month: '2-digit', day: '2-digit' })}</div>
                     {/* 제목 (맨위) */}
                     <h6 className="fw-bold mb-2">{p.title}</h6>
+
+                    {/* 반복 일정 */}
+                    {p.repeat_text && <div className="small mb-1">🔁 {p.repeat_text}</div>}
 
                     {/* 1차 일정 */}
                     {p.event_date_display && <div className="small mb-1">📅 {p.event_date_display}</div>}
@@ -271,6 +405,9 @@ export default function AdminYard() {
                     <div className="small text-muted mb-1">#{p.db_id} · 등록 {formatKST(p.created_at, { month: '2-digit', day: '2-digit' })}</div>
                     {/* 제목 (맨위) */}
                     <h6 className="fw-bold mb-2">{p.title}</h6>
+
+                    {/* 반복 일정 */}
+                    {p.repeat_text && <div className="small mb-1">🔁 {p.repeat_text}</div>}
 
                     {/* 1차 일정 */}
                     {p.event_date_display && <div className="small mb-1">📅 {p.event_date_display}</div>}

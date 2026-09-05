@@ -3,11 +3,114 @@ import os
 import re
 from flask import Blueprint, request, jsonify, session, current_app
 from models import db, YardPost, YardComment, YardOrg, YardSchedule, VillageEvent, User
-from datetime import datetime
+from datetime import datetime, timedelta
 
 yard_bp = Blueprint('yard_bp', __name__)
 
 _WEEKDAYS_KR = ['월', '화', '수', '목', '금', '토', '일']
+_WEEKDAY_KR = {'월': 0, '화': 1, '수': 2, '목': 3, '금': 4, '토': 5, '일': 6}
+
+
+def _repeat_text(f):
+    """반복 일정 표시 텍스트 생성. 없으면 ''"""
+    rt = (str(f.get('repeat_type') or '')).strip()
+    if not rt:
+        return ''
+    mask = int(f.get('repeat_weekdays') or 0)
+    days = [n for n in range(7) if mask & (1 << n)]
+    day_str = '·'.join(_WEEKDAYS_KR[d] for d in days) + ('요일' if len(days) == 1 else '요일')
+    time_str = ''
+    rst = (str(f.get('repeat_start_time') or '')).strip()
+    ret_ = (str(f.get('repeat_end_time') or '')).strip()
+    if rst:
+        time_str = f' {rst}' + (f'~{ret_}' if ret_ else '')
+    if rt == 'weekly':
+        return f'매주 {day_str}{time_str}'
+    if rt == 'monthly_week':
+        weeks = sorted(int(w) for w in (str(f.get('repeat_weeks') or '')).split(',') if w.strip().isdigit())
+        day_name = day_str if len(days) == 1 else '·'.join(f'{_WEEKDAYS_KR[d]}' for d in days) + '요일'
+        if weeks == [0]:
+            return f'매월 매주 {day_name}{time_str}' if False else f'매주 {day_name}{time_str}'
+        if not weeks:
+            return f'매월 {day_name}{time_str}'
+        wk_names = {1: '첫째', 2: '둘째', 3: '셋째', 4: '넷째', 5: '다섯째'}
+        wk_str = '·'.join(wk_names[w] for w in weeks if w in wk_names) + '주'
+        return f'매월 {wk_str} {day_name}{time_str}'
+    if rt == 'monthly_day':
+        rd = (str(f.get('repeat_days') or '')).strip()
+        parts = [f'{d}일' for d in rd.split(',') if d.strip()]
+        return '매월 ' + '·'.join(parts) + time_str if parts else ''
+    if rt == 'tbd':
+        return '일시 미정'
+    return ''
+
+
+def _next_repeat_date(p):
+    """반복 일정의 다음 날짜 (내일정 앵커용). 없으면 None"""
+    import calendar as _cal
+    rt = p.repeat_type
+    mask = p.repeat_weekdays or 0
+    base = datetime.now().date() + timedelta(days=1)
+    if rt == 'weekly' and mask:
+        for i in range(14):
+            d = base + timedelta(days=i)
+            if mask & (1 << d.weekday()):
+                return datetime.combine(d, datetime.min.time())
+    if rt == 'monthly_week' and mask:
+        wom = p.repeat_week_of_month or 0
+        for m in range(3):
+            y, mo = (datetime.now() + timedelta(days=30 * m)).year, (datetime.now() + timedelta(days=30 * m)).month
+            first = datetime(y, mo, 1).date()
+            for d in [first + timedelta(days=i) for i in range(31)]:
+                if d.month != mo:
+                    break
+                if not (mask & (1 << d.weekday())):
+                    continue
+                if wom:
+                    nth = (d.day - 1) // 7 + 1
+                    if nth != wom:
+                        continue
+                if d >= base:
+                    return datetime.combine(d, datetime.min.time())
+    if rt == 'monthly_day' and p.repeat_days:
+        days = sorted(int(d) for d in p.repeat_days.split(',') if d.strip().isdigit())
+        for m in range(3):
+            ref = datetime.now() + timedelta(days=30 * m)
+            y, mo = ref.year, ref.month
+            for day in days:
+                if day <= _cal.monthrange(y, mo)[1]:
+                    d = datetime(y, mo, day).date()
+                    if d >= base:
+                        return datetime.combine(d, datetime.min.time())
+    return None
+
+
+def _next_repeat_dates(p):
+    """반복 일정의 다음 날짜 목록 (월별 두 날짜 지원: 1,6 → 앵커 2개). ISO 문자열 리스트"""
+    import calendar as _cal
+    rt = p.repeat_type
+    mask = p.repeat_weekdays or 0
+    base = datetime.now().date() + timedelta(days=1)
+    out = []
+    if rt in ('weekly', 'monthly_week') and mask:
+        d = _next_repeat_date(p)
+        if d:
+            if p.repeat_start_time:
+                d = datetime.combine(d.date(), p.repeat_start_time)
+            out.append(d.isoformat())
+    elif rt == 'monthly_day' and p.repeat_days:
+        days = sorted(int(d) for d in p.repeat_days.split(',') if d.strip().isdigit())
+        for day in days:
+            for m in range(3):
+                ref = datetime.now() + timedelta(days=30 * m)
+                y, mo = ref.year, ref.month
+                if day <= _cal.monthrange(y, mo)[1]:
+                    d = datetime(y, mo, day).date()
+                    if d >= base:
+                        dtv = datetime.combine(d, p.repeat_start_time or datetime.min.time())
+                        out.append(dtv.isoformat())
+                        break
+    return out
 
 
 def _parse_dt(s):
@@ -160,6 +263,14 @@ def api_yard_list():
             'is_allday': bool(p.is_allday),
             'event_date_iso': p.event_date.isoformat() if p.event_date else '',
             'event_end_iso': p.event_end.isoformat() if p.event_end else '',
+            'repeat_text': p.repeat_text or '', 'repeat_type': p.repeat_type or '',
+            'repeat_weekdays': p.repeat_weekdays or 0, 'repeat_week_of_month': p.repeat_week_of_month or 0, 'repeat_weeks': p.repeat_weeks or '',
+            'repeat_days': p.repeat_days or '',
+        'repeat_start': p.repeat_start_time.strftime('%H:%M') if p.repeat_start_time else '',
+        'repeat_end': p.repeat_end_time.strftime('%H:%M') if p.repeat_end_time else '',
+            'repeat_start': p.repeat_start_time.strftime('%H:%M') if p.repeat_start_time else '',
+            'repeat_end': p.repeat_end_time.strftime('%H:%M') if p.repeat_end_time else '',
+            'repeat_next_list': _next_repeat_dates(p),
             'extra_schedules': _post_schedules(p.id),
             'distance_km': dist_km,
             'created_at': p.created_at.isoformat() if p.created_at else '',
@@ -331,6 +442,26 @@ def _save_yard(f, p):
     p.event_end = event_end
     p.is_allday = is_allday
     p.event_place = event_place or None
+    # 반복 일정
+    p.repeat_type = (str(f.get('repeat_type') or '')).strip()[:20] or None
+    p.repeat_weekdays = int(f.get('repeat_weekdays') or 0) or None
+    _weeks_raw = (str(f.get('repeat_weeks') or '')).strip()
+    p.repeat_weeks = _weeks_raw or None
+    p.repeat_week_of_month = int(_weeks_raw.split(',')[0]) if _weeks_raw.split(',')[0].strip().isdigit() else None
+    p.repeat_days = (str(f.get('repeat_days') or '')).strip()[:50] or None
+    p.repeat_text = _repeat_text(f) or None
+    # 반복 시작/종료시간 (HH:MM)
+    def _to_time(s):
+        m = re.match(r'^(\d{1,2}):(\d{2})$', s)
+        if m:
+            from datetime import time as _time
+            return _time(int(m.group(1)), int(m.group(2)))
+        return None
+    p.repeat_start_time = _to_time((str(f.get('repeat_start_time') or '')).strip())
+    p.repeat_end_time = _to_time((str(f.get('repeat_end_time') or '')).strip())
+    # 반복 일정인데 시작시간이 없으면 종일로 자동 인식
+    if p.repeat_type and not p.repeat_start_time:
+        p.is_allday = True
     p.apply_start = apply_start
     p.apply_end = apply_end
     p.apply_allday = apply_allday
@@ -392,7 +523,15 @@ def api_yard_admin_list():
             'event_date_display': _event_display(p),
             'event_date_iso': p.event_date.isoformat() if p.event_date else '',
             'event_end_iso': p.event_end.isoformat() if p.event_end else '',
-            'extra_schedules': _post_schedules(p.id),
+            'repeat_text': p.repeat_text or '', 'repeat_type': p.repeat_type or '',
+            'repeat_weekdays': p.repeat_weekdays or 0, 'repeat_week_of_month': p.repeat_week_of_month or 0, 'repeat_weeks': p.repeat_weeks or '',
+            'repeat_days': p.repeat_days or '',
+            'repeat_text': p.repeat_text or '', 'repeat_type': p.repeat_type or '',
+        'repeat_weekdays': p.repeat_weekdays or 0, 'repeat_week_of_month': p.repeat_week_of_month or 0, 'repeat_weeks': p.repeat_weeks or '',
+        'repeat_days': p.repeat_days or '',
+        'repeat_start': p.repeat_start_time.strftime('%H:%M') if p.repeat_start_time else '',
+        'repeat_end': p.repeat_end_time.strftime('%H:%M') if p.repeat_end_time else '',
+        'extra_schedules': _post_schedules(p.id),
             'event_place': p.event_place or '',
             'is_approved': bool(p.is_approved), 'is_active': bool(p.is_active),
             'created_at': p.created_at.isoformat() if p.created_at else '',
@@ -634,6 +773,10 @@ def api_yard_get(post_id):
         'contact': p.contact or '', 'is_allday': bool(p.is_allday),
         'apply_display': _apply_display(p), 'apply_allday': bool(p.apply_allday),
         'event_date_display': _event_display(p),
+        'repeat_text': p.repeat_text or '', 'repeat_type': p.repeat_type or '',
+        'repeat_weekdays': p.repeat_weekdays or 0, 'repeat_week_of_month': p.repeat_week_of_month or 0, 'repeat_weeks': p.repeat_weeks or '',
+        'repeat_days': p.repeat_days or '',
+        'repeat_next_list': _next_repeat_dates(p),
         'extra_schedules': _post_schedules(p.id),
         'event_place': p.event_place or '',
         'event_date_iso': p.event_date.isoformat() if p.event_date else '',

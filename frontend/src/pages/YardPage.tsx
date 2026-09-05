@@ -16,6 +16,11 @@ interface YardItem {
   event_date?: string; event_date_display?: string; event_date_iso?: string; event_end_iso?: string
   event_place?: string
   apply_display?: string
+  repeat_text?: string; repeat_type?: string
+  repeat_weekdays?: number; repeat_week_of_month?: number; repeat_days?: string
+  repeat_weeks?: string
+  repeat_start?: string; repeat_end?: string
+  repeat_next_list?: string[]
   extra_schedules?: YardExtraSchedule[]
   distance_km?: number | null
   created_at: string
@@ -83,6 +88,59 @@ export default function YardPage() {
         } else alert(d.msg || '오류')
       })
       .catch(() => alert('오류가 발생했습니다.'))
+  }
+
+  // 반복 일정을 내 일정에 등록 (앵커 날짜 수만큼 생성)
+  const addRecurringSchedule = async (it: YardItem) => {
+    if (!me) { alert('로그인 후 이용하세요.'); return }
+    const anchors = it.repeat_next_list || []
+    if (!anchors.length) { alert('다음 일정을 계산할 수 없습니다. 일시를 확인해 주세요.'); return }
+    const rt = it.repeat_type || ''
+    const mask = it.repeat_weekdays || 0
+    try {
+      const schedules: { repeat_type: string; repeat_weekdays: number; repeat_week_of_month: number }[] = []
+      if (rt === 'weekly') {
+        schedules.push({ repeat_type: 'weekly', repeat_weekdays: mask, repeat_week_of_month: 0 })
+      } else if (rt === 'monthly_week') {
+        // 복수 주 지원: 선택한 각 주(첫째·셋째주 등)마다 반복 일정 1건
+        const weeks = (it.repeat_weeks || '0').split(',').filter(Boolean).map((x: string) => Number(x))
+        weeks.forEach(w => schedules.push({ repeat_type: 'monthly', repeat_weekdays: mask, repeat_week_of_month: w }))
+      } else if (rt === 'monthly_day') {
+        schedules.push({ repeat_type: 'monthly', repeat_weekdays: 0, repeat_week_of_month: 0 })
+      }
+      for (const anchorIso of anchors) {
+        const endDate = it.repeat_end ? `${anchorIso.slice(0, 10)}T${it.repeat_end}` : ''
+        const isAllday = !it.repeat_start
+        const timeSuffix = isAllday ? '' : `T${it.repeat_start || '00:00'}`
+        for (const sched of schedules) {
+          // monthly_day: 앵커 날짜의 일자가 곧 반복 기준일
+          const anchorDate = sched.repeat_type === 'monthly' && sched.repeat_weekdays === 0
+            ? `${anchorIso.slice(0, 10)}${timeSuffix}` : anchorIso
+          const body: any = {
+            title: it.title,
+            description: `[마당 반복] ${it.repeat_text || ''}`,
+            event_date: anchorDate,
+            end_date: endDate,
+            location: it.event_place || '',
+            is_recurring: true,
+            repeat_infinite: true,
+            is_allday: isAllday && sched.repeat_type === 'monthly',
+            repeat_type: sched.repeat_type,
+            repeat_weekdays: sched.repeat_weekdays,
+            repeat_week_of_month: sched.repeat_week_of_month,
+            repeat_interval: 1,
+          }
+          const res = await fetch('/api/bot/schedule', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          })
+          if (res.status === 401) { alert('로그인 후 이용하세요.'); return }
+        }
+      }
+      setAddedSchedule(prev => ({ ...prev, [`r${it.db_id}`]: true }))
+      window.open(`/schedule-popup?date=${anchors[0].slice(0, 10)}`, 'schedulePopup', 'width=920,height=760')
+    } catch { alert('오류가 발생했습니다.') }
   }
 
   // 댓글 모달 열기
@@ -190,11 +248,25 @@ export default function YardPage() {
                     {/* 제목 (맨위) */}
                     <h6 className="fw-bold mb-2">{it.title}</h6>
 
-                    {/* 1차 일정 + 내일정 버튼 */}
+                    {/* 반복 일정 */}
+                    {it.repeat_text && (
+                      <div className="small mb-1 d-flex justify-content-between align-items-center">
+                        <span>🔁 {it.repeat_text}</span>
+                        {it.kind === 'post' && it.repeat_type !== 'tbd' && !addedSchedule[`r${it.db_id}`] && (
+                          <button className="btn btn-sm btn-outline-warning py-0" style={{ fontSize: '0.7rem' }}
+                            onClick={() => addRecurringSchedule(it)}>
+                            📅 내일정 추가
+                          </button>
+                        )}
+                        {addedSchedule[`r${it.db_id}`] && <span className="text-success" style={{ fontSize: '0.7rem' }}>✅ 추가됨</span>}
+                      </div>
+                    )}
+
+                    {/* 1차 일정 + 내일정 버튼 (반복 일정이 없을 때만 버튼 표시) */}
                     {it.event_date_display && (
                       <div className="small mb-1 d-flex justify-content-between align-items-center">
                         <span>📅 {it.event_date_display}</span>
-                        {it.kind === 'post' && it.event_date_iso && !addedSchedule[it.id] && (
+                        {it.kind === 'post' && !it.repeat_text && it.event_date_iso && !addedSchedule[it.id] && (
                           <button className="btn btn-sm btn-outline-warning py-0" style={{ fontSize: '0.7rem' }}
                             onClick={() => addToSchedule(it.id, it.title, it.event_date_iso!, it.event_end_iso || '', it.event_place || '', !!(it as any).is_allday)}>
                             📅 내일정 추가
