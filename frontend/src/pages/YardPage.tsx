@@ -148,7 +148,8 @@ export default function YardPage() {
       if (res.status === 401) { alert('로그인 후 이용하세요.'); return }
       if (data.id || data.status === 'success') {
         setAddedSchedule(prev => ({ ...prev, [key]: true }))
-        alert('✅ 내 일정에 추가되었습니다. (내 일정 페이지에서 확인)')
+        // 기존 일정 팝업 창을 해당 날짜로 열기 (페이지는 그대로 유지)
+        window.open(`/schedule-popup?date=${startIso.slice(0, 10)}`, 'schedulePopup', 'width=920,height=760')
       } else alert(data.error || data.msg || '추가 실패')
     } catch { alert('오류가 발생했습니다.') }
   }

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import Loading from '../components/common/Loading'
 import ErrorMessage from '../components/common/ErrorMessage'
 import EmptyState from '../components/common/EmptyState'
@@ -62,13 +63,17 @@ function mapUrl(from: string, to: string) {
 }
 
 export default function SchedulePopupPage() {
+  const [searchParams] = useSearchParams()
+  // ?date=YYYY-MM-DD 지원: 해당 날짜의 월로 열림 (마당 내일정 추가용)
+  const initDate = searchParams.get('date') || ''
   const [tab, setTab] = useState<'calendar' | 'add' | 'common' | 'route'>('calendar')
   const [events, setEvents] = useState<ScheduleEvent[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [year, setYear] = useState(new Date().getFullYear())
-  const [month, setMonth] = useState(new Date().getMonth() + 1)
-  const [selectedDate, setSelectedDate] = useState('')
+  const [year, setYear] = useState(initDate ? Number(initDate.slice(0, 4)) : new Date().getFullYear())
+  const [month, setMonth] = useState(initDate ? Number(initDate.slice(5, 7)) : new Date().getMonth() + 1)
+  const [selectedDate, setSelectedDate] = useState(initDate)
+
 
   const [formTitle, setFormTitle] = useState('')
   const [formDate, setFormDate] = useState('')
