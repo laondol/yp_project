@@ -239,7 +239,7 @@ export default function YardPage() {
           <p>아직 등록된 소식이 없습니다.</p>
         </div>
       ) : (
-        <div className="row g-3 flex-nowrap flex-sm-wrap" style={{ overflowX: 'auto', paddingBottom: 4 }}>
+        <div className="row g-3">
           {filtered.map(it => {
             return (
               <div key={it.id} className="col-12 col-md-6 col-lg-4" style={{ minWidth: 340 }}>

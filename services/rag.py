@@ -43,7 +43,7 @@ def build_context(query, top_k=3):
 
 def rebuild_index(app=None):
     try:
-        resp = requests.post(f'{RAG_URL}/rebuild', headers=_headers(), timeout=120)
+        resp = requests.post(f'{RAG_URL}/rebuild', headers=_headers(), timeout=600)
         resp.raise_for_status()
         print(f"[RAG] 인덱스 재구축 요청 완료: {resp.json()}")
     except Exception as e:

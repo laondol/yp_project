@@ -64,13 +64,25 @@ def run_route_recalc_scheduler(app):
         time.sleep(600)
 
 
-def run_rag_rebuild(app):
-    try:
-        with app.app_context():
-            from services.rag import rebuild_index
-            rebuild_index(app)
-    except Exception as e:
-        print(f"[RAG] rebuild error: {e}")
+def run_rag_rebuild_scheduler(app):
+    """매일 새벽 1시 30분에 RAG 인덱스를 재구축하여 삭제된 내용이 검색에 노출되지 않게 함"""
+    while True:
+        try:
+            now = datetime.now()
+            target = now.replace(hour=1, minute=30, second=0, microsecond=0)
+            if now >= target:
+                from datetime import timedelta
+                target += timedelta(days=1)
+            wait_sec = (target - now).total_seconds()
+            print(f"[RAG_REBUILD] 다음 인덱스 재구축까지 {wait_sec/3600:.1f}시간 대기")
+            time.sleep(wait_sec)
+            with app.app_context():
+                from services.rag import rebuild_index
+                rebuild_index(app)
+                print("[RAG_REBUILD] 인덱스 재구축 완료 (삭제 내용 검색에서 제거)")
+        except Exception as e:
+            print(f"[RAG_REBUILD] 오류: {e}")
+            time.sleep(3600)
 
 
 def run_construction_extract_scheduler(app):
@@ -322,7 +334,7 @@ def main():
     threading.Thread(target=run_notification_scheduler, args=(app,), daemon=True).start()
     threading.Thread(target=run_route_recalc_scheduler, args=(app,), daemon=True).start()
     # RAG 재구축은 yp_rag 서버 시작 시 자체 수행하므로 중복 제거 (타임아웃 오류 해결)
-    # threading.Thread(target=run_rag_rebuild, args=(app,), daemon=True).start()
+    threading.Thread(target=run_rag_rebuild_scheduler, args=(app,), daemon=True).start()
     threading.Thread(target=run_monthly_payout, args=(app,), daemon=True).start()
     threading.Thread(target=run_construction_extract_scheduler, args=(app,), daemon=True).start()
     threading.Thread(target=run_yard_collect_scheduler, args=(app,), daemon=True).start()
