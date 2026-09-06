@@ -39,6 +39,7 @@ export default function AdminNews() {
   const [importMsgOk, setImportMsgOk] = useState(false)
   const [cleaning, setCleaning] = useState(false)
   const [collecting, setCollecting] = useState(false)
+  const [suggesting, setSuggesting] = useState(false)
 
   const fetchNews = async () => {
     setLoading(true)
@@ -111,6 +112,28 @@ export default function AdminNews() {
       alert('오류가 발생했습니다.')
     } finally {
       setCleaning(false)
+    }
+  }
+
+  const handleAiSuggest = async () => {
+    setSuggesting(true)
+    try {
+      const res = await fetch('/admin/news/ai-suggest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `tab=${tab}`,
+      })
+      const data = await res.json()
+      if (data.status === 'success' || data.success) {
+        alert(data.msg || `✅ ${data.count}개의 실제 뉴스를 가져왔습니다.`)
+        fetchNews()
+      } else {
+        alert(data.msg || data.message || '추천 실패')
+      }
+    } catch {
+      alert('오류가 발생했습니다.')
+    } finally {
+      setSuggesting(false)
     }
   }
 
@@ -221,12 +244,19 @@ export default function AdminNews() {
             <div className={`mt-2 small ${importMsgOk ? 'text-success' : 'text-danger'}`}>{importMsg}</div>
           )}
           <div className="mt-2">
+            {tab === 'world' && (
+              <button className="btn btn-outline-success btn-sm" onClick={handleAiSuggest} disabled={suggesting}>
+                {suggesting ? '⏳ 생성 중...' : '🤖 세계와양평 AI 추천'}
+              </button>
+            )}
             <button className="btn btn-outline-warning btn-sm" onClick={handleCleanCjk} disabled={cleaning}>
               {cleaning ? '⏳ 정리 중...' : '🗣️ 깨진 글자 정리'}
             </button>
-            <button className="btn btn-outline-info btn-sm ms-1" onClick={handleCollect} disabled={collecting}>
-              {collecting ? '⏳ 수집 중...' : '📰 대한민국·양평 자동 수집'}
-            </button>
+            {tab === 'kr_yp' && (
+              <button className="btn btn-outline-info btn-sm ms-1" onClick={handleCollect} disabled={collecting}>
+                {collecting ? '⏳ 수집 중...' : '📰 대한민국·양평 자동 수집'}
+              </button>
+            )}
             <small className="text-muted ms-2">
               {tab === 'world' ? '🌐 영문 검색 → 해외 기사 중심' : '🇰🇷 국내 검색 → 한국 뉴스 중심'} (자동 가져오기)
             </small>
@@ -291,7 +321,7 @@ export default function AdminNews() {
                       {item.source_url ? (
                         <div className="d-flex gap-1 justify-content-center">
                           <a href={item.source_url} target="_blank" rel="noopener noreferrer" className="btn btn-sm btn-outline-primary">🔗 원문</a>
-                          <a href={`https://translate.google.com/translate?sl=auto&tl=ko&u=${encodeURIComponent(item.source_url)}`} target="_blank" rel="noopener noreferrer" className="btn btn-sm btn-outline-info">🌐 번역</a>
+                          <a href={`https://papago.naver.net/website?source=auto&target=ko&url=${encodeURIComponent(item.source_url)}`} target="_blank" rel="noopener noreferrer" className="btn btn-sm btn-outline-info">🌐 번역</a>
                         </div>
                       ) : (
                         <span className="text-muted small">-</span>
