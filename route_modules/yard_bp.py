@@ -166,6 +166,15 @@ def _apply_display(p):
     return f"{s} ~ {e}" if e else s
 
 
+def _yard_review_count(post_id):
+    """마당 행사에 달린 후기(통벗 노트) 수"""
+    try:
+        from models import Note
+        return Note.query.filter_by(yard_event_id=post_id).count()
+    except Exception:
+        return 0
+
+
 def _sched_display(s):
     """추가 일정 표시"""
     if not s.event_start:
@@ -221,10 +230,42 @@ def _embed_url(platform, url):
     return ''
 
 
+@yard_bp.route('/api/yard/reviews', methods=['GET'])
+def api_yard_reviews():
+    """공개된 마당 행사 후기(노트) 목록 - 공유마당 배치용 (행사 위치 좌표 포함)
+    ?yard_event=ID 지원: 해당 행사의 후기만 조회"""
+    from models import Note, User
+    query = Note.query.filter(
+        Note.yard_event_id.isnot(None),
+        Note.is_public == True,
+    )
+    # 특정 행사의 후기만 조회
+    yard_event = request.args.get('yard_event', type=int)
+    if yard_event:
+        query = query.filter(Note.yard_event_id == yard_event)
+    notes = query.order_by(Note.created_at.desc()).limit(100).all()
+    out = []
+    for n in notes:
+        u = User.query.get(n.user_id) if n.user_id else None
+        m = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', n.content or '')
+        img = m.group(1) if m else ''
+        out.append({
+            'id': f'n{n.id}', 'db_id': n.id,
+            'yard_event_id': n.yard_event_id,
+            'title': n.title, 'content': re.sub(r'<[^>]+>', '', n.content or '')[:200],
+            'image_path': img,
+            'latitude': n.latitude, 'longitude': n.longitude,
+            'address': n.address or '',
+            'author_name': (u.username if u else '') or '익명',
+            'created_at': n.created_at.isoformat() if n.created_at else '',
+        })
+    return jsonify({'items': out})
+
+
 @yard_bp.route('/api/yard', methods=['GET'])
 def api_yard_list():
     """마당 목록(일반 회원): 승인된 소식 + 마을행사.
-    - 행사 일시가 지난 글은 숨기고, 임박한 행사부터 먼저 정렬
+    - 지난 행사는 숨기지 않고 is_past 플래그로 전달 (후기 모드)
     - GPS(lat/lng) 제공 시: 좌표 있는 행사는 가까운 순 우선 정렬"""
     from datetime import datetime as _dt
     from services.geocode import haversine
@@ -237,9 +278,14 @@ def api_yard_list():
 
     items = []
     for p in YardPost.query.filter_by(is_active=True, is_approved=True).order_by(YardPost.created_at.desc()).limit(100).all():
-        # 지난 행사는 목록에서 자동 숨김
-        if p.event_date and p.event_date < today:
-            continue
+        # 후기 모드 판정: 1차 일정 + 모든 추가 일정이 지났으면 지나간 행사
+        scheds = _post_schedules(p.id)
+        primary_past = bool(p.event_date and p.event_date < now)
+        extra_ongoing = any(
+            s.get('event_start_iso') and _dt.fromisoformat(s['event_start_iso']) >= now
+            for s in scheds
+        )
+        is_past = primary_past and not extra_ongoing
         dist_km = None
         if has_gps and p.latitude and p.longitude:
             try:
@@ -271,7 +317,9 @@ def api_yard_list():
             'repeat_start': p.repeat_start_time.strftime('%H:%M') if p.repeat_start_time else '',
             'repeat_end': p.repeat_end_time.strftime('%H:%M') if p.repeat_end_time else '',
             'repeat_next_list': _next_repeat_dates(p),
-            'extra_schedules': _post_schedules(p.id),
+            'extra_schedules': scheds,
+            'is_past': is_past,
+            'review_count': _yard_review_count(p.id),
             'distance_km': dist_km,
             'created_at': p.created_at.isoformat() if p.created_at else '',
         })
@@ -280,7 +328,7 @@ def api_yard_list():
         author = ''
         if ev.created_by:
             u = User.query.get(ev.created_by)
-            author = (u.name or u.username) if u else ''
+            author = (u.username or u.real_name or "익명") if u else ''
         ev_dt = ''
         ev_iso = ''
         dist_km = None
@@ -311,22 +359,27 @@ def api_yard_list():
         except Exception:
             return False
 
+    # 정렬: 예정 행사/소식 먼저 → **지나간 행사는 맨 마지막에, 최근에 끝난 행사부터** (쌓이는 방식)
+    past_items = [x for x in items if x.get('is_past')]
+
     if has_gps:
-        # GPS 있음: 좌표 있는 소식은 가까운 순 → 좌표 없는 임박 행사는 빠른 날짜순 → 나머지 최신순
-        geo = [x for x in items if x.get('distance_km') is not None]
-        dated_nogeo = [x for x in items if x.get('distance_km') is None and _upcoming(x)]
-        undated = [x for x in items if x.get('distance_km') is None and not _upcoming(x)]
+        # GPS 있음: 좌표 있는 소식 가까운 순 → 좌표 없는 임박 행사 빠른 날짜순 → 나머지 최신순
+        geo = [x for x in items if x.get('distance_km') is not None and not x.get('is_past')]
+        dated_nogeo = [x for x in items if x.get('distance_km') is None and _upcoming(x) and not x.get('is_past')]
+        undated = [x for x in items if x.get('distance_km') is None and not _upcoming(x) and not x.get('is_past')]
         geo.sort(key=lambda x: x['distance_km'])
         dated_nogeo.sort(key=lambda x: x.get('event_date_iso') or '')
         undated.sort(key=lambda x: x.get('created_at') or '', reverse=True)
-        items = geo + dated_nogeo + undated
+        past_items.sort(key=lambda x: x.get('event_date_iso') or '', reverse=True)
+        items = geo + dated_nogeo + undated + past_items
     else:
-        # GPS 없음: 임박한 행사순 → 날짜 없는 소식 최신순
-        dated = [x for x in items if _upcoming(x)]
-        undated = [x for x in items if not _upcoming(x)]
+        # GPS 없음: 임박한 행사순 → 날짜 없는 소식 최신순 → 지나간 행사 마지막
+        dated = [x for x in items if _upcoming(x) and not x.get('is_past')]
+        others = [x for x in items if not _upcoming(x) and not x.get('is_past')]
         dated.sort(key=lambda x: x.get('event_date_iso') or '')
-        undated.sort(key=lambda x: x.get('created_at') or '', reverse=True)
-        items = dated + undated
+        others.sort(key=lambda x: x.get('created_at') or '', reverse=True)
+        past_items.sort(key=lambda x: x.get('event_date_iso') or '', reverse=True)
+        items = dated + others + past_items
 
     return jsonify({'items': items})
 
@@ -487,9 +540,10 @@ def api_yard_delete(fid):
     p = YardPost.query.get(int(fid[1:]))
     if not p:
         return jsonify({"status": "error", "msg": "없는 글입니다."}), 404
-    db.session.delete(p)
+    # 소프트 삭제: 완전 삭제 대신 숨김 처리 (재수집 방지 - 수집기의 중복 체크가 통과됨)
+    p.is_active = False
     db.session.commit()
-    return jsonify({"status": "success", "msg": "삭제되었습니다."})
+    return jsonify({"status": "success", "msg": "숨김 처리되었습니다. (재수집되지 않습니다)"})
 
 
 @yard_bp.route('/api/yard/<string:fid>/toggle', methods=['POST'])
@@ -512,7 +566,7 @@ def api_yard_admin_list():
     if not _require_admin():
         return jsonify({"status": "error", "msg": "권한 없음"}), 403
     out = []
-    for p in YardPost.query.order_by(YardPost.created_at.desc()).limit(300).all():
+    for p in YardPost.query.filter_by(is_active=True).order_by(YardPost.created_at.desc()).limit(300).all():
         out.append({
             'id': f'p{p.id}', 'db_id': p.id,
             'title': p.title, 'content': p.content or '',
@@ -778,7 +832,11 @@ def api_yard_get(post_id):
         'repeat_days': p.repeat_days or '',
         'repeat_next_list': _next_repeat_dates(p),
         'extra_schedules': _post_schedules(p.id),
+        'is_past': bool(p.event_date and p.event_date < datetime.now()),
+        'review_count': _yard_review_count(p.id),
         'event_place': p.event_place or '',
+        'latitude': p.latitude,
+        'longitude': p.longitude,
         'event_date_iso': p.event_date.isoformat() if p.event_date else '',
         'event_end_iso': p.event_end.isoformat() if p.event_end else '',
         'like_count': p.like_count or 0, 'dislike_count': p.dislike_count or 0,

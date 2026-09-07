@@ -331,31 +331,56 @@ export default function NavBar() {
                 <li><a className="dropdown-item" href="/all-proposals">누구의꿈</a></li>
               </ul>
             </li>
-            {user?.role === 'leader' && (
+            {(user?.role === 'leader' || user?.role === 'admin') && (() => {
+              const mp = user?.managed_pages || []
+              const isAdminOrLeader = user?.role === 'leader' || user?.role === 'admin'
+              // 관리 메뉴 키 ↔ managed_pages 키 매핑
+              const pageToMenu: Record<string, string[]> = {
+                admin_proposals: ['admin_proposals', 'all_proposals', 'proposals'],
+                admin_news: ['admin_news', 'kr_news', 'world_news'],
+                admin_share: ['admin_share', 'share'],
+                admin_users: ['admin_users'],
+                admin_stores: ['admin_stores', 'stores'],
+                admin_alerts: ['admin_alerts'],
+                admin_construction: ['admin_construction', 'construction'],
+                yard: ['yard'],
+                admin_ai_train: ['admin_ai_train'],
+              }
+              const hasPage = (menuKey: string) => {
+                if (isAdminOrLeader) return true
+                const aliases = pageToMenu[menuKey] || [menuKey]
+                return aliases.some(k => mp.includes(k))
+              }
+              return (
               <li className="nav-item dropdown mx-1">
                 <a className="nav-link dropdown-toggle px-2" href="#" data-bs-toggle="dropdown">관리</a>
                 <ul className="dropdown-menu border-0 shadow">
                   <li style={{ fontSize: '0.7rem', fontWeight: 700, color: '#27ae60', textTransform: 'uppercase', letterSpacing: 1, padding: '6px 16px 2px' }}>관리</li>
-                  <li><a className="dropdown-item" href="/admin">누구의꿈(관리)</a></li>
-                  <li><a className="dropdown-item" href="/admin/users">회원관리</a></li>
-                  <li><a className="dropdown-item" href="/admin/news">소식(관리)</a></li>
-                  <li><a className="dropdown-item" href="/admin/share-reports">공유(관리)</a></li>
-                  <li><a className="dropdown-item" href="/admin/stores">🏪 동네가게(관리)</a></li>
-                  <li><a className="dropdown-item" href="/admin/alerts">🚨 알림(관리)</a></li>
-                  <li><a className="dropdown-item" href="/admin/construction-notices">🚧 공사알림(관리)</a></li>
-                  <li><a className="dropdown-item" href="/admin/yard">🌾 마당(관리)</a></li>
+                  {hasPage('admin_proposals') && <li><a className="dropdown-item" href="/admin">누구의꿈(관리)</a></li>}
+                  {hasPage('admin_users') && <li><a className="dropdown-item" href="/admin/users">회원관리</a></li>}
+                  {hasPage('admin_news') && <li><a className="dropdown-item" href="/admin/news">소식(관리)</a></li>}
+                  {hasPage('admin_share') && <li><a className="dropdown-item" href="/admin/share-reports">공유(관리)</a></li>}
+                  {hasPage('admin_stores') && <li><a className="dropdown-item" href="/admin/stores">🏪 동네가게(관리)</a></li>}
+                  {hasPage('admin_alerts') && <li><a className="dropdown-item" href="/admin/alerts">🚨 알림(관리)</a></li>}
+                  {hasPage('admin_construction') && <li><a className="dropdown-item" href="/admin/construction-notices">🚧 공사알림(관리)</a></li>}
+                  {hasPage('yard') && <li><a className="dropdown-item" href="/admin/yard">🌾 마당(관리)</a></li>}
                   <li><div className="dropdown-divider"></div></li>
                   <li><a className="dropdown-item" href="/admin/ai-chat">🤖 관리자 AI</a></li>
                   <li><a className="dropdown-item" href="/admin/ai-feedback">📋 AI 피드백</a></li>
-                  <li><a className="dropdown-item" href="/admin/ai-train">📚 양평AI 가르치기</a></li>
-                  <li><div className="dropdown-divider"></div></li>
-                  {host !== 'unocum.kr' && (
-                    <li><a className="dropdown-item" href="/admin/page-managers">🔑 페이지관리자</a></li>
+                   {hasPage('admin_ai_train') && <li><a className="dropdown-item" href="/admin/ai-train">📚 양평AI 가르치기</a></li>}
+                  {isAdminOrLeader && (
+                    <>
+                      <li><div className="dropdown-divider"></div></li>
+                      {host !== 'unocum.kr' && (
+                        <li><a className="dropdown-item" href="/admin/page-managers">🔑 페이지관리자</a></li>
+                      )}
+                      <li><a className="dropdown-item" href="/admin/message">쪽지 발송</a></li>
+                    </>
                   )}
-                  <li><a className="dropdown-item" href="/admin/message">쪽지 발송</a></li>
                 </ul>
               </li>
-            )}
+              )
+            })()}
           </ul>
         </div>
 

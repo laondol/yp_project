@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import Loading from '../components/common/Loading'
 import ErrorMessage from '../components/common/ErrorMessage'
 
@@ -23,6 +24,8 @@ interface PageManagersData {
 }
 
 export default function AdminPageManagers() {
+  const [searchParams] = useSearchParams()
+  const targetUserId = Number(searchParams.get('user')) || 0
   const [data, setData] = useState<PageManagersData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -30,7 +33,8 @@ export default function AdminPageManagers() {
   const load = async () => {
     setLoading(true); setError('')
     try {
-      const res = await fetch('/api/admin/page-managers')
+      const url = targetUserId ? `/api/admin/page-managers?user=${targetUserId}` : '/api/admin/page-managers'
+      const res = await fetch(url)
       if (!res.ok) throw new Error('불러오기 실패')
       setData(await res.json())
     } catch (e: unknown) {
@@ -39,6 +43,12 @@ export default function AdminPageManagers() {
   }
 
   useEffect(() => { load() }, [])
+
+  useEffect(() => {
+    if (!data || !targetUserId) return
+    const el = document.getElementById(`pm_user_${targetUserId}`)
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [data, targetUserId])
 
   const togglePage = async (userId: number, page: string) => {
     const fd = new FormData()
@@ -58,13 +68,17 @@ export default function AdminPageManagers() {
   if (error) return <div className="px-0 px-md-2"><ErrorMessage message={error} onRetry={load} /></div>
   if (!data) return null
 
+  const sortedAdmins = targetUserId
+    ? data.admins.filter(u => u.id === targetUserId)
+    : data.admins
+
   return (
     <div className="px-0 px-md-2" style={{ maxWidth: 900 }}>
-      {data.admins.map(u => {
+      {sortedAdmins.map(u => {
         const up = (u.managed_pages || '').split(',').filter(Boolean)
         const isVillage = up.some(p => p.startsWith('vi_'))
         return (
-          <div key={u.id}>
+          <div key={u.id} id={`pm_user_${u.id}`}>
             <div className="card border-0 shadow-sm mb-3 sticky-top" style={{ borderRadius: 16, backgroundColor: '#e8f5e9', zIndex: 1020, top: 56 }}>
               <div className="card-body py-2 px-3">
                 <div className="d-flex align-items-center gap-2 flex-wrap">

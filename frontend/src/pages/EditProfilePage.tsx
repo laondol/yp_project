@@ -12,6 +12,16 @@ export default function EditProfilePage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
+  const [isNeighbor, setIsNeighbor] = useState(false)
+  const [isResident, setIsResident] = useState(false)
+  const [town, setTown] = useState('')
+  const [village, setVillage] = useState('')
+  const [neighborLoading, setNeighborLoading] = useState(false)
+  const [neighborMsg, setNeighborMsg] = useState('')
+  const [neighborMsgOk, setNeighborMsgOk] = useState(false)
+  const [showHomeModal, setShowHomeModal] = useState(false)
+  const [pendingCoords, setPendingCoords] = useState<{lat: number; lon: number} | null>(null)
+
   const [pwStep, setPwStep] = useState(1)
   const [pwCode, setPwCode] = useState('')
   const [pwNew, setPwNew] = useState('')
@@ -31,6 +41,10 @@ export default function EditProfilePage() {
         setHomeAddress(d.home_address || '')
         setOfficeAddress(d.office_address || '')
         setUserId(d.id)
+        setIsNeighbor(d.is_neighbor || false)
+        setIsResident(d.is_verified_resident || false)
+        setTown(d.town || '')
+        setVillage(d.village || '')
       })
       .catch(() => setError('데이터를 불러오지 못했습니다.'))
   }, [])
@@ -58,6 +72,58 @@ export default function EditProfilePage() {
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleVerifyNeighbor = () => {
+    if (!navigator.geolocation) { setNeighborMsg('GPS를 지원하지 않는 브라우저입니다.'); setNeighborMsgOk(false); return }
+    setNeighborLoading(true); setNeighborMsg('')
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setPendingCoords({ lat: pos.coords.latitude, lon: pos.coords.longitude })
+        setShowHomeModal(true)
+        setNeighborLoading(false)
+      },
+      () => { setNeighborMsg('위치 정보를 가져올 수 없습니다.'); setNeighborMsgOk(false); setNeighborLoading(false) },
+      { enableHighAccuracy: true, timeout: 10000 }
+    )
+  }
+
+  const submitVerifyNeighbor = async (isHome: boolean) => {
+    if (!pendingCoords) return
+    setNeighborLoading(true)
+    setShowHomeModal(false)
+    try {
+      const res = await fetch('/user/verify-neighbor', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lat: pendingCoords.lat, lon: pendingCoords.lon, is_home: isHome })
+      })
+      const d = await res.json()
+      if (d.status === 'success') {
+        setIsNeighbor(true)
+        if (d.town) { setTown(d.town); setVillage(d.village || '') }
+        if (d.is_resident) {
+          setIsResident(true)
+          setNeighborMsg('주민 인증이 완료되었습니다! 🏠 동네 소식을 더 빨리 받아보실 수 있습니다.')
+        } else if (d.home_match) {
+          setIsResident(true)
+          setNeighborMsg('집 주소 확인! 주민 인증이 완료되었습니다! 🏠')
+        } else if (d.home_set) {
+          setNeighborMsg('이웃인증 완료! 🏘️ 주민이 되려면 집 주소에서 인증해 주세요. 주민이 되면 동네 소식을 더 빨리 받으실 수 있습니다.')
+        } else if (isHome) {
+          setNeighborMsg('집 주소가 설정되었습니다! 다시 인증하면 주민이 됩니다.')
+        } else {
+          setNeighborMsg('이웃인증 완료! 🏘️ 주민이 되려면 집 주소에서 인증해 주세요. 주민이 되면 동네 소식을 더 빨리 받으실 수 있습니다.')
+        }
+        setNeighborMsgOk(true)
+      } else {
+        setNeighborMsg(d.msg || '인증 실패')
+        setNeighborMsgOk(false)
+      }
+    } catch {
+      setNeighborMsg('인증 요청 중 오류가 발생했습니다.')
+      setNeighborMsgOk(false)
+    } finally { setNeighborLoading(false); setPendingCoords(null) }
   }
 
   const handleSendCode = async () => {
@@ -147,6 +213,48 @@ export default function EditProfilePage() {
           </div>
         </div>
       </div>
+
+      <div className="card border-0 shadow-sm mt-4" style={{ borderRadius: 18 }}>
+        <div className="card-body p-4">
+          <h5 className="fw-bold mb-2">이웃인증</h5>
+          <p className="text-muted small mb-3">양평군내 GPS 위치인증을 통해 이웃이 됩니다.</p>
+          {isNeighbor && (
+            <div className="mb-2">
+              <span className="badge bg-success">✅ 이웃인증 완료</span>
+              {isResident && <span className="badge bg-primary ms-1">🏠 주민</span>}
+              {town && <span className="text-muted small ms-2">{town} {village}</span>}
+            </div>
+          )}
+          {neighborMsg && <div className={`small mb-2 ${neighborMsgOk ? 'text-success' : 'text-danger'}`}>{neighborMsg}</div>}
+          {!isNeighbor ? (
+            <button type="button" className="btn btn-success w-100 py-2 fw-bold" onClick={handleVerifyNeighbor} disabled={neighborLoading}>
+              {neighborLoading ? '인증 중...' : '📍 이웃인증하기'}
+            </button>
+          ) : (
+            <button type="button" className="btn btn-outline-success w-100 py-2 fw-bold" onClick={handleVerifyNeighbor} disabled={neighborLoading}>
+              {neighborLoading ? '인증 중...' : '🔄 이웃인증 갱신'}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {showHomeModal && (
+        <div className="position-fixed top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center" style={{ zIndex: 9999, backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="bg-white rounded-4 p-4 mx-3" style={{ maxWidth: 380, width: '100%' }}>
+            <h5 className="fw-bold mb-3">이 위치가 집인가요?</h5>
+            <p className="text-muted small mb-3">집으로 설정하면 주민 인증을 받습니다.</p>
+            <div className="d-flex gap-2">
+              <button className="btn btn-success flex-fill fw-bold" onClick={() => submitVerifyNeighbor(true)}>
+                🏠 예, 집입니다
+              </button>
+              <button className="btn btn-outline-secondary flex-fill fw-bold" onClick={() => submitVerifyNeighbor(false)}>
+                🏘️ 아니요, 이웃만
+              </button>
+            </div>
+            <button className="btn btn-link text-muted w-100 mt-2" onClick={() => { setShowHomeModal(false); setPendingCoords(null) }}>취소</button>
+          </div>
+        </div>
+      )}
 
       <div className="card border-0 shadow-sm mt-4" style={{ borderRadius: 18 }}>
         <div className="card-body p-4">

@@ -2,7 +2,7 @@ import os
 from flask import Blueprint, render_template, request, redirect, url_for, jsonify, session, current_app, send_file
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import or_
-from models import db, User, Post, Message, NewsArticle, ShareReport, AiKnowledge, VillageAlert, AiKnowledge, VillageAlert
+from models import db, User, Post, Message, NewsArticle, ShareReport, AiKnowledge, VillageAlert, PostVote
 page_bp = Blueprint('page', __name__)
 from route_modules.user_bp import _cleanup_expired_posts
 from route_modules.common import is_privileged_viewer, mask_name, mask_title, mask_post_item, is_ramp_post
@@ -140,7 +140,7 @@ def note_page(path=''):
 
 @page_bp.route('/all-proposals')
 def all_proposals():
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     user_id = session.get('user_id')
     _cleanup_expired_posts()
     
@@ -296,6 +296,13 @@ def api_all_proposals():
             item = mask_post_item(item, author_uid=p.user_id, page_key='ramp')
         result.append(item)
     return jsonify(result)
+
+@page_bp.route('/api/page/all-proposals/my-agrees')
+def api_my_agrees():
+    uid = session.get('user_id')
+    if not uid: return jsonify({'agreed_post_ids': []})
+    votes = PostVote.query.filter_by(user_id=uid, vote_type='agree').all()
+    return jsonify({'agreed_post_ids': [v.post_id for v in votes]})
 
 @page_bp.route('/api/page/index-posts')
 def api_index_posts():

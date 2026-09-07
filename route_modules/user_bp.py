@@ -298,6 +298,78 @@ def user_location_refresh():
         "village": user.curr_village or ''
     })
 
+@user_bp.route('/user/verify-neighbor', methods=['POST'])
+def user_verify_neighbor():
+    if not session.get('username'):
+        return jsonify({"status": "error", "msg": "로그인이 필요합니다."}), 401
+    user = User.query.get(session['user_id'])
+    data = request.get_json() or {}
+    lat = float(data.get('lat', 0))
+    lon = float(data.get('lon', 0))
+    is_home = data.get('is_home', False)
+    if not lat or not lon:
+        return jsonify({"status": "error", "msg": "GPS 위치가 필요합니다."}), 400
+    from services.geocode import gps_to_town_village, is_in_yangpyeong
+    if not is_in_yangpyeong(lat, lon):
+        return jsonify({"status": "error", "msg": "양평군 외 지역에서는 이웃인증이 불가합니다."}), 400
+    t, v = gps_to_town_village(lat, lon)
+    user.is_neighbor = True
+    user.verified_method = 'neighbor'
+    user.curr_latitude = lat
+    user.curr_longitude = lon
+    if t:
+        user.curr_town = t
+        user.curr_village = v or ''
+
+    # 집 주소가 아직 없으면 is_home=true로 설정
+    if is_home and t:
+        user.town = t
+        user.village = v or ''
+        if not user.reg_town:
+            user.reg_town = t
+            user.reg_village = v or ''
+
+    is_resident = False
+    got_correction_points = False
+    home_set = bool((user.town or '').strip() and (user.village or '').strip())
+
+    # GPS 위치가 집 주소와 같으면 → 주민 인증
+    if home_set and t and user.town == t and user.village == (v or ''):
+        if not user.is_verified_resident:
+            user.is_verified_resident = True
+            user.jin_verified_at = datetime.now(timezone.utc)
+            is_resident = True
+        # 보정 닢: 주민인증 후 GPS로 집 위치 보정 시 닢 지급 (년 1회)
+        last_correction = PointHistory.query.filter(
+            PointHistory.user_id == user.id,
+            PointHistory.change_type == 'location_correction'
+        ).order_by(PointHistory.created_at.desc()).first()
+        now_utc = datetime.now(timezone.utc)
+        can_get = True
+        if last_correction:
+            last_dt = last_correction.created_at
+            if last_dt.tzinfo is None:
+                last_dt = last_dt.replace(tzinfo=timezone.utc)
+            if (now_utc - last_dt).days < 365:
+                can_get = False
+        if can_get:
+            from services.point_service import add_points
+            add_points(user.id, 1000, 'location_correction', '집 위치 보정 닢 (년 1회)')
+            got_correction_points = True
+
+    user.location_updated_at = datetime.now()
+    db.session.commit()
+    return jsonify({
+        "status": "success",
+        "is_neighbor": True,
+        "is_home": bool(is_home),
+        "is_resident": is_resident,
+        "got_correction_points": got_correction_points,
+        "home_set": home_set,
+        "home_match": home_set and t and user.town == t and user.village == (v or ''),
+        "town": t or '', "village": v or ''
+    })
+
 @user_bp.route('/user/location/share/toggle', methods=['POST'])
 def user_location_share_toggle():
     if not session.get('username'):
@@ -421,6 +493,13 @@ def api_user_edit_profile_get():
         'phone': user.phone or '',
         'home_address': user.curr_address or '',
         'office_address': user.office_address or '',
+        'is_neighbor': bool(user.is_neighbor),
+        'is_verified_resident': bool(user.is_verified_resident),
+        'town': user.town or '',
+        'village': user.village or '',
+        'curr_town': user.curr_town or '',
+        'curr_village': user.curr_village or '',
+        'location_updated_at': user.location_updated_at.strftime('%Y-%m-%d %H:%M') if user.location_updated_at else '',
     })
 
 

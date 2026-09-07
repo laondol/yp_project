@@ -21,7 +21,7 @@ interface AdminUser {
   managed_pages: string
 }
 
-type SortKey = 'email' | 'village' | 'points' | 'verified' | 'role'
+type SortKey = 'email' | 'village' | 'points' | 'verified' | 'role' | 'did'
 
 export default function AdminUsers() {
   const navigate = useNavigate()
@@ -82,6 +82,8 @@ export default function AdminUsers() {
         case 'role':
           cmp = a.role.localeCompare(b.role)
           break
+        case 'did':
+          cmp = Number(b.has_did) - Number(a.has_did)
       }
       return sortDir === 'asc' ? cmp : -cmp
     })
@@ -143,11 +145,21 @@ export default function AdminUsers() {
     }
   }
 
-  const roleBadge = (role: string) => {
-    if (role === 'admin') return <span className="badge bg-danger me-1">관</span>
-    if (role === 'leader') return <span className="badge bg-primary me-1">책</span>
-    if (role === 'manager') return <span className="badge bg-info me-1">운</span>
-    return <span className="badge bg-secondary me-1">회</span>
+  const roleBadge = (role: string, userId: number) => {
+    const badge = role === 'admin' ? <span className="badge bg-danger me-1">관</span>
+      : role === 'leader' ? <span className="badge bg-primary me-1">책</span>
+      : role === 'manager' ? <span className="badge bg-info me-1">운</span>
+      : <span className="badge bg-secondary me-1">회</span>
+    return (
+      <>
+        {badge}
+        <span
+          title="페이지관리자로 이동"
+          style={{ cursor: 'pointer', marginLeft: 4 }}
+          onClick={() => navigate(`/admin/page-managers?user=${userId}`)}
+        >🔑</span>
+      </>
+    )
   }
 
   if (loading) return (
@@ -205,7 +217,9 @@ export default function AdminUsers() {
                     <th style={{ cursor: 'pointer' }} onClick={() => toggleSort('verified')}>
                       인증{sortIcon('verified')}
                     </th>
-                    <th>DID/VC</th>
+                    <th style={{ cursor: 'pointer' }} onClick={() => toggleSort('did')}>
+                      DID/VC{sortIcon('did')}
+                    </th>
                     <th style={{ cursor: 'pointer' }} onClick={() => toggleSort('role')}>
                       역할{sortIcon('role')}
                     </th>
@@ -243,9 +257,11 @@ export default function AdminUsers() {
                           <span className="text-muted">-</span>
                         )}
                       </td>
-                      <td>{roleBadge(u.role)}</td>
+                      <td>{roleBadge(u.role, u.id)}</td>
                       <td>
-                        {u.has_did ? <span className="badge bg-info me-1" title="DID 있음">DID</span> : null}
+                        {u.has_did ? (
+                          <span className="badge bg-info me-1" title="DID 있음">DID</span>
+                        ) : null}
                         {u.has_vc ? <span className="badge bg-success" title="VC 있음">VC</span> : null}
                         {!u.has_did && !u.has_vc ? <span className="text-muted">-</span> : null}
                       </td>

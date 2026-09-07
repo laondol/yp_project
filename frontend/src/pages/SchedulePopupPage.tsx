@@ -122,6 +122,7 @@ export default function SchedulePopupPage() {
       if (!planDate) setPlanDate(new Date().toISOString().slice(0, 10))
       fetch('/api/user/location').then(r => r.json()).then(loc => {
         if (loc.town) setPlanFrom(prev => prev || (loc.town + ' ' + (loc.village || '')).trim())
+        if (loc.home_town) setPlanTo(prev => prev || (loc.home_town + ' ' + (loc.home_village || '')).trim())
       }).catch(() => {})
     }
   }, [tab])

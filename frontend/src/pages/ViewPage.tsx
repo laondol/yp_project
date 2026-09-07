@@ -36,7 +36,7 @@ export default function ViewPage() {
   const handleVote = async (type: 'like' | 'dislike') => {
     if (!postId) return
     try {
-      const res = await fetch(`/post/${type}/${postId}`, { method: 'POST' })
+      const res = await fetch(`/post/${type}/${postId}`, { method: 'POST', credentials: 'include' })
       const data = await res.json()
       if (data.status === 'success') load()
     } catch { alert('투표 중 오류') }

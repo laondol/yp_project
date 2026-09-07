@@ -189,6 +189,9 @@ def _collect_org_rss():
                 norm_title = re.sub(r'\s+', ' ', title).strip()
                 if YardPost.query.filter_by(title=norm_title).first():
                     continue
+                if _title_similarity_blocked(norm_title):
+                    print(f'[YARD] 스킵(유사 제목): {norm_title[:40]}')
+                    continue
 
                 # 행사/공지성 판정 (단순 홍보·일반 정보 제외)
                 judge = _ai_event_filter(title, desc)
@@ -293,6 +296,9 @@ def collect_yard_notices():
                 norm_title = re.sub(r'\s+', ' ', title).strip()
                 if YardPost.query.filter_by(title=norm_title).first():
                     continue
+                if _title_similarity_blocked(norm_title):
+                    print(f'[YARD] 스킵(유사 제목): {norm_title[:40]}')
+                    continue
 
                 # 행사/공지성 판정 (단순 홍보·일반 정보 제외)
                 judge = _ai_event_filter(title, desc)
@@ -335,6 +341,18 @@ def collect_yard_notices():
             print(f'[YARD] {q} 수집 오류: {e}')
             continue
 
+    # 행사일이 지났는데 승인(채택)되지 않은 소식 삭제 (마당은 미래의 일정만 수집, 승인 건은 후기 받으려고 유지)
+    past_unapp = YardPost.query.filter(
+        YardPost.event_date.isnot(None),
+        YardPost.event_date < datetime.now(),
+        YardPost.is_approved == False,
+    )
+    past_cnt = past_unapp.count()
+    if past_cnt:
+        past_unapp.delete(synchronize_session=False)
+        db.session.commit()
+        print(f'[YARD] 행사일 지난 미승인건 {past_cnt}건 삭제')
+
     # 오래된 자동수집건 정리 (30일 초과)
     from datetime import timedelta
     cutoff = datetime.now() - timedelta(days=30)
@@ -354,3 +372,19 @@ def collect_yard_notices():
 
     print(f'[YARD] 마당 소식 자동 수집 완료: 신규 {total_new}건 (단체블로그 {org_new}건)')
     return total_new
+
+def _title_similarity_blocked(title):
+    """정규화 제목이 기존 소식과 유사(80% 이상)하면 True - Google News 재수집 방지"""
+    import difflib
+    from models import YardPost
+    norm = re.sub(r'\s+', ' ', title).strip()
+    if not norm:
+        return False
+    recent = YardPost.query.order_by(YardPost.created_at.desc()).limit(200).all()
+    for p in recent:
+        t = re.sub(r'\s+', ' ', p.title or '').strip()
+        if not t:
+            continue
+        if difflib.SequenceMatcher(None, norm, t).ratio() >= 0.8:
+            return True
+    return False

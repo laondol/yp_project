@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import AuthorName from '../components/AuthorName'
 
 interface ShareItem {
-  id: number; title: string; description: string
+  id: number | string; title: string; description: string
   image_path: string | null; extra_images: string
   drawing_path: string | null
+  video_path?: string | null
   latitude: number; longitude: number
   town: string; village: string; address?: string
   ai_category: string; ai_summary: string
@@ -14,6 +16,13 @@ interface ShareItem {
   author_email?: string
   status: string; created_at: string
   auto_sent?: boolean
+  yard_event_id?: number | null
+  db_id?: number
+  event_date_display?: string
+  repeat_text?: string
+  distance_km?: number
+  source?: 'share' | 'yard'
+  kind_badge?: string
 }
 
 function haversine(lat1: number, lon1: number, lat2: number, lon2: number) {
@@ -35,6 +44,8 @@ export default function ShareList() {
   const [nearbyItems, setNearbyItems] = useState<any[]>([])
   const [nearbyLoading, setNearbyLoading] = useState(false)
   const [userLoc, setUserLoc] = useState<{ lat: number; lon: number } | null>(null)
+  const [searchParams] = useSearchParams()
+  const yardEventFilter = searchParams.get('yard_event')
   const [myId, setMyId] = useState<number | null>(null)
   const categories = ['사건', '풍경', '장소', '맛집', '기타']
 
@@ -55,18 +66,58 @@ export default function ShareList() {
     if (village) params.set('village', village)
     if (category) params.set('category', category)
     const qs = params.toString()
-    fetch(`/api/share/reports${qs ? '?' + qs : ''}`)
-      .then(r => r.json())
-      .then(data => {
+    const reviewQs = yardEventFilter ? `?yard_event=${yardEventFilter}` : ''
+    const sources = yardEventFilter
+      ? [Promise.resolve([]), Promise.resolve({ items: [] }), fetch(`/api/yard/reviews${reviewQs}`).then(r => r.json()).catch(() => ({ items: [] }))]
+      : [
+          fetch(`/api/share/reports${qs ? '?' + qs : ''}`).then(r => r.json()).catch(() => []),
+          fetch('/api/yard').then(r => r.json()).catch(() => ({ items: [] })),
+          fetch('/api/yard/reviews').then(r => r.json()).catch(() => ({ items: [] })),
+        ]
+    Promise.all(sources)
+      .then(([shareData, yardData, reviewData]) => {
+        const shareItems: ShareItem[] = (Array.isArray(shareData) ? shareData : []).map((r: any) => ({
+          ...r, source: 'share' as const, kind_badge: '공유',
+        }))
+        // 마당 행사 후기(노트) - 행사 위치 좌표로 배치 (사진 위주)
+        const reviewItems: ShareItem[] = (reviewData.items || []).map((n: any) => ({
+          id: n.id, db_id: n.db_id, title: n.title, description: n.content || '',
+          image_path: n.image_path || null, extra_images: '', drawing_path: null,
+          latitude: n.latitude ?? 0, longitude: n.longitude ?? 0,
+          town: '', village: '', address: n.address || '',
+          ai_category: '행사후기', ai_summary: n.content || '',
+          ai_region_news: '', ai_news_links: '',
+          like_count: 0, dislike_count: 0,
+          author_name: n.author_name || '익명', user_id: 0,
+          status: 'approved', created_at: n.created_at || '',
+          source: 'yard' as const, kind_badge: '⭐ 행사후기',
+          yard_event_id: n.yard_event_id,
+        }))
+        // 마당 승인 소식(행사·공지) 병합 - 배지로 구분
+        const yardItems: ShareItem[] = (yardData.items || []).map((y: any) => ({
+          id: y.id, db_id: y.db_id, title: y.title, description: y.content || '',
+          image_path: null, extra_images: '', drawing_path: null,
+          latitude: y.latitude ?? 0, longitude: y.longitude ?? 0,
+          town: '', village: '', address: y.event_place || '',
+          ai_category: y.kind === 'event' ? '행사' : '소식', ai_summary: y.content || '',
+          ai_region_news: '', ai_news_links: '',
+          like_count: 0, dislike_count: 0,
+          author_name: y.author_name || '관리자', user_id: 0,
+          status: 'approved', created_at: y.created_at || '',
+          source: 'yard' as const, kind_badge: y.kind === 'event' ? '행사' : '마당소식',
+          event_date_display: y.event_date_display || '',
+          repeat_text: y.repeat_text || '',
+        }))
+        let merged: ShareItem[] = [...shareItems, ...yardItems, ...reviewItems]
         if (userLoc) {
-          data.sort((a: ShareItem, b: ShareItem) => {
-            const dA = a.latitude ? haversine(userLoc.lat, userLoc.lon, a.latitude, a.longitude) : 9999
-            const dB = b.latitude ? haversine(userLoc.lat, userLoc.lon, b.latitude, b.longitude) : 9999
-            return dA - dB
-          })
+          merged = merged.map((m: ShareItem) => ({
+            ...m,
+            distance_km: m.latitude ? Number(haversine(userLoc.lat, userLoc.lon, Number(m.latitude), Number(m.longitude)).toFixed(1)) : undefined,
+          }))
+          merged.sort((a: ShareItem, b: ShareItem) => (a.distance_km ?? 9999) - (b.distance_km ?? 9999))
         }
-        setItems(data)
-        const t = [...new Set(data.map((r: ShareItem) => r.town).filter(Boolean))] as string[]
+        setItems(merged)
+        const t = [...new Set(shareItems.map((r: ShareItem) => r.town).filter(Boolean))] as string[]
         setTowns(t)
       })
       .finally(() => setLoading(false))
@@ -142,7 +193,7 @@ export default function ShareList() {
               <div className="row g-2">
                 {nearbyItems.map((item: any) => (
                   <div key={item.id} className="col-6 col-md-4 col-lg-3 p-2" style={{cursor:'pointer',borderRadius:12}}
-                    onClick={() => window.location.href = '/share/detail/' + item.id}>
+                    onClick={() => window.location.href = (item.source === 'yard' ? '/yard/' + String(item.id).slice(1) : '/share/detail/' + item.id)}>
                     <div className="d-flex gap-2 align-items-start">
                       {item.image ? <img src={item.image} style={{width:50,height:50,objectFit:'cover',borderRadius:8}} />
                         : <div style={{width:50,height:50,background:'#eee',borderRadius:8}} />}
@@ -196,7 +247,8 @@ export default function ShareList() {
       ) : items.length > 0 ? (
         <div className="row g-3 flex-nowrap flex-sm-wrap" style={{ overflowX: 'auto', paddingBottom: 4 }}>
           {items.map(r => {
-            const dist = userLoc && r.latitude ? haversine(userLoc.lat, userLoc.lon, r.latitude, r.longitude) : null
+            const dist = userLoc && r.latitude ? haversine(userLoc.lat, userLoc.lon, Number(r.latitude), Number(r.longitude)) : null
+            const rid = typeof r.id === 'number' ? r.id : null
             return (
             <div key={r.id} className="col-12 col-md-6 col-lg-4" style={{ minWidth: 340 }}>
               <div className="card border-0 shadow-sm h-100" style={{borderRadius:16,overflow:'hidden'}}>
@@ -234,7 +286,8 @@ export default function ShareList() {
                 })()}
                 <div className="card-body p-3 d-flex flex-column">
                   <div className="d-flex gap-1 flex-wrap mb-2">
-                    <span className="badge bg-info">{r.ai_category}</span>
+                    <span className={`badge ${r.source === 'yard' ? 'bg-success' : 'bg-info'}`}>{r.kind_badge}</span>
+                    <span className="badge bg-light text-dark">{r.ai_category}</span>
                     <span className="badge bg-light text-dark">{r.address || `${r.town} ${r.village}`}</span>
                     {r.status !== 'approved' && myId === r.user_id && (
                       <span className="badge bg-danger">{r.status === 'pending_person' ? '보류(인물)' : r.status === 'flagged' ? '차단됨' : r.status === 'draft' ? '자동보관' : '승인대기'}</span>
@@ -258,7 +311,7 @@ export default function ShareList() {
                   <div className="d-flex justify-content-between align-items-center pt-2 border-top">
                     <small className="text-muted">
                       📍 {r.address || `${r.town} ${r.village}`}
-                      {dist !== null && (
+                      {dist !== null && typeof dist === 'number' && (
                         <span className="text-primary ms-1 fw-bold">{dist.toFixed(1)}km</span>
                       )}
                       {r.latitude && r.longitude && (
@@ -266,13 +319,17 @@ export default function ShareList() {
                       )}
                     </small>
                     <div className="d-flex gap-1">
-                      <button onClick={() => vote(r.id, 'like')} className="btn btn-sm btn-outline-success">👍 {r.like_count}</button>
-                      <button onClick={() => vote(r.id, 'dislike')} className="btn btn-sm btn-outline-danger">👎 {r.dislike_count}</button>
+                      {rid !== null && (
+                        <>
+                          <button onClick={() => vote(rid, 'like')} className="btn btn-sm btn-outline-success">👍 {r.like_count}</button>
+                          <button onClick={() => vote(rid, 'dislike')} className="btn btn-sm btn-outline-danger">👎 {r.dislike_count}</button>
+                        </>
+                      )}
                     </div>
                   </div>
 
                   <div className="d-flex justify-content-between align-items-center mt-2">
-                    <a href={`/share/detail/${r.id}`} className="text-decoration-none small text-primary">자세히 보기 →</a>
+                    <a href={r.source === 'yard' ? `/yard/${r.db_id ?? String(r.id).slice(1)}` : `/share/detail/${r.id}`} className="text-decoration-none small text-primary">자세히 보기 →</a>
                   </div>
 
                   <div className="small text-muted mt-1 pt-2 border-top border-light" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

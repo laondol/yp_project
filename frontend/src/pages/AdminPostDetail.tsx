@@ -58,7 +58,7 @@ export default function AdminPostDetail() {
     setSaving(true)
     try {
       const body: Record<string, unknown> = {}
-      if (role === 'admin') body.admin_score = adminScore
+      if (role === 'admin' || role === 'user') body.admin_score = adminScore
       if (role === 'leader') body.leader_score = leaderScore
       body.is_forced_approved = forceApprove
       const res = await fetch(`/api/admin/post/${id}/scores`, {
@@ -68,7 +68,7 @@ export default function AdminPostDetail() {
       })
       if (!res.ok) throw new Error('저장 실패')
       const data = await res.json()
-      setPost(prev => prev ? { ...prev, total_score: data.total_score, is_forced_approved: data.is_forced_approved } : prev)
+      setPost(prev => prev ? { ...prev, total_score: data.total_score, is_forced_approved: data.is_forced_approved, admin_score: data.admin_score ?? prev.admin_score, leader_score: data.leader_score ?? prev.leader_score } : prev)
       alert('저장되었습니다.')
     } catch { alert('저장 실패') }
     finally { setSaving(false) }
@@ -161,30 +161,22 @@ export default function AdminPostDetail() {
 
             <div className="mb-4">
               <div className="row g-2 mb-3">
-                {role === 'admin' && (
-                  <>
-                    <div className="col-6">
-                      <label className="small">👮 관리자 점수(-10~10)</label>
-                      <input type="number" className="form-control" value={adminScore} onChange={e => setAdminScore(Number(e.target.value))} disabled={post.is_finalized} />
-                    </div>
-                    <div className="col-6">
-                      <label className="small">👑 책임자 점수</label>
-                      <input type="number" className="form-control" value={post.leader_score} disabled />
-                    </div>
-                  </>
-                )}
-                {role === 'leader' && (
-                  <>
-                    <div className="col-6">
-                      <label className="small">👮 관리자 점수</label>
-                      <input type="number" className="form-control" value={post.admin_score} disabled />
-                    </div>
-                    <div className="col-6">
-                      <label className="small">👑 책임자 점수(-10~10)</label>
-                      <input type="number" className="form-control" value={leaderScore} onChange={e => setLeaderScore(Number(e.target.value))} disabled={post.is_finalized} />
-                    </div>
-                  </>
-                )}
+                <div className="col-6">
+                  <label className="small">👮 관리자 점수(-10~10)</label>
+                  {(role === 'admin' || role === 'user') ? (
+                    <input type="number" className="form-control" min="-10" max="10" value={adminScore} onChange={e => setAdminScore(Math.max(-10, Math.min(10, Number(e.target.value))))} disabled={post.is_finalized} />
+                  ) : (
+                    <input type="number" className="form-control" value={post.admin_score} disabled />
+                  )}
+                </div>
+                <div className="col-6">
+                  <label className="small">👑 책임자 점수(-10~10)</label>
+                  {role === 'leader' ? (
+                    <input type="number" className="form-control" min="-10" max="10" value={leaderScore} onChange={e => setLeaderScore(Math.max(-10, Math.min(10, Number(e.target.value))))} disabled={post.is_finalized} />
+                  ) : (
+                    <input type="number" className="form-control" value={post.leader_score} disabled />
+                  )}
+                </div>
               </div>
               {!post.is_finalized && (
                 <div className="form-check mb-3">

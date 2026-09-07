@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { formatKST } from '../utils/format'
 
 interface YardExtraSchedule {
@@ -22,6 +23,8 @@ interface YardItem {
   repeat_start?: string; repeat_end?: string
   repeat_next_list?: string[]
   extra_schedules?: YardExtraSchedule[]
+  is_past?: boolean
+  review_count?: number
   distance_km?: number | null
   created_at: string
 }
@@ -33,6 +36,7 @@ interface YardComment {
 }
 
 export default function YardPage() {
+  const navigate = useNavigate()
   const [items, setItems] = useState<YardItem[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('all')
@@ -70,7 +74,9 @@ export default function YardPage() {
   }, [])
 
   const filtered = items.filter(i =>
-    filter === 'all' ? true : filter === 'event' ? i.kind === 'event' : i.kind === 'post' && i.platform === filter
+    filter === 'all' ? true :
+    filter === 'past' ? !!i.is_past :
+    filter === 'event' ? i.kind === 'event' : i.kind === 'post' && i.platform === filter
   )
 
   const vote = (it: YardItem, v: 'like' | 'dislike') => {
@@ -225,6 +231,7 @@ export default function YardPage() {
         {[
           { key: 'all', label: '전체' },
           { key: 'event', label: '🌾 마을행사' },
+          { key: 'past', label: '⭐ 지나간 행사' },
         ].map(f => (
           <button key={f.key} className={`btn btn-sm ${filter === f.key ? 'btn-success' : 'btn-outline-success'}`}
             onClick={() => setFilter(f.key)}>{f.label}</button>
@@ -241,12 +248,30 @@ export default function YardPage() {
       ) : (
         <div className="row g-3">
           {filtered.map(it => {
+            const isPast = !!it.is_past
             return (
               <div key={it.id} className="col-12 col-md-6 col-lg-4" style={{ minWidth: 340 }}>
                 <div className="card border-0 shadow-sm h-100" style={{ borderRadius: 16 }}>
                   <div className="card-body p-3 d-flex flex-column">
                     {/* 제목 (맨위) */}
                     <h6 className="fw-bold mb-2">{it.title}</h6>
+
+                    {/* ⭐ 지나간 행사 배지 + 후기 (클릭 시 공유마당에서 후기 목록 표시) */}
+                    {isPast && (
+                      <>
+                        <div className="d-flex justify-content-between align-items-center mb-2 p-2 rounded" style={{ background: '#fffbe6' }}>
+                          <span className="small fw-bold" style={{ cursor: 'pointer' }}
+                            onClick={() => navigate(`/share?yard_event=${it.db_id}`)}>
+                            ⭐ 지나간 행사 · 후기 {(it.review_count ?? 0)}건 보기 →
+                          </span>
+                          <button className="btn btn-sm btn-warning py-0" style={{ fontSize: '0.7rem' }}
+                            onClick={() => navigate(`/note/new?yard_event=${it.db_id}&event_title=${encodeURIComponent(it.title)}`)}>
+                            ⭐ 후기 쓰기
+                          </button>
+                        </div>
+                        {it.event_place && <div className="small mb-1">📍 {it.event_place}</div>}
+                      </>
+                    )}
 
                     {/* 반복 일정 */}
                     {it.repeat_text && (
@@ -291,10 +316,10 @@ export default function YardPage() {
                     ))}
 
                     {/* 장소 */}
-                    {it.event_place && <div className="small mb-1">📍 {it.event_place}</div>}
+                    {!isPast && it.event_place && <div className="small mb-1">📍 {it.event_place}</div>}
 
-                    {/* 신청기간 + 예약/신청 바로가기 + 연락처 */}
-                    {(it.apply_display || it.reserve_url || it.contact) && (
+                    {/* 신청기간 + 예약/신청 바로가기 + 연락처 (지나간 행사에서는 숨김) */}
+                    {!isPast && (it.apply_display || it.reserve_url || it.contact) && (
                       <div className="small mb-1 p-2 bg-light rounded">
                         {it.apply_display && <div>🗓️ 신청기간: {it.apply_display}</div>}
                         {it.reserve_url && (
@@ -335,7 +360,7 @@ export default function YardPage() {
                       )}
                       {it.kind === 'post' && (
                         <button className="btn btn-sm btn-outline-secondary py-0" onClick={() => openComments(it)}>
-                          💬 댓글
+                          {isPast ? '⭐ 후기' : '💬 댓글'}
                         </button>
                       )}
                     </div>
@@ -399,7 +424,7 @@ export default function YardPage() {
                 {/* 댓글 작성 */}
                 {me ? (
                   <form onSubmit={e => { e.preventDefault(); submitComment() }}>
-                    <textarea className="form-control mb-2" rows={2} placeholder="의견을 남겨주세요."
+                    <textarea className="form-control mb-2" rows={2} placeholder={(commentPost?.is_past) ? "후기를 남겨주세요." : "의견을 남겨주세요."}
                       value={commentText} onChange={e => setCommentText(e.target.value)} />
                     <div className="d-flex gap-2 mb-2 flex-wrap">
                       <input type="file" accept="image/*" className="form-control form-control-sm" style={{ maxWidth: 200 }}
@@ -407,7 +432,7 @@ export default function YardPage() {
                       <input type="url" className="form-control form-control-sm" placeholder="링크 (선택)"
                         value={commentLink} onChange={e => setCommentLink(e.target.value)} style={{ maxWidth: 220 }} />
                       <button type="submit" className="btn btn-sm btn-success" disabled={sending}>
-                        {sending ? '⏳ 등록 중...' : '💬 댓글 등록'}
+                        {sending ? '⏳ 등록 중...' : ((commentPost?.is_past) ? '⭐ 후기 등록' : '💬 댓글 등록')}
                       </button>
                     </div>
                     {commentImage && <small className="text-success">📷 {commentImage.name}</small>}

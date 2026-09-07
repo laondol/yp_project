@@ -111,6 +111,83 @@ class Post(db.Model):
     dislike_count = db.Column(db.Integer, default=0)
     is_finalized = db.Column(db.Boolean, default=False)         # admin+leader 점수 확정
 
+    def recalc_total(self):
+        """종합점수 재계산 + 현실화 전환
+        - 관리자/책임자만 점수를 줌 → is_forced_approved 설정
+        - AI 30점은 자동승인 안 됨 (스케줄러에서 7일 후 자동게시)
+        - 게시 시 관리자에게 통보
+        - AI+관리자 ≥ 20점 → 책임자에게 리마인더
+        - 현실화: 합계 ≥ 80 → 현실화 (작성자 80坭 지급·쪽지 발송)"""
+        self.total_score = (self.ai_score or 0) + (self.admin_score or 0) + (self.leader_score or 0) + (self.member_score or 0)
+        result = {'published': False, 'realized': False}
+        # 관리자 또는 책임자가 점수를 주었으면 게시
+        if not self.is_forced_approved and ((self.admin_score or 0) > 0 or (self.leader_score or 0) > 0):
+            self.is_forced_approved = True
+            result['published'] = True
+            # 게시 시 관리자에게 통보
+            author = User.query.get(self.user_id) if self.user_id else None
+            admins = User.query.filter(User.role.in_(['leader', 'admin'])).all()
+            for a in admins:
+                if author and a.id == author.id:
+                    continue
+                msg = Message(
+                    sender_id=None,
+                    sender_name='함께사는양평',
+                    sender_role='admin',
+                    receiver_id=a.id,
+                    subject='📢 누구의 꿈 게시 알림',
+                    content=f'「{self.title}」 제안이 게시되었습니다. AI: {self.ai_score}점, 관리자: {self.admin_score or 0}점, 책임자: {self.leader_score or 0}점.'
+                )
+                db.session.add(msg)
+        # AI+관리자 점수 합 ≥ 20점 → 책임자에게 편지
+        if (self.ai_score or 0) + (self.admin_score or 0) >= 20 and (self.leader_score or 0) == 0:
+            already_notified = Message.query.filter(
+                Message.subject == '📋 리뷰 요청 (20점 달성)',
+                Message.content.contains(f'id={self.id}')
+            ).first()
+            if not already_notified:
+                leaders = User.query.filter(User.role == 'leader').all()
+                author = User.query.get(self.user_id) if self.user_id else None
+                for leader in leaders:
+                    if author and leader.id == author.id:
+                        continue
+                    msg = Message(
+                        sender_id=None,
+                        sender_name='함께사는양평',
+                        sender_role='admin',
+                        receiver_id=leader.id,
+                        subject='📋 리뷰 요청 (20점 달성)',
+                        content=f'「{self.title}」 제안이 AI+관리자 {self.ai_score + (self.admin_score or 0)}점으로 20점을 달성했습니다. 책임자 리뷰를 부탁드립니다. (id={self.id})'
+                    )
+                    db.session.add(msg)
+        # 현실화 전환
+        if self.status == '제안' and self.total_score >= 80:
+            self.status = '현실화'
+            result['realized'] = True
+            author = User.query.get(self.user_id) if self.user_id else None
+            admin_user = User.query.filter(User.role == 'admin').first()
+            if author and admin_user and admin_user.id != self.user_id:
+                msg = Message(
+                    sender_id=admin_user.id,
+                    sender_name='함께사는양평',
+                    sender_role='admin',
+                    receiver_id=author.id,
+                    subject='🎉 현실화 축하드립니다',
+                    content='누구의 꿈에 올라 현실화 단계로 전환되었습니다. 행사 준비를 시작하며, 보상으로 80 닢이 지급되었습니다. 회의에 참석하실 수 있는 날짜와 시간을 알려 주세요. 직접 방문이나 구글미트 회의가 가능합니다. 문의: 010-2438-7953 (평일 10~18시)'
+                )
+                db.session.add(msg)
+            if author and admin_user and admin_user.id != self.user_id:
+                author.points = (author.points or 0) + 80
+                db.session.add(PointHistory(
+                    user_id=author.id,
+                    change_type='realize_reward',
+                    amount=80,
+                    balance_after=author.points,
+                    description='누구의 꿈 현실화 보상',
+                    related_id=self.id,
+                ))
+        return result
+
 class Comment(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     post_id = db.Column(db.Integer, db.ForeignKey('post.id'))
@@ -263,6 +340,7 @@ class ShareReport(db.Model):
     video_path = db.Column(db.String(300))
     latitude = db.Column(db.Float)
     longitude = db.Column(db.Float)
+    yard_event_id = db.Column(db.Integer)   # 마당 행사 연결 (행사후기 글)
     town = db.Column(db.String(50))
     village = db.Column(db.String(50))
     address = db.Column(db.String(200))
@@ -564,6 +642,7 @@ class Note(db.Model):
     latitude = db.Column(db.Float)
     longitude = db.Column(db.Float)
     address = db.Column(db.String(300))
+    yard_event_id = db.Column(db.Integer)   # 마당 행사 연결 (행사후기 글)
     is_public = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)

@@ -64,6 +64,7 @@ export default function AllProposalsPage() {
   const [posts, setPosts] = useState<Post[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [myAgrees, setMyAgrees] = useState<Set<number>>(new Set())
 
   const load = useCallback(async () => {
     setLoading(true); setError('')
@@ -75,15 +76,31 @@ export default function AllProposalsPage() {
     } finally { setLoading(false) }
   }, [])
 
-  useEffect(() => { load() }, [load])
-
-  const handleVote = async (id: number, type: 'like' | 'dislike') => {
+  const loadMyAgrees = useCallback(async () => {
     try {
-      const res = await api.post<{ status: string }>(`/post/${type}/${id}`)
+      const res = await api.get<{ agreed_post_ids: number[] }>('/api/page/all-proposals/my-agrees')
+      setMyAgrees(new Set(res.agreed_post_ids || []))
+    } catch { /* ignore */ }
+  }, [])
+
+  useEffect(() => { load(); loadMyAgrees() }, [load, loadMyAgrees])
+
+  const handleAgree = async (id: number) => {
+    try {
+      const res = await api.post<{ status: string; agree_count: number; member_score: number; total_score: number }>(`/post/agree/${id}`)
       if (res.status === 'success') {
-        setPosts(prev => prev.map(p =>
-          p.id === id ? { ...p, [type === 'like' ? 'like_count' : 'dislike_count']: (p[type === 'like' ? 'like_count' : 'dislike_count'] || 0) + 1 } : p
-        ))
+        setMyAgrees(prev => new Set([...prev, id]))
+        setPosts(prev => prev.map(p => p.id === id ? { ...p, member_score: res.member_score, total_score: res.total_score } : p))
+      }
+    } catch { /* ignore */ }
+  }
+
+  const handleAgreeCancel = async (id: number) => {
+    try {
+      const res = await api.post<{ status: string; agree_count: number; member_score: number; total_score: number }>(`/post/agree-cancel/${id}`)
+      if (res.status === 'success') {
+        setMyAgrees(prev => { const n = new Set(prev); n.delete(id); return n })
+        setPosts(prev => prev.map(p => p.id === id ? { ...p, member_score: res.member_score, total_score: res.total_score } : p))
       }
     } catch { /* ignore */ }
   }
@@ -119,6 +136,7 @@ export default function AllProposalsPage() {
             const within48 = createdAt && now - createdAt < 48 * 60 * 60 * 1000
             const noScore = (p.admin_score === 0 || p.admin_score == null) && (p.leader_score === 0 || p.leader_score == null)
             const canEdit = userId && p.user_id === userId && !p.is_forced_approved && noScore && within48
+            const isAgreed = myAgrees.has(p.id)
 
             return (
               <div key={p.id} className="list-group-item mb-3 p-4 shadow-sm border-0 bg-white" style={{ borderRadius: 18 }}>
@@ -150,20 +168,27 @@ export default function AllProposalsPage() {
                   </div>
                 )}
 
-                {userId && p.user_id === userId && (
-                  <div className="mb-3 p-2 bg-light rounded small">
-                    <span className="fw-bold me-2">📊 점수:</span>
-                    <span className="me-2">AI: <strong>{p.ai_score ?? 0}</strong></span>
-                    <span className="me-2">관리자: <strong>{p.admin_score ?? 0}</strong></span>
-                    <span className="me-2">책임자: <strong>{p.leader_score ?? 0}</strong></span>
-                    <span className="me-2">회원: <strong>{p.member_score ?? 0}</strong></span>
-                    <span>합계: <strong>{p.total_score ?? 0}</strong></span>
-                  </div>
-                )}
+                <div className="mb-3 p-2 bg-light rounded small">
+                  <span className="fw-bold me-2">📊 점수:</span>
+                  <span className="me-2">AI: <strong>{p.ai_score ?? 0}</strong></span>
+                  <span className="me-2">관리자: <strong>{p.admin_score ?? 0}</strong></span>
+                  <span className="me-2">책임자: <strong>{p.leader_score ?? 0}</strong></span>
+                  <span className="me-2">동의: <strong>{p.member_score ?? 0}</strong></span>
+                  <span>합계: <strong className={(p.total_score ?? 0) >= 80 ? 'text-success' : ''}>{p.total_score ?? 0}</strong></span>
+                </div>
+
                 <div className="d-flex justify-content-between align-items-center pt-3 border-top flex-wrap gap-2">
                   <div className="d-flex align-items-center gap-2 flex-wrap">
-                    <button onClick={() => handleVote(p.id, 'like')} className="btn btn-sm btn-outline-success py-0 px-2">👍 {p.like_count || 0}</button>
-                    <button onClick={() => handleVote(p.id, 'dislike')} className="btn btn-sm btn-outline-danger py-0 px-2">👎 {p.dislike_count || 0}</button>
+                    {userId && (
+                      isAgreed ? (
+                        <button onClick={() => handleAgreeCancel(p.id)} className="btn btn-sm btn-success py-0 px-2">✅ 동의취소</button>
+                      ) : (
+                        <button onClick={() => handleAgree(p.id)} className="btn btn-sm btn-outline-success py-0 px-2">이 제안에 동의합니다</button>
+                      )
+                    )}
+                    {!userId && (
+                      <span className="text-muted small">동의: {p.member_score ?? 0}</span>
+                    )}
                     <span className="mx-2">|</span>
                     {getStatusBadge(p)}
                     {p.created_at && within48 && <CountdownTimer createdAt={p.created_at} />}

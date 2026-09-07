@@ -14,7 +14,17 @@ def _serve_spa():
         return send_file(path)
     return render_template('intro.html')
 
+def _is_admin_or_leader():
+    return session.get('role') in ('leader', 'admin')
 
+def _has_managed_page(page_key):
+    mp_str = session.get('managed_pages') or ''
+    if not mp_str:
+        uid = session.get('user_id')
+        if uid:
+            u = User.query.get(uid)
+            mp_str = u.managed_pages or '' if u else ''
+    return page_key in mp_str.split(',')
 
 def add_points(user_id, amount, change_type, description, related_id=None):
     user = User.query.get(user_id)
@@ -30,7 +40,8 @@ def add_points(user_id, amount, change_type, description, related_id=None):
 
 @admin_bp.route('/api/admin/posts')
 def api_admin_posts():
-    if session.get('role') != 'leader': return jsonify({'error': '권한 없음'}), 403
+    if not (_is_admin_or_leader() or _has_managed_page('admin_proposals') or _has_managed_page('all_proposals')):
+        return jsonify({'error': '권한 없음'}), 403
     posts = Post.query.order_by(Post.created_at.desc()).all()
     return jsonify([{
         'id': p.id, 'title': p.title, 'content': p.content[:100],
@@ -41,7 +52,7 @@ def api_admin_posts():
 
 @admin_bp.route('/api/admin/users')
 def api_admin_users():
-    if session.get('role') != 'leader': return jsonify({'error': '권한 없음'}), 403
+    if not (_is_admin_or_leader() or _has_managed_page('admin_users')): return jsonify({'error': '권한 없음'}), 403
     users = User.query.order_by(User.id.desc()).all()
     from models import DIDDocument, VerifiableCredential
 
@@ -67,7 +78,7 @@ def api_admin_users():
 
 @admin_bp.route('/api/admin/users/search')
 def api_admin_users_search():
-    if session.get('role') not in ('admin', 'leader'): return jsonify({'error': '권한 없음'}), 403
+    if not (_is_admin_or_leader() or _has_managed_page('admin_users')): return jsonify({'error': '권한 없음'}), 403
     q = request.args.get('q', '').strip()
     if not q: return jsonify([])
     pattern = f'%{q}%'
@@ -86,7 +97,7 @@ def api_admin_users_search():
 
 @admin_bp.route('/api/admin/stores')
 def api_admin_stores():
-    if session.get('role') not in ('admin', 'leader'): return jsonify({'error': '권한 없음'}), 403
+    if not (_is_admin_or_leader() or _has_managed_page('admin_stores')): return jsonify({'error': '권한 없음'}), 403
     from models import StoreInfo
     stores = StoreInfo.query.order_by(StoreInfo.name).all()
     return jsonify([{
@@ -97,7 +108,7 @@ def api_admin_stores():
 
 @admin_bp.route('/api/admin/alerts')
 def api_admin_alerts():
-    if session.get('role') not in ('admin', 'leader'): return jsonify({'error': '권한 없음'}), 403
+    if not (_is_admin_or_leader() or _has_managed_page('admin_alerts')): return jsonify({'error': '권한 없음'}), 403
     from models import VillageAlert
     alerts = VillageAlert.query.order_by(VillageAlert.created_at.desc()).all()
     return jsonify([{
@@ -143,7 +154,7 @@ def api_admin_share_reports():
 
 @admin_bp.route('/api/admin/ai-knowledge')
 def api_admin_ai_knowledge():
-    if session.get('role') not in ('admin', 'leader'): return jsonify({'error': '권한 없음'}), 403
+    if not _is_admin_or_leader(): return jsonify({'error': '권한 없음'}), 403
     knowledge = AiKnowledge.query.order_by(AiKnowledge.created_at.desc()).all()
     return jsonify([{
         'id': k.id, 'question': k.question, 'answer': k.answer,
@@ -152,7 +163,7 @@ def api_admin_ai_knowledge():
 
 @admin_bp.route('/api/admin/news')
 def api_admin_news():
-    if session.get('role') not in ('admin', 'leader'): return jsonify({'error': '권한 없음'}), 403
+    if not (_is_admin_or_leader() or _has_managed_page('admin_news')): return jsonify({'error': '권한 없음'}), 403
     tab = request.args.get('tab', 'all')
     page = int(request.args.get('page', 1))
     per_page = 20
@@ -188,7 +199,7 @@ def api_admin_news():
 
 @admin_bp.route('/api/admin/pending-letters')
 def api_admin_pending_letters():
-    if session.get('role') not in ('admin', 'leader'): return jsonify({'error': '권한 없음'}), 403
+    if not (_is_admin_or_leader() or _has_managed_page('admin_proposals') or _has_managed_page('all_proposals')): return jsonify({'error': '권한 없음'}), 403
     from models import Message
     pending = Message.query.filter_by(is_pending=True).order_by(Message.created_at.desc()).all()
     return jsonify([{
@@ -200,7 +211,7 @@ def api_admin_pending_letters():
 
 @admin_bp.route('/admin/postgresql')
 def admin_postgresql():
-    if session.get('role') != 'leader':
+    if not _is_admin_or_leader():
         return "권한 없음", 403
     from sqlalchemy import inspect, text
     insp = inspect(db.engine)
@@ -214,12 +225,13 @@ def admin_postgresql():
     return _serve_spa()
 @admin_bp.route('/admin')
 def admin():
-    if session.get('role') != 'leader': return "권한 없음", 403
-    return _serve_spa()
+    if _is_admin_or_leader() or _has_managed_page('admin_proposals') or _has_managed_page('all_proposals'):
+        return _serve_spa()
+    return "권한 없음", 403
 
 @admin_bp.route('/api/admin/post/<int:post_id>')
 def api_admin_post_detail(post_id):
-    if session.get('role') != 'leader': return jsonify({'error': '권한 부족'}), 403
+    if not (_is_admin_or_leader() or _has_managed_page('admin_proposals') or _has_managed_page('all_proposals')): return jsonify({'error': '권한 부족'}), 403
     post = Post.query.get_or_404(post_id)
     import json as _json
     logs = _json.loads(post.ai_debate_log) if post.ai_debate_log else []
@@ -238,38 +250,44 @@ def api_admin_post_detail(post_id):
 
 @admin_bp.route('/api/admin/post/<int:post_id>/scores', methods=['POST'])
 def api_admin_update_scores(post_id):
-    if session.get('role') != 'leader': return jsonify({'error': '권한 부족'}), 403
+    if not (_is_admin_or_leader() or _has_managed_page('admin_proposals') or _has_managed_page('all_proposals')): return jsonify({'error': '권한 부족'}), 403
     post = Post.query.get_or_404(post_id)
     data = request.get_json() or {}
     role = session.get('role')
-    if role == 'admin':
-        post.admin_score = int(data.get('admin_score', post.admin_score))
-    elif role == 'leader':
-        post.leader_score = int(data.get('leader_score', post.leader_score))
+    if role in ('admin', 'leader'):
+        if role == 'admin':
+            post.admin_score = max(-10, min(10, int(data.get('admin_score', post.admin_score))))
+        elif role == 'leader':
+            post.leader_score = max(-10, min(10, int(data.get('leader_score', post.leader_score))))
+    else:
+        post.admin_score = max(-10, min(10, int(data.get('admin_score', post.admin_score))))
     if 'is_forced_approved' in data:
         post.is_forced_approved = bool(data['is_forced_approved'])
-    post.total_score = post.ai_score + post.admin_score + post.leader_score + post.member_score
+    post.recalc_total()
     if post.admin_score != 0 and post.leader_score != 0 and post.total_score > -50:
         post.is_forced_approved = True
     db.session.commit()
-    return jsonify({'status': 'success', 'total_score': post.total_score, 'is_forced_approved': post.is_forced_approved})
+    return jsonify({'status': 'success', 'total_score': post.total_score, 'is_forced_approved': post.is_forced_approved, 'admin_score': post.admin_score, 'leader_score': post.leader_score})
 
 @admin_bp.route('/admin/post/<int:post_id>')
 def admin_post_view(post_id):
-    if session.get('role') != 'leader': return "권한 부족", 403
+    if not (_is_admin_or_leader() or _has_managed_page('admin_proposals') or _has_managed_page('all_proposals')): return "권한 부족", 403
     return _serve_spa()
 
 @admin_bp.route('/admin/update_scores/<int:post_id>', methods=['POST'])
 def update_scores(post_id):
-    if session.get('role') != 'leader': return "권한 부족", 403
+    if not (_is_admin_or_leader() or _has_managed_page('admin_proposals') or _has_managed_page('all_proposals')): return "권한 부족", 403
     post = Post.query.get_or_404(post_id)
     role = session.get('role')
-    if role == 'admin':
+    if role in ('admin', 'leader'):
+        if role == 'admin':
+            post.admin_score = int(request.form.get('admin_score', 0))
+        elif role == 'leader':
+            post.leader_score = int(request.form.get('leader_score', 0))
+    else:
         post.admin_score = int(request.form.get('admin_score', 0))
-    elif role == 'leader':
-        post.leader_score = int(request.form.get('leader_score', 0))
     post.is_forced_approved = 'force_approve' in request.form
-    post.total_score = post.ai_score + post.admin_score + post.leader_score + post.member_score
+    post.recalc_total()
     # 관리자와 책임자가 모두 점수를 주면 자동 공개 (-50점 이하는 제외)
     if post.admin_score != 0 and post.leader_score != 0 and post.total_score > -50:
         post.is_forced_approved = True
@@ -278,13 +296,14 @@ def update_scores(post_id):
 
 @admin_bp.route('/admin/debate/<int:post_id>', methods=['POST'])
 def admin_debate(post_id):
-    if session.get('role') != 'leader': return jsonify({"status": "error", "msg": "권한 부족"}), 403
+    if not (_is_admin_or_leader() or _has_managed_page('admin_proposals') or _has_managed_page('all_proposals')): return jsonify({"status": "error", "msg": "권한 부족"}), 403
     post = Post.query.get_or_404(post_id)
     admin_opinion = request.form.get('admin_opinion')
     if not admin_opinion:
         return jsonify({"status": "error", "msg": "의견을 입력하세요"}), 400
     suggested_score = int(request.form.get('suggested_score', post.ai_score))
     try:
+        from services.ai_service import call_ai_debate
         res = call_ai_debate(post, admin_opinion, suggested_score)
     except Exception as e:
         return jsonify({"status": "error", "msg": f"AI 응답 오류: {e}"}), 500
@@ -292,7 +311,7 @@ def admin_debate(post_id):
     logs.append({"time": datetime.now().strftime('%H:%M'), "admin": admin_opinion, "ai": res.get('ai_reply', 'AI 분석 오류')})
     post.ai_debate_log = json.dumps(logs, ensure_ascii=False)
     post.ai_score = res.get('final_ai_score', post.ai_score)
-    post.total_score = post.ai_score + post.admin_score + post.leader_score + post.member_score
+    post.recalc_total()
     db.session.commit()
     return jsonify({"status": "success"})
 
@@ -377,7 +396,7 @@ def _delete_user_files(uid):
 
 @admin_bp.route('/admin/users/delete/<int:user_id>', methods=['POST'])
 def admin_delete_user(user_id):
-    if session.get('role') != 'leader':
+    if not (_is_admin_or_leader() or _has_managed_page('admin_users')):
         return jsonify({"status":"error","msg":"권한 없음"}), 403
     user = User.query.get_or_404(user_id)
     if user.role == 'admin':
@@ -448,7 +467,7 @@ def admin_delete_user(user_id):
 
 @admin_bp.route('/admin/users/points/<int:user_id>', methods=['GET','POST'])
 def admin_user_points(user_id):
-    if session.get('role') != 'leader':
+    if not (_is_admin_or_leader() or _has_managed_page('admin_users')):
         return jsonify({"status":"error","msg":"최고책임자만 가능합니다"}), 403
     user = User.query.get_or_404(user_id)
     if request.method == 'POST':
@@ -463,8 +482,8 @@ def admin_user_points(user_id):
 
 @admin_bp.route('/admin/page-managers', methods=['GET','POST'])
 def admin_page_managers():
-    if session.get('role') != 'leader':
-        return "최고책임자만 접근 가능", 403
+    if not _is_admin_or_leader():
+        return "최고책임자/관리자만 접근 가능", 403
     if request.method == 'POST':
         uid = request.form.get('user_id', type=int)
         page = request.form.get('page','')
@@ -485,8 +504,15 @@ def admin_page_managers():
                 else:
                     pages.append(page)
                 user.managed_pages = ','.join(filter(None, pages))
+                # managed_pages가 있으면 admin으로, 없으면 user로 자동 변경
+                if user.role not in ('leader',):
+                    if user.managed_pages:
+                        user.role = 'admin'
+                    else:
+                        user.role = 'user'
                 if uid == session.get('user_id'):
                     session['managed_pages'] = user.managed_pages
+                    session['role'] = user.role
             if page == 'village' and page in pages and not had_village:
                 already_got = PointHistory.query.filter_by(user_id=uid, change_type='village_appointment').first()
                 if not already_got:
@@ -497,9 +523,15 @@ def admin_page_managers():
 
 @admin_bp.route('/api/admin/page-managers')
 def api_admin_page_managers():
-    if session.get('role') != 'leader':
+    if not _is_admin_or_leader():
         return jsonify({'error': '권한 없음'}), 403
     admins = User.query.filter(User.managed_pages.isnot(None), User.managed_pages != '').all()
+    admin_ids = {u.id for u in admins}
+    target_uid = request.args.get('user', type=int)
+    if target_uid and target_uid not in admin_ids:
+        target_user = User.query.get(target_uid)
+        if target_user:
+            admins.append(target_user)
     def vi_k(myeon, ri):
         return f'vi_{myeon}_{ri}'
     TOWNS = [
@@ -525,7 +557,7 @@ def api_admin_page_managers():
             {'label': '♿ 휠체어경사로보급사업', 'pages': {'ramp':'휠체어경사로사업'}},
         ]},
         {'title': '제안', 'pages': {'proposals':'꿈꾸기', 'all_proposals':'누구의꿈'}},
-        {'title': '관리', 'pages': {'admin_proposals':'누구의꿈(관리)', 'admin_users':'회원관리', 'admin_news':'소식(관리)', 'admin_share':'공유(관리)', 'admin_stores':'동네가게(관리)', 'admin_alerts':'알림(관리)', 'admin_ai_train':'양평AI 가르치기'}},
+        {'title': '관리', 'pages': {'admin_proposals':'누구의꿈(관리)', 'admin_users':'회원관리', 'admin_news':'소식(관리)', 'admin_share':'공유(관리)', 'admin_stores':'동네가게(관리)', 'admin_alerts':'알림(관리)', 'admin_construction':'공사알림(관리)', 'yard':'마당(관리)', 'admin_ai_train':'양평AI 가르치기'}},
         {'title': '기타', 'pages': {'schedule':'일정', 'stores':'동네가게', 'news':'소식'}},
         {'title': '마을', 'groups': village_groups},
     ]
@@ -545,12 +577,12 @@ def api_admin_page_managers():
 
 @admin_bp.route('/admin/users')
 def admin_users():
-    if session.get('role') != 'leader': return "권한 부족", 403
+    if not (_is_admin_or_leader() or _has_managed_page('admin_users')): return "권한 부족", 403
     return _serve_spa()
 
 @admin_bp.route('/admin/users/verify/<int:user_id>/<string:action>')
 def verify_user(user_id, action):
-    if session.get('role') != 'leader': return "권한 부족", 403
+    if not (_is_admin_or_leader() or _has_managed_page('admin_users')): return "권한 부족", 403
     user = User.query.get_or_404(user_id)
     
     if action == 'approve':
@@ -578,19 +610,19 @@ def verify_user(user_id, action):
 
 @admin_bp.route('/admin/ai-chat')
 def admin_ai_chat():
-    if session.get('role') != 'leader':
+    if not _is_admin_or_leader():
         return "권한 부족", 403
     return _serve_spa()
 
 @admin_bp.route('/admin/did/issue')
 def admin_did_issue():
-    if session.get('role') != 'leader':
+    if not _is_admin_or_leader():
         return "권한 부족", 403
     return _serve_spa()
 
 @admin_bp.route('/admin/ai-chat/send', methods=['POST'])
 def admin_ai_chat_send():
-    if session.get('role') != 'leader':
+    if not _is_admin_or_leader():
         return jsonify({"error":"권한 부족"}), 403
     msg = request.json.get('message','').strip()
     if not msg:
@@ -628,19 +660,19 @@ def admin_ai_chat_send():
 
 @admin_bp.route('/admin/ai-feedback')
 def admin_ai_feedback():
-    if session.get('role') != 'leader':
+    if not _is_admin_or_leader():
         return "권한 부족", 403
     return _serve_spa()
 
 @admin_bp.route('/admin/ai-train')
 def admin_ai_train():
-    if session.get('role') != 'leader':
+    if not _is_admin_or_leader():
         return "최고책임자만 접근 가능", 403
     return _serve_spa()
 
 @admin_bp.route('/admin/ai-train/save', methods=['POST'])
 def admin_ai_train_save():
-    if session.get('role') not in ('admin', 'leader'):
+    if not _is_admin_or_leader():
         return jsonify({"error":"권한 부족"}), 403
     data = request.get_json() or request.form
     q = data.get('question','').strip()
@@ -654,7 +686,7 @@ def admin_ai_train_save():
 
 @admin_bp.route('/api/admin/ai-train/update/<int:kid>', methods=['POST'])
 def admin_ai_train_update(kid):
-    if session.get('role') not in ('admin', 'leader'):
+    if not _is_admin_or_leader():
         return jsonify({"error":"권한 부족"}), 403
     data = request.get_json() or request.form
     q = data.get('question','').strip()
@@ -668,7 +700,7 @@ def admin_ai_train_update(kid):
 
 @admin_bp.route('/admin/ai-train/delete/<int:kid>', methods=['POST'])
 def admin_ai_train_delete(kid):
-    if session.get('role') not in ('admin', 'leader'):
+    if not _is_admin_or_leader():
         return jsonify({"error":"권한 부족"}), 403
     k = AiKnowledge.query.get_or_404(kid)
     db.session.delete(k)
@@ -680,7 +712,7 @@ def admin_ai_train_delete(kid):
 @admin_bp.route('/api/admin/ai-broadcasts', methods=['GET'])
 def admin_ai_broadcasts_list():
     uid = session.get('user_id')
-    if not uid or session.get('role') not in ('admin', 'leader'):
+    if not uid or not _is_admin_or_leader():
         return jsonify({"error": "권한이 없습니다."}), 403
     from models import AiBroadcast
     bcs = AiBroadcast.query.order_by(AiBroadcast.created_at.desc()).all()
@@ -693,7 +725,7 @@ def admin_ai_broadcasts_list():
 @admin_bp.route('/api/admin/ai-broadcasts', methods=['POST'])
 def admin_ai_broadcasts_create():
     uid = session.get('user_id')
-    if not uid or session.get('role') not in ('admin', 'leader'):
+    if not uid or not _is_admin_or_leader():
         return jsonify({"error": "권한이 없습니다."}), 403
     from models import User, AiBroadcast
     data = request.get_json() or {}
@@ -712,7 +744,7 @@ def admin_ai_broadcasts_create():
 def admin_ai_broadcasts_status(b_id):
     """상태 변경: draft → pending(승인요청) / pending → approved(최종승인, leader전용) / approved → published(발행) / any → rejected(반려)"""
     uid = session.get('user_id')
-    if not uid or session.get('role') not in ('admin', 'leader'):
+    if not uid or not _is_admin_or_leader():
         return jsonify({"error": "권한이 없습니다."}), 403
     from models import AiBroadcast
     from datetime import datetime, timezone
@@ -741,7 +773,7 @@ def admin_ai_broadcasts_status(b_id):
 @admin_bp.route('/api/admin/ai-broadcasts/<int:b_id>', methods=['DELETE'])
 def admin_ai_broadcasts_delete(b_id):
     uid = session.get('user_id')
-    if not uid or session.get('role') not in ('admin', 'leader'):
+    if not uid or not _is_admin_or_leader():
         return jsonify({"error": "권한이 없습니다."}), 403
     from models import AiBroadcast
     b = AiBroadcast.query.get_or_404(b_id)

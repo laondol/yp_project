@@ -1,4 +1,5 @@
 import { useRef, useState, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import LeafletMap from '../components/LeafletMap'
 
 export default function ShareReport() {
@@ -31,6 +32,18 @@ export default function ShareReport() {
   const drawingRef = useRef(false)
   const reportIdRef = useRef<number | null>(null)
   const saveQueueRef = useRef<Promise<unknown>>(Promise.resolve())
+
+  const [searchParams] = useSearchParams()
+  const yardEventId = searchParams.get('yard_event')
+  const yardEventTitle = searchParams.get('title') || ''
+
+  useEffect(() => {
+    if (yardEventId && yardEventTitle) {
+      // 마당 행사 후기: [행사후기] 접두사 제목 + 안내 메모 자동 채움
+      setTitle(`[행사후기] ${decodeURIComponent(yardEventTitle)}`)
+      setDescription(`${decodeURIComponent(yardEventTitle)}에 다녀오신 후기를 남겨주세요.`)
+    }
+  }, [yardEventId, yardEventTitle])
 
   useEffect(() => {
     getLocation()
@@ -258,6 +271,7 @@ const res = await fetch('/share-report/auto-save', { method: 'POST', body: fd, c
     const fd = new FormData()
     fd.append('title', title)
     fd.append('description', description)
+    if (yardEventId) fd.append('yard_event_id', yardEventId)
     if (lat && lon) {
       fd.append('latitude', lat)
       fd.append('longitude', lon)

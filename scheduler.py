@@ -148,7 +148,17 @@ def run_monthly_payout(app):
                         if base.tzinfo is None:
                             base = base.replace(tzinfo=timezone.utc)
                         if (now - base).days >= 30:
-                            add_points(u.id, 1000, 'monthly', '30일 주기 물맑은머니 지급')
+                            # 이웃인증 안 된 회원: 월간 닢 지급 제외
+                            loc_updated = getattr(u, 'location_updated_at', None)
+                            if loc_updated:
+                                if loc_updated.tzinfo is None:
+                                    loc_updated = loc_updated.replace(tzinfo=timezone.utc)
+                                days_since_verify = (now - loc_updated).days
+                            else:
+                                days_since_verify = 999
+                            if not u.is_neighbor or days_since_verify > 30:
+                                continue
+                            add_points(u.id, 1000, 'monthly', '30일 주기 물맑은머니 지급 (이웃인증 30일 이내)')
                             if 'village' in (u.managed_pages or ''):
                                 add_points(u.id, 10000, 'village_monthly', '마을지기 활동지원금')
                             u.last_payout = now
@@ -158,6 +168,105 @@ def run_monthly_payout(app):
                     print(f'[PAYOUT] monthly points granted to {granted} user(s)')
         except Exception as e:
             print(f'[PAYOUT] error: {e}')
+        time.sleep(86400)
+
+
+def run_proposal_review_scheduler(app):
+    """누구의 꿈 제안 리뷰 스케줄러
+    - 4일 경과: 관리자/책임자가 미점수 시 매일 리마인더 편지
+    - 7일 경과: AI 30점 이상이면 자동 게시"""
+    time.sleep(60)
+    while True:
+        try:
+            with app.app_context():
+                from models import Post, User, Message, db
+                from datetime import timedelta
+                now = datetime.now(timezone.utc)
+                today = now.date()
+
+                unreviewed = Post.query.filter(
+                    Post.is_forced_approved == False,
+                    Post.ai_score >= 30,
+                    Post.created_at.isnot(None),
+                ).all()
+
+                for p in unreviewed:
+                    created = p.created_at
+                    if created.tzinfo is None:
+                        created = created.replace(tzinfo=timezone.utc)
+                    days = (now - created).days
+
+                    # 7일 경과 → 자동 게시
+                    if days >= 7:
+                        p.is_forced_approved = True
+                        author = User.query.get(p.user_id) if p.user_id else None
+                        if author:
+                            msg = Message(
+                                sender_id=None,
+                                sender_name='함께사는양평',
+                                sender_role='admin',
+                                receiver_id=author.id,
+                                subject='📢 제안이 자동으로 게시되었습니다',
+                                content=f'「{p.title}」 제안이 7일간 관리자/책임자 리뷰 없이 자동으로 게시되었습니다.'
+                            )
+                            db.session.add(msg)
+                        # 관리자/책임자에게도 통보
+                        admins_leaders = User.query.filter(User.role.in_(['leader', 'admin'])).all()
+                        for a in admins_leaders:
+                            if author and a.id == author.id:
+                                continue
+                            msg = Message(
+                                sender_id=None,
+                                sender_name='함께사는양평',
+                                sender_role='admin',
+                                receiver_id=a.id,
+                                subject='📢 제안 자동 게시 알림',
+                                content=f'「{p.title}」 제안이 7일 경과로 자동 게시되었습니다. AI: {p.ai_score}점. (id={p.id})'
+                            )
+                            db.session.add(msg)
+                        print(f'[PROPOSAL] auto-published: {p.title} (id={p.id})')
+                        continue
+
+                    # 4일~6일: 미점수 리마인더
+                    if days >= 4:
+                        scored_admins = set()
+                        if p.admin_score and p.admin_score > 0:
+                            scored_admins.add('admin')
+                        if p.leader_score and p.leader_score > 0:
+                            scored_admins.add('leader')
+
+                        leaders = User.query.filter(User.role.in_(['leader', 'admin'])).all()
+                        for leader in leaders:
+                            if leader.id == p.user_id:
+                                continue
+                            role_key = leader.role
+                            if role_key in scored_admins:
+                                continue
+
+                            already_sent = Message.query.filter(
+                                Message.receiver_id == leader.id,
+                                Message.sender_name == '함께사는양평',
+                                Message.subject.contains('리뷰 요청'),
+                                Message.content.contains(f'id={p.id}'),
+                                Message.created_at >= today.isoformat(),
+                            ).first()
+                            if already_sent:
+                                continue
+
+                            msg = Message(
+                                sender_id=None,
+                                sender_name='함께사는양평',
+                                sender_role='admin',
+                                receiver_id=leader.id,
+                                subject='📋 제안 리뷰 요청',
+                                content=f'「{p.title}」 제안이 {days}일째 리뷰 대기 중입니다. AI 점수: {p.ai_score}점. 7일 내 미리뷰 시 자동 게시됩니다. 관리 페이지에서 점수를 부여해 주세요. (id={p.id})'
+                            )
+                            db.session.add(msg)
+                            print(f'[PROPOSAL] reminder sent to {leader.username}: {p.title}')
+
+                db.session.commit()
+        except Exception as e:
+            print(f'[PROPOSAL] error: {e}')
         time.sleep(86400)
 
 
@@ -338,6 +447,7 @@ def main():
     threading.Thread(target=run_monthly_payout, args=(app,), daemon=True).start()
     threading.Thread(target=run_construction_extract_scheduler, args=(app,), daemon=True).start()
     threading.Thread(target=run_yard_collect_scheduler, args=(app,), daemon=True).start()
+    threading.Thread(target=run_proposal_review_scheduler, args=(app,), daemon=True).start()
     threading.Thread(target=run_labor_news_scheduler, args=(app,), daemon=True).start()
     threading.Thread(target=run_kr_yp_news_scheduler, args=(app,), daemon=True).start()
     threading.Thread(target=run_world_news_scheduler, args=(app,), daemon=True).start()

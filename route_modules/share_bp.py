@@ -260,6 +260,7 @@ def share_report():
         author_name=user.username if user else '익명',
         title=title or '공유',
         description=description,
+        yard_event_id=int(request.form.get('yard_event_id')) if request.form.get('yard_event_id', '').strip().isdigit() else None,
         image_path=image_path,
         extra_images=extra_images,
         drawing_path=drawing_path,
@@ -980,10 +981,15 @@ def api_share_reports():
     if town: query = query.filter_by(town=town)
     if village: query = query.filter_by(village=village)
     if category: query = query.filter_by(ai_category=category)
-    
+    # 마당 행사 연결 후기만 조회 (?yard_event=ID)
+    yard_event = request.args.get('yard_event', type=int)
+    if yard_event:
+        query = query.filter(ShareReport.yard_event_id == yard_event)
+
     reports = query.order_by(ShareReport.created_at.desc()).limit(50).all()
     return jsonify([{
         "id": r.id, "title": r.title, "description": r.description,
+        "yard_event_id": r.yard_event_id,
         "image_path": r.image_path, "extra_images": r.extra_images or '',
         "drawing_path": r.drawing_path,
         "video_path": r.video_path, "latitude": r.latitude,

@@ -71,9 +71,39 @@ def note_create():
         latitude=data.get('latitude'),
         longitude=data.get('longitude'),
         address=(data.get('address') or '').strip()[:300],
+        yard_event_id=int(data.get('yard_event_id')) if str(data.get('yard_event_id') or '').strip().isdigit() else None,
         is_public=bool(data.get('is_public')),
         updated_at=datetime.now(),
     )
+    # 마당 행사 후기: 행사 위치·주소 자동 반영 + 공개 (공유마당 배치용)
+    if note.yard_event_id:
+        from models import YardPost
+        yp = YardPost.query.get(note.yard_event_id)
+        if yp:
+            note.address = yp.event_place or note.address
+            if yp.latitude:
+                note.latitude = yp.latitude
+                note.longitude = yp.longitude
+            elif yp.event_place:
+                from services.geocode import geocode_text
+                note.latitude, note.longitude = geocode_text(yp.event_place)
+                if not note.latitude:
+                    # 지명은 주소 검색으로 안 잡힘 → 카카오 키워드 검색으로 폴백
+                    try:
+                        import requests as _req
+                        from flask import current_app as _ca
+                        kakao_key = _ca.config.get('KAKAO_REST_API_KEY', '')
+                        r2 = _req.get('https://dapi.kakao.com/v2/local/search/keyword.json',
+                                      headers={'Authorization': f'KakaoAK {kakao_key}'},
+                                      params={'query': yp.event_place, 'size': 1}, timeout=10)
+                        if r2.status_code == 200:
+                            docs = r2.json().get('documents') or []
+                            if docs:
+                                note.latitude, note.longitude = float(docs[0]['y']), float(docs[0]['x'])
+                    except Exception as e:
+                        print(f'[NOTE] kakao keyword fail: {e}')
+        if not data.get('is_public'):
+            note.is_public = True  # 행사 후기는 공개 (공유마당 배치)
     db.session.add(note)
     db.session.commit()
     return jsonify({"success": True, "id": note.id})

@@ -171,46 +171,69 @@ def reset_password_send():
     if not user:
         return jsonify({"status":"error","msg":"등록되지 않은 이메일입니다."})
     import secrets, time
-    token = secrets.token_urlsafe(32)
-    user.reset_token = token
-    user.reset_token_expiry = datetime.utcnow() + timedelta(hours=1)
-    db.session.commit()
-    reset_url = url_for('auth.reset_password_confirm', token=token, _external=True)
+    code = ''.join(secrets.choice('0123456789') for _ in range(6))
+    session['reset_code'] = code
+    session['reset_email'] = email
+    session['reset_code_time'] = time.time()
     from services.email_service import EmailService
-    sent = EmailService.send(email, '[함께사는양평] 비밀번호 재설정',
-        f'비밀번호 재설정 링크:\n{reset_url}\n\n1시간 내에 사용해 주세요.')
+    sent = EmailService.send(email, '[함께사는양평] 비밀번호 재설정 인증번호',
+        f'비밀번호 재설정 인증번호: {code}\n\n5분간 유효합니다.')
     if sent:
-        return jsonify({"status":"success","msg":"재설정 링크를 이메일로 발송했습니다."})
+        return jsonify({"status":"success","msg":"인증번호를 이메일로 발송했습니다."})
     else:
-        return jsonify({"status":"success","msg":"로컬모드: 메일발송 실패","debug_url":reset_url})
+        from flask import current_app
+        if current_app.config.get('DEBUG'):
+            return jsonify({"status":"success","msg":f'[DEV] 인증번호: {code} (이메일 발송 실패)'})
+        return jsonify({"status":"error","msg":"이메일 발송에 실패했습니다."})
 
 @auth_bp.route('/reset-password/<token>')
 def reset_password_confirm(token):
-    user = User.query.filter_by(reset_token=token).first()
-    if not user or _reset_token_expired(user.reset_token_expiry):
-        return "<script>alert('만료된 링크입니다.'); location.href='/reset-password';</script>"
     return _serve_spa()
 
 @auth_bp.route('/reset-password/confirm', methods=['POST'])
 def reset_password_confirm_post():
+    import time
     data = request.get_json()
-    token = data.get('token','')
+    code = data.get('code', '').strip()
     password_hash = data.get('password_hash', '')
     password = data.get('password', '')
-    user = User.query.filter_by(reset_token=token).first()
-    if not user or _reset_token_expired(user.reset_token_expiry):
-        return jsonify({"status":"error","msg":"만료된 링크입니다."})
-    # v2: 클라이언트 해시 저장(신규 기본). 레거시 폴백: 평문(기존 동작)
+
+    if not session.get('reset_code') or not session.get('reset_email'):
+        return jsonify({"status":"error","msg":"인증번호가 만료되었습니다. 다시 발송해 주세요."})
+    if time.time() - session.get('reset_code_time', 0) > 300:
+        session.pop('reset_code', None)
+        session.pop('reset_email', None)
+        session.pop('reset_code_time', None)
+        return jsonify({"status":"error","msg":"인증번호가 만료되었습니다. 다시 발송해 주세요."})
+    if code != session.get('reset_code'):
+        return jsonify({"status":"error","msg":"인증번호가 일치하지 않습니다."})
+
+    email = session['reset_email']
+    from sqlalchemy import func
+    user = User.query.filter(func.lower(User.email) == email).first()
+    if not user:
+        return jsonify({"status":"error","msg":"사용자를 찾을 수 없습니다."})
+
     if password_hash:
         user.password = generate_password_hash(password_hash)
         user.password_v2 = True
-    else:
+    elif password:
         user.password = generate_password_hash(password)
         user.password_v2 = False
+    else:
+        return jsonify({"status":"error","msg":"비밀번호를 입력해 주세요."})
     user.reset_token = None
     user.reset_token_expiry = None
     db.session.commit()
-    return jsonify({"status":"success","msg":"비밀번호가 변경되었습니다. 로그인해 주세요."})
+    session.pop('reset_code', None)
+    session.pop('reset_email', None)
+    session.pop('reset_code_time', None)
+    # 자동 로그인
+    session['user_id'] = user.id
+    session['username'] = user.username
+    session['role'] = user.role
+    session['managed_pages'] = user.managed_pages or ''
+    return jsonify({"status":"success","msg":"비밀번호가 변경되었습니다. 로그인 페이지로 이동합니다.", "auto_login": True})
 
 def _serve_spa():
     react_index = os.path.join(current_app.root_path, 'frontend', 'dist', 'index.html')
@@ -232,24 +255,9 @@ def register():
         # username이 비었으면 이메일 앞부분으로 자동 생성
         if not username and verified_email:
             username = verified_email.split('@')[0][:20]
-        # GPS 기반 위치
-        lat = request.form.get('lat', type=float)
-        lon = request.form.get('lon', type=float)
-        town = ''
-        village = ''
-        neighbor = False
-        if lat and lon:
-            from services.geocode import gps_to_town_village, is_in_yangpyeong
-            if is_in_yangpyeong(lat, lon):
-                t, v = gps_to_town_village(lat, lon)
-                town = t or ''
-                village = v or ''
-                neighbor = True
-        # town/village 없는 경우 form에서 가져오기
-        if not town:
-            town = request.form.get('town', '')
-        if not village:
-            village = request.form.get('village', '')
+        # 이메일 인증만으로 가입 (이웃인증은 가입 후 회원정보에서 별도 진행)
+        town = request.form.get('town', '')
+        village = request.form.get('village', '')
         
         if User.query.filter_by(email=verified_email).first():
             session.pop('verify_email', None)
@@ -263,9 +271,8 @@ def register():
             town=town, village=village,
             reg_town=town, reg_village=village,
             curr_town=town, curr_village=village,
-            is_neighbor=neighbor,
+            is_neighbor=False,
             location_updated_at=now,
-            points=1000
         )
         # 프로필 이미지 저장
         profile_img = request.files.get('profile_img')
@@ -290,10 +297,6 @@ def register():
         new_user.last_payout = now
         db.session.add(new_user)
         db.session.flush()
-        history = PointHistory(
-            user_id=new_user.id, change_type='signup', amount=1000,
-            balance_after=1000, description='회원가입 지급'
-        )
         db.session.add(history)
         db.session.commit()
         
@@ -702,20 +705,10 @@ def api_register():
         return jsonify({'status': 'error', 'msg': '이미 사용 중인 별명입니다.'}), 400
     if not username and verified_email:
         username = verified_email.split('@')[0][:20]
-    lat = data.get('lat', type=float)
-    lon = data.get('lon', type=float)
     town = data.get('town', '')
     village = data.get('village', '')
     home_address = data.get('home_address', '')
     office_address = data.get('office_address', '')
-    neighbor = data.get('is_neighbor', type=bool) or False
-    if lat and lon:
-        from services.geocode import gps_to_town_village, is_in_yangpyeong
-        if is_in_yangpyeong(lat, lon):
-            t, v = gps_to_town_village(lat, lon)
-            town = t or town
-            village = v or village
-            neighbor = True
     if User.query.filter_by(email=verified_email).first():
         session.pop('verify_email', None)
         return jsonify({'status': 'error', 'msg': '이미 등록된 이메일입니다.'}), 400
@@ -723,7 +716,7 @@ def api_register():
     hashed_pw = generate_password_hash(password_hash) if password_hash else generate_password_hash(password)
     is_v2 = bool(password_hash)
     now = datetime.now(timezone.utc)
-    new_user = User(username=username, password=hashed_pw, real_name=real_name, email=verified_email, email_verified=True, town=town, village=village, reg_town=town, reg_village=village, curr_town=town, curr_village=village, curr_address=home_address[:200] if home_address else None, office_address=office_address[:200] if office_address else None, is_neighbor=neighbor, location_updated_at=now, points=1000, password_v2=is_v2)
+    new_user = User(username=username, password=hashed_pw, real_name=real_name, email=verified_email, email_verified=True, town=town, village=village, reg_town=town, reg_village=village, curr_town=town, curr_village=village, curr_address=home_address[:200] if home_address else None, office_address=office_address[:200] if office_address else None, is_neighbor=False, location_updated_at=now, points=1000, password_v2=is_v2)
     profile_img = request.files.get('profile_img')
     if profile_img and profile_img.filename:
         import os

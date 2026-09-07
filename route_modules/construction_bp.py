@@ -694,7 +694,7 @@ def api_user_location():
     user = User.query.get(uid)
     if not user:
         return jsonify({"error": "not_found"}), 404
-    return jsonify({"town": user.curr_town or "", "village": user.curr_village or "", "address": user.curr_address or ""})
+    return jsonify({"town": user.curr_town or "", "village": user.curr_village or "", "address": user.curr_address or "", "home_town": user.town or "", "home_village": user.village or ""})
 
 @construction_bp.route('/construction/refresh')
 def construction_refresh():

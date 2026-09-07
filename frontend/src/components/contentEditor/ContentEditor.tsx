@@ -12,6 +12,7 @@ export interface ContentEditorHandle {
   getContent: () => string
   getDrawingData: () => string
   getLocation: () => LocationValue
+  setLocation: (loc: LocationValue) => void
   setContent: (html: string) => void
   focus: () => void
 }
@@ -19,6 +20,7 @@ export interface ContentEditorHandle {
 interface ContentEditorProps {
   initialContent?: string
   showLocation?: boolean
+  lockLocation?: boolean
   uploadUrl?: string
   fileUploadUrl?: string
   placeholder?: string
@@ -31,6 +33,7 @@ type OverlayBox = { x: number; y: number; w: number; h: number; deg: number }
 const ContentEditor = forwardRef<ContentEditorHandle, ContentEditorProps>(function ContentEditor({
   initialContent,
   showLocation = true,
+  lockLocation = false,
   uploadUrl = '/api/board/upload-image',
   fileUploadUrl = '/api/upload/file',
   placeholder = '내용을 입력해 주세요. (사진은 Ctrl+V로 붙여넣기 가능)',
@@ -94,6 +97,11 @@ const ContentEditor = forwardRef<ContentEditorHandle, ContentEditorProps>(functi
     getContent: () => editorRef.current?.innerHTML || '',
     getDrawingData: () => canvasRef.current?.toDataURL('image/png') || '',
     getLocation: () => ({ lat, lng, addr }),
+    setLocation: (loc: LocationValue) => {
+      setLat(loc.lat || '')
+      setLng(loc.lng || '')
+      setAddr(loc.addr || '')
+    },
     setContent: (html: string) => {
       if (editorRef.current) editorRef.current.innerHTML = html
     },
@@ -1069,6 +1077,13 @@ const ContentEditor = forwardRef<ContentEditorHandle, ContentEditorProps>(functi
           </div>
 
           <button type="button" className="btn btn-outline-secondary" onClick={() => fileInputRef.current?.click()} title="사진/파일 첨부">📎 이미지첨부</button>
+          <button type="button" className="btn btn-outline-secondary" onClick={() => {
+            const url = window.prompt('삽입할 사이트 링크(URL)를 입력하세요')
+            if (!url) return
+            const label = window.prompt('링크에 표시할 이름 (선택, 빈칸이면 주소 표시)') || ''
+            const esc = (s: string) => s.replace(/"/g, '&quot;').replace(/</g, '&lt;')
+            insertAtCursor(`<div style="margin:8px 0;padding:10px;border:1px solid #bee5eb;background:#f0f9ff;border-radius:10px">🔗 <a href="${esc(url)}" target="_blank" rel="noopener noreferrer" style="color:#198754;font-weight:bold">${esc(label) || esc(url)}</a></div><p><br></p>`)
+          }} title="사이트 링크 블록 삽입">🔗 링크</button>
           <button type="button" className="btn btn-outline-secondary" onClick={() => fileAttachRef.current?.click()} title="파일 첨부 (이미지 외 모든 파일)" disabled={fileUploading}>
             {fileUploading ? '⏳' : '📁'} 파일첨부
           </button>
@@ -1177,11 +1192,17 @@ const ContentEditor = forwardRef<ContentEditorHandle, ContentEditorProps>(functi
       {showLocation && (
         <div className="mb-3 p-3 border rounded" style={{ background: '#f8f9fa' }}>
           <div className="d-flex justify-content-between align-items-center mb-2">
-            <label className="fw-bold small mb-0">📍 위치 (선택)</label>
-            <button type="button" className="btn btn-sm btn-outline-primary" onClick={getMyPlace} disabled={geoBusy}>
-              {geoBusy ? '찾는 중...' : '내 위치 가져오기'}
-            </button>
+            <label className="fw-bold small mb-0">📍 위치 {lockLocation ? '(행사 위치로 고정)' : '(선택)'}</label>
+            {!lockLocation && (
+              <button type="button" className="btn btn-sm btn-outline-primary" onClick={getMyPlace} disabled={geoBusy}>
+                {geoBusy ? '찾는 중...' : '내 위치 가져오기'}
+              </button>
+            )}
           </div>
+          {lockLocation ? (
+            <div className="small fw-bold">📌 {addr || '행사 위치'}</div>
+          ) : (
+            <>
           <input
             type="text"
             className="form-control form-control-sm mb-2"
@@ -1208,6 +1229,8 @@ const ContentEditor = forwardRef<ContentEditorHandle, ContentEditorProps>(functi
             />
           </div>
           <small className="text-muted d-block mt-1">주소 검색·수정 가능하며, GPS로 현재 위치를 자동 입력할 수 있습니다.</small>
+            </>
+          )}
         </div>
       )}
 
