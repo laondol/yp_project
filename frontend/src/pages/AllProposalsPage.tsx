@@ -27,16 +27,12 @@ function getStatusBadge(p: Post) {
 
 function CountdownTimer({ createdAt }: { createdAt?: string }) {
   const [display, setDisplay] = useState('')
-
   useEffect(() => {
     if (!createdAt) return
     const update = () => {
       const deadline = new Date(createdAt).getTime() + 48 * 60 * 60 * 1000
       const diff = deadline - Date.now()
-      if (diff <= 0) {
-        setDisplay('심사 완료 (공개됨)')
-        return
-      }
+      if (diff <= 0) { setDisplay('심사 완료 (공개됨)'); return }
       const h = Math.floor(diff / (1000 * 60 * 60))
       const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60))
       const s = Math.floor((diff % (1000 * 60)) / 1000)
@@ -46,7 +42,6 @@ function CountdownTimer({ createdAt }: { createdAt?: string }) {
     const iv = setInterval(update, 1000)
     return () => clearInterval(iv)
   }, [createdAt])
-
   return <span className="countdown-timer small text-muted">{display}</span>
 }
 
@@ -54,7 +49,6 @@ function isImageFile(fp: string) {
   const ext = fp.toLowerCase().split('.').pop() || ''
   return ['png', 'jpg', 'jpeg', 'gif'].includes(ext) || fp.includes('draw_')
 }
-
 function isPdfFile(fp: string) {
   return fp.toLowerCase().endsWith('.pdf')
 }
@@ -64,7 +58,6 @@ export default function AllProposalsPage() {
   const [posts, setPosts] = useState<Post[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [myAgrees, setMyAgrees] = useState<Set<number>>(new Set())
 
   const load = useCallback(async () => {
     setLoading(true); setError('')
@@ -76,31 +69,22 @@ export default function AllProposalsPage() {
     } finally { setLoading(false) }
   }, [])
 
-  const loadMyAgrees = useCallback(async () => {
-    try {
-      const res = await api.get<{ agreed_post_ids: number[] }>('/api/page/all-proposals/my-agrees')
-      setMyAgrees(new Set(res.agreed_post_ids || []))
-    } catch { /* ignore */ }
-  }, [])
+  useEffect(() => { load() }, [load])
 
-  useEffect(() => { load(); loadMyAgrees() }, [load, loadMyAgrees])
-
-  const handleAgree = async (id: number) => {
+  const handleLike = async (id: number) => {
     try {
-      const res = await api.post<{ status: string; agree_count: number; member_score: number; total_score: number }>(`/post/agree/${id}`)
+      const res = await api.post<{ status: string; likes: number; dislikes: number }>(`/post/like/${id}`)
       if (res.status === 'success') {
-        setMyAgrees(prev => new Set([...prev, id]))
-        setPosts(prev => prev.map(p => p.id === id ? { ...p, member_score: res.member_score, total_score: res.total_score } : p))
+        setPosts(prev => prev.map(p => p.id === id ? { ...p, like_count: res.likes, dislike_count: res.dislikes } : p))
       }
     } catch { /* ignore */ }
   }
 
-  const handleAgreeCancel = async (id: number) => {
+  const handleDislike = async (id: number) => {
     try {
-      const res = await api.post<{ status: string; agree_count: number; member_score: number; total_score: number }>(`/post/agree-cancel/${id}`)
+      const res = await api.post<{ status: string; likes: number; dislikes: number }>(`/post/dislike/${id}`)
       if (res.status === 'success') {
-        setMyAgrees(prev => { const n = new Set(prev); n.delete(id); return n })
-        setPosts(prev => prev.map(p => p.id === id ? { ...p, member_score: res.member_score, total_score: res.total_score } : p))
+        setPosts(prev => prev.map(p => p.id === id ? { ...p, like_count: res.likes, dislike_count: res.dislikes } : p))
       }
     } catch { /* ignore */ }
   }
@@ -116,7 +100,6 @@ export default function AllProposalsPage() {
 
   if (loading) return <Loading />
   if (error) return <ErrorMessage message={error} onRetry={load} />
-
   const userId = (user as any)?.id
 
   return (
@@ -136,7 +119,6 @@ export default function AllProposalsPage() {
             const within48 = createdAt && now - createdAt < 48 * 60 * 60 * 1000
             const noScore = (p.admin_score === 0 || p.admin_score == null) && (p.leader_score === 0 || p.leader_score == null)
             const canEdit = userId && p.user_id === userId && !p.is_forced_approved && noScore && within48
-            const isAgreed = myAgrees.has(p.id)
 
             return (
               <div key={p.id} className="list-group-item mb-3 p-4 shadow-sm border-0 bg-white" style={{ borderRadius: 18 }}>
@@ -179,17 +161,11 @@ export default function AllProposalsPage() {
 
                 <div className="d-flex justify-content-between align-items-center pt-3 border-top flex-wrap gap-2">
                   <div className="d-flex align-items-center gap-2 flex-wrap">
-                    {userId && (
-                      isAgreed ? (
-                        <button onClick={() => handleAgreeCancel(p.id)} className="btn btn-sm btn-success py-0 px-2">✅ 동의취소</button>
-                      ) : (
-                        <button onClick={() => handleAgree(p.id)} className="btn btn-sm btn-outline-success py-0 px-2">이 제안에 동의합니다</button>
-                      )
-                    )}
-                    {!userId && (
-                      <span className="text-muted small">동의: {p.member_score ?? 0}</span>
-                    )}
-                    <span className="mx-2">|</span>
+                    <span className="fw-bold text-success small">동의 {p.member_score ?? 0}</span>
+                    <span className="mx-1">|</span>
+                    <button onClick={() => handleLike(p.id)} className="btn btn-sm btn-outline-success py-0 px-2">👍 {p.like_count || 0}</button>
+                    <button onClick={() => handleDislike(p.id)} className="btn btn-sm btn-outline-danger py-0 px-2">👎 {p.dislike_count || 0}</button>
+                    <span className="mx-1">|</span>
                     {getStatusBadge(p)}
                     {p.created_at && within48 && <CountdownTimer createdAt={p.created_at} />}
                   </div>

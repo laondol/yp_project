@@ -16,6 +16,13 @@ export default function ViewPage() {
   const [error, setError] = useState('')
   const [commentText, setCommentText] = useState('')
   const [sending, setSending] = useState(false)
+  const [isAgreed, setIsAgreed] = useState(false)
+  const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null)
+
+  const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
+    setToast({ msg, type })
+    setTimeout(() => setToast(null), 3000)
+  }
 
   const load = useCallback(async () => {
     if (!postId) return
@@ -32,6 +39,41 @@ export default function ViewPage() {
   }, [postId])
 
   useEffect(() => { load() }, [load])
+
+  useEffect(() => {
+    if (!postId) return
+    fetch('/api/page/all-proposals/my-agrees', { credentials: 'include' })
+      .then(r => r.json())
+      .then(d => setIsAgreed((d.agreed_post_ids || []).includes(Number(postId))))
+      .catch(() => {})
+  }, [postId])
+
+  const handleAgree = async () => {
+    if (!postId) return
+    try {
+      const res = await fetch(`/post/agree/${postId}`, { method: 'POST', credentials: 'include' })
+      const data = await res.json()
+      if (data.status === 'success') {
+        setIsAgreed(true)
+        setPost(prev => prev ? { ...prev, member_score: data.member_score, total_score: data.total_score } : prev)
+        if (data.cost) showToast(`${data.cost}坭 사용 (잔여: ${data.remaining}坭)`, 'success')
+      } else {
+        showToast(data.msg || '동의 실패', 'error')
+      }
+    } catch { showToast('동의 중 오류', 'error') }
+  }
+
+  const handleAgreeCancel = async () => {
+    if (!postId) return
+    try {
+      const res = await fetch(`/post/agree-cancel/${postId}`, { method: 'POST', credentials: 'include' })
+      const data = await res.json()
+      if (data.status === 'success') {
+        setIsAgreed(false)
+        setPost(prev => prev ? { ...prev, member_score: data.member_score, total_score: data.total_score } : prev)
+      }
+    } catch { /* ignore */ }
+  }
 
   const handleVote = async (type: 'like' | 'dislike') => {
     if (!postId) return
@@ -160,8 +202,28 @@ export default function ViewPage() {
 
             <div className="mb-4" style={{ lineHeight: 1.8 }} dangerouslySetInnerHTML={{ __html: post.content }} />
 
-            <div className="text-center">
-              <button className="btn btn-success btn-lg px-5">이 제안에 동의합니다</button>
+            {post.total_score != null && (
+              <div className="mb-3 p-2 bg-light rounded small">
+                <span className="fw-bold me-2">📊 점수:</span>
+                <span className="me-2">AI: <strong>{post.ai_score ?? 0}</strong></span>
+                <span className="me-2">관리자: <strong>{post.admin_score ?? 0}</strong></span>
+                <span className="me-2">책임자: <strong>{post.leader_score ?? 0}</strong></span>
+                <span className="me-2">동의: <strong>{post.member_score ?? 0}</strong></span>
+                <span>합계: <strong>{post.total_score ?? 0}</strong></span>
+              </div>
+            )}
+
+            <div className="text-center my-4">
+              {toast && (
+                <div className={`mb-3 p-2 rounded text-white small fw-bold ${toast.type === 'success' ? 'bg-success' : 'bg-danger'}`}>
+                  {toast.type === 'success' ? '✅' : '❌'} {toast.msg}
+                </div>
+              )}
+              {isAgreed ? (
+                <button className="btn btn-success btn-lg px-5" onClick={handleAgreeCancel}>✅ 동의취소</button>
+              ) : (
+                <button className="btn btn-outline-success btn-lg px-5 fw-bold" onClick={handleAgree}>이 제안에 동의합니다</button>
+              )}
             </div>
           </div>
         </div>

@@ -190,79 +190,28 @@ def post_like(post_id):
     uid = session.get('user_id')
     if not uid: return jsonify({'status':'error','msg':'로그인 필요'}), 401
     post = Post.query.get_or_404(post_id)
-    voter = User.query.get(uid)
-    prev_votes = PostVote.query.filter_by(post_id=post_id, user_id=uid).count()
-    cost = 5 * (2 ** prev_votes)
-    if (voter.points or 0) < cost:
-        return jsonify({'status':'error','msg':f'립이 부족합니다. 필요: {cost}坭 (이전 투표 {prev_votes}회)'}), 400
+    existing = PostVote.query.filter_by(post_id=post_id, user_id=uid, vote_type='like').first()
+    if existing:
+        return jsonify({'status':'error','msg':'이미 좋아요 하셨습니다'}), 400
     v = PostVote(post_id=post_id, user_id=uid, vote_type='like')
     db.session.add(v)
     post.like_count = (post.like_count or 0) + 1
-    like_count = post.like_count
-    dislike_count = post.dislike_count or 0
-    total_voters = like_count + dislike_count
-    if total_voters <= 30:
-        post.member_score = like_count - dislike_count
-    else:
-        post.member_score = round((like_count - dislike_count) * 30 / total_voters)
-    post.member_score = max(-30, min(30, post.member_score))
-    post.recalc_total()
-    voter.points = (voter.points or 0) - cost
-    db.session.add(PointHistory(user_id=uid, change_type='like', amount=-cost, balance_after=voter.points, description=f'좋아요 투표 ({prev_votes+1}회째)', related_id=post_id))
-    if post.user_id and post.user_id != uid:
-        author = User.query.get(post.user_id)
-        if author:
-            author.points = (author.points or 0) + 1
-            db.session.add(PointHistory(user_id=post.user_id, change_type='like_reward', amount=1, balance_after=author.points, description='좋아요 받음', related_id=post_id))
-    status_changed = False
-    if post.status == '제안' and post.total_score >= 80:
-        post.status = '현실화'
-        status_changed = True
-        admin_user = User.query.filter(User.role == 'admin').first()
-        if admin_user and post.user_id and post.user_id != admin_user.id:
-            msg = Message(
-                sender_id=admin_user.id,
-                sender_name='함께사는양평',
-                sender_role='admin',
-                receiver_id=post.user_id,
-                subject='🎉 현실화 축하드립니다',
-                content='회의에 참석 하실 수 있으실까요 가능한 날짜와 시간을 알려 주세요. 직접 방문하거나 구글미트로 회의 하실 수 있습니다. 혹시 문의 사항이 있으시면 010-2438-7953으로 오전 10시 ~ 오후 6시 월 금요일 사이에 연락 주세요.'
-            )
-            db.session.add(msg)
     db.session.commit()
-    return jsonify({'status':'success', 'likes':post.like_count, 'dislikes':post.dislike_count, 'total_score':post.total_score, 'cost':cost, 'remaining':voter.points, 'status_changed':status_changed, 'new_status':post.status})
+    return jsonify({'status':'success', 'likes':post.like_count, 'dislikes':post.dislike_count or 0})
 
 @board_bp.route('/post/dislike/<int:post_id>', methods=['POST'])
 def post_dislike(post_id):
     uid = session.get('user_id')
     if not uid: return jsonify({'status':'error','msg':'로그인 필요'}), 401
     post = Post.query.get_or_404(post_id)
-    voter = User.query.get(uid)
-    prev_votes = PostVote.query.filter_by(post_id=post_id, user_id=uid).count()
-    cost = 5 * (2 ** prev_votes)
-    if (voter.points or 0) < cost:
-        return jsonify({'status':'error','msg':f'립이 부족합니다. 필요: {cost}坭 (이전 투표 {prev_votes}회)'}), 400
+    existing = PostVote.query.filter_by(post_id=post_id, user_id=uid, vote_type='dislike').first()
+    if existing:
+        return jsonify({'status':'error','msg':'이미 별로예요 하셨습니다'}), 400
     v = PostVote(post_id=post_id, user_id=uid, vote_type='dislike')
     db.session.add(v)
     post.dislike_count = (post.dislike_count or 0) + 1
-    like_count = post.like_count or 0
-    dislike_count = post.dislike_count
-    total_voters = like_count + dislike_count
-    if total_voters <= 30:
-        post.member_score = like_count - dislike_count
-    else:
-        post.member_score = round((like_count - dislike_count) * 30 / total_voters)
-    post.member_score = max(-30, min(30, post.member_score))
-    post.recalc_total()
-    voter.points = (voter.points or 0) - cost
-    db.session.add(PointHistory(user_id=uid, change_type='dislike', amount=-cost, balance_after=voter.points, description=f'나빠요 투표 ({prev_votes+1}회째)', related_id=post_id))
-    if post.user_id and post.user_id != uid:
-        author = User.query.get(post.user_id)
-        if author:
-            author.points = (author.points or 0) - 1
-            db.session.add(PointHistory(user_id=post.user_id, change_type='dislike_penalty', amount=-1, balance_after=author.points, description='나빠요 받음', related_id=post_id))
     db.session.commit()
-    return jsonify({'status':'success', 'likes':post.like_count, 'dislikes':post.dislike_count, 'total_score':post.total_score, 'cost':cost, 'remaining':voter.points})
+    return jsonify({'status':'success', 'likes':post.like_count or 0, 'dislikes':post.dislike_count})
 
 @board_bp.route('/post/agree/<int:post_id>', methods=['POST'])
 def post_agree(post_id):
@@ -272,13 +221,19 @@ def post_agree(post_id):
     existing = PostVote.query.filter_by(post_id=post_id, user_id=uid, vote_type='agree').first()
     if existing:
         return jsonify({'status':'error','msg':'이미 동의하셨습니다'}), 400
+    voter = User.query.get(uid)
+    cost = 10
+    if (voter.points or 0) < cost:
+        return jsonify({'status':'error','msg':f'립이 부족합니다. 필요: {cost}坭'}), 400
+    voter.points = (voter.points or 0) - cost
+    db.session.add(PointHistory(user_id=uid, change_type='agree', amount=-cost, balance_after=voter.points, description='제안 동의', related_id=post_id))
     v = PostVote(post_id=post_id, user_id=uid, vote_type='agree')
     db.session.add(v)
     agree_count = PostVote.query.filter_by(post_id=post_id, vote_type='agree').count()
     post.member_score = agree_count
     post.recalc_total()
     db.session.commit()
-    return jsonify({'status':'success', 'agree_count': agree_count, 'member_score': post.member_score, 'total_score': post.total_score})
+    return jsonify({'status': 'success', 'agree_count': agree_count, 'member_score': post.member_score, 'total_score': post.total_score, 'cost': cost, 'remaining': voter.points})
 
 @board_bp.route('/post/agree-cancel/<int:post_id>', methods=['POST'])
 def post_agree_cancel(post_id):
