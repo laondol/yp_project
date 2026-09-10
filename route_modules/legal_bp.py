@@ -35,9 +35,9 @@ def legal_issues_write():
             keyword = request.form.get('keyword', title)
             try:
                 from openai import OpenAI
-                client = OpenAI(base_url="https://api.motif.com/openai/v1", api_key=current_app.config.get('MOTIF_API_KEY',''))
+                client = OpenAI(base_url="https://api-cbt.morphfactory.io/v1", api_key=current_app.config.get('MOTIF_API_KEY',''))
                 resp = client.chat.completions.create(
-                    model="motif-12.7b",
+                    model="motif/motif-3",
                     messages=[{"role":"system","content":"한국의 최신 노동 관련 이슈에 대해 500자 내외로 정리해줘. 마크다운 없이 일반 텍스트로."},
                               {"role":"user","content":keyword}],
                     temperature=0.5, max_tokens=600

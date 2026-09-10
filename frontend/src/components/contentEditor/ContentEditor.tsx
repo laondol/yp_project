@@ -2,6 +2,18 @@ import { useRef, useState, useCallback, useEffect, forwardRef, useImperativeHand
 import Cropper from 'cropperjs'
 import 'cropperjs/dist/cropper.css'
 
+function useIsMobile(breakpoint = 768) {
+  const [isMobile, setIsMobile] = useState(() =>
+    typeof window !== 'undefined' ? window.innerWidth < breakpoint : false
+  )
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < breakpoint)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [breakpoint])
+  return isMobile
+}
+
 export interface LocationValue {
   lat: string
   lng: string
@@ -39,6 +51,10 @@ const ContentEditor = forwardRef<ContentEditorHandle, ContentEditorProps>(functi
   placeholder = '내용을 입력해 주세요. (사진은 Ctrl+V로 붙여넣기 가능)',
   onLocationChange,
 }, ref) {
+  const isMobile = useIsMobile()
+  const [mobileToolbarOpen, setMobileToolbarOpen] = useState(false)
+  const [showMoreMenu, setShowMoreMenu] = useState(false)
+  const editorWrapperRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const fileAttachRef = useRef<HTMLInputElement>(null)
@@ -958,6 +974,8 @@ const ContentEditor = forwardRef<ContentEditorHandle, ContentEditorProps>(functi
 
   return (
     <div>
+      {/* ===== 데스크톱 툴바 (기존 그대로) ===== */}
+      {!isMobile && (
       <div className="mb-2">
         <div className="btn-group btn-group-sm" style={{ display: 'flex', flexWrap: 'nowrap' }}>
 
@@ -1106,21 +1124,140 @@ const ContentEditor = forwardRef<ContentEditorHandle, ContentEditorProps>(functi
           </div>
         )}
       </div>
+      )}
 
-      <div className="mb-3" style={{ position: 'relative' }}>
+      {/* ===== 모바일 툴바 (자동 숨김 + 축약) ===== */}
+      {isMobile && (
+      <>
+        {/* 툴바 열기 버튼 — 에디터 상단에 표시 */}
+        {!mobileToolbarOpen && (
+          <div className="mb-1 d-flex justify-content-end">
+            <button type="button" className="btn btn-sm btn-outline-success"
+              style={{ fontSize: '0.8rem', borderRadius: 20, padding: '2px 12px' }}
+              onClick={(e) => { e.stopPropagation(); setMobileToolbarOpen(true); setShowMoreMenu(false) }}>
+              ✏️ 툴바
+            </button>
+          </div>
+        )}
+
+        {/* 모바일 툴바 패널 */}
+        {mobileToolbarOpen && (
+          <div className="mb-2" style={{
+            position: 'sticky', bottom: 0, zIndex: 6500,
+            background: '#fff', borderTop: '1px solid #dee2e6',
+            padding: '6px 4px', boxShadow: '0 -2px 8px rgba(0,0,0,0.1)',
+          }}>
+            {/* 핵심 버튼 줄 */}
+            <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'nowrap', overflowX: 'auto' }}>
+              <button type="button" className="btn btn-sm btn-outline-secondary"
+                style={{ minWidth: 40, minHeight: 40, fontSize: '1rem', fontWeight: 700, flexShrink: 0 }}
+                onClick={() => execCmd('bold')} title="굵게"><b>B</b></button>
+              <button type="button" className="btn btn-sm btn-outline-secondary"
+                style={{ minWidth: 40, minHeight: 40, fontSize: '1rem', fontStyle: 'italic', flexShrink: 0 }}
+                onClick={() => execCmd('italic')} title="기울임"><i>I</i></button>
+
+              {/* 문단 드롭다운 */}
+              <div style={{ position: 'relative', flexShrink: 0 }}>
+                <button type="button" className={`btn btn-sm ${showPara ? 'btn-primary' : 'btn-outline-secondary'}`}
+                  style={{ minWidth: 40, minHeight: 40, fontSize: '0.85rem' }}
+                  onClick={() => { setShowPara(v => !v); setShowFormat(false); setShowTable(false); setShowDraw(false); setShowMoreMenu(false) }} title="문단">📑 문단 ▾</button>
+                {showPara && (
+                  <div style={{ position: 'absolute', bottom: '100%', left: 0, zIndex: 6600, background: '#fff', border: '1px solid #ccc', borderRadius: 8, padding: 6, display: 'flex', flexDirection: 'column', gap: 4, minWidth: 140, boxShadow: '0 -2px 8px rgba(0,0,0,0.15)' }}>
+                    <button type="button" className="btn btn-sm btn-outline-secondary text-start" onClick={() => { applyCmd('formatBlock', 'H2'); setShowPara(false) }}>제목 1</button>
+                    <button type="button" className="btn btn-sm btn-outline-secondary text-start" onClick={() => { applyCmd('formatBlock', 'H3'); setShowPara(false) }}>제목 2</button>
+                    <button type="button" className="btn btn-sm btn-outline-secondary text-start" onClick={() => { applyCmd('formatBlock', 'P'); setShowPara(false) }}>일반 문단</button>
+                    <button type="button" className="btn btn-sm btn-outline-secondary text-start" onClick={() => { applyCmd('formatBlock', 'BLOCKQUOTE'); setShowPara(false) }}>인용</button>
+                    <button type="button" className="btn btn-sm btn-outline-secondary text-start" onClick={() => { execCmd('insertUnorderedList'); setShowPara(false) }}>글머리 목록</button>
+                    <button type="button" className="btn btn-sm btn-outline-secondary text-start" onClick={() => { execCmd('insertOrderedList'); setShowPara(false) }}>번호 목록</button>
+                  </div>
+                )}
+              </div>
+
+              {/* 이미지첨부 (카메라 우선) */}
+              <button type="button" className="btn btn-sm btn-outline-secondary"
+                style={{ minWidth: 40, minHeight: 40, fontSize: '1rem', flexShrink: 0 }}
+                onClick={() => {
+                  const input = fileInputRef.current
+                  if (input) {
+                    input.setAttribute('capture', 'environment')
+                    input.click()
+                    setTimeout(() => input.removeAttribute('capture'), 100)
+                  }
+                }} title="사진 촬영/첨부">📷</button>
+
+              {/* ⋮더보기 */}
+              <div style={{ position: 'relative', flexShrink: 0 }}>
+                <button type="button" className={`btn btn-sm ${showMoreMenu ? 'btn-primary' : 'btn-outline-secondary'}`}
+                  style={{ minWidth: 40, minHeight: 40, fontSize: '1rem', fontWeight: 700 }}
+                  onClick={() => { setShowMoreMenu(v => !v); setShowPara(false); setShowFormat(false); setShowTable(false); setShowDraw(false) }} title="더보기">⋮</button>
+                {showMoreMenu && (
+                  <div style={{ position: 'absolute', bottom: '100%', right: 0, zIndex: 6600, background: '#fff', border: '1px solid #ccc', borderRadius: 8, padding: 6, display: 'flex', flexDirection: 'column', gap: 4, minWidth: 150, boxShadow: '0 -2px 8px rgba(0,0,0,0.15)' }}>
+                    <button type="button" className="btn btn-sm btn-outline-secondary text-start" onClick={() => { fileInputRef.current?.click(); setShowMoreMenu(false) }}>📷 이미지 첨부</button>
+                    <button type="button" className="btn btn-sm btn-outline-secondary text-start" onClick={() => { fileAttachRef.current?.click(); setShowMoreMenu(false) }}>📁 파일 첨부</button>
+                    <button type="button" className="btn btn-sm btn-outline-secondary text-start" onClick={() => {
+                      const url = window.prompt('삽입할 사이트 링크(URL)를 입력하세요')
+                      if (!url) return
+                      const label = window.prompt('링크에 표시할 이름 (선택)') || ''
+                      const esc = (s: string) => s.replace(/"/g, '&quot;').replace(/</g, '&lt;')
+                      insertAtCursor(`<div style="margin:8px 0;padding:10px;border:1px solid #bee5eb;background:#f0f9ff;border-radius:10px">🔗 <a href="${esc(url)}" target="_blank" rel="noopener noreferrer" style="color:#198754;font-weight:bold">${esc(label) || esc(url)}</a></div><p><br></p>`)
+                      setShowMoreMenu(false)
+                    }}>🔗 링크 삽입</button>
+                    <button type="button" className="btn btn-sm btn-outline-secondary text-start" onClick={() => { setShowTable(v => !v); setShowMoreMenu(false) }}>▦ 표</button>
+                    <button type="button" className="btn btn-sm btn-outline-secondary text-start" onClick={() => { const n = !showDraw; setShowDraw(n); setShowCanvas(n); setShowMoreMenu(false) }}>✏️ 그리기</button>
+                    <button type="button" className="btn btn-sm btn-outline-secondary text-start" onClick={() => { startMatch(); setShowMoreMenu(false) }}>💞 매치</button>
+                  </div>
+                )}
+              </div>
+
+              <div style={{ flex: 1 }} />
+
+              {/* 툴바 닫기 */}
+              <button type="button" className="btn btn-sm btn-outline-danger"
+                style={{ minWidth: 40, minHeight: 40, fontSize: '0.75rem', flexShrink: 0 }}
+                onClick={() => { setMobileToolbarOpen(false); setShowPara(false); setShowTable(false); setShowDraw(false); setShowMoreMenu(false); editorRef.current?.focus() }}>✕</button>
+            </div>
+
+            {/* 표 편집 (더보기에서 열렸을 때) */}
+            {showTable && (
+              <div style={{ marginTop: 6, padding: 6, border: '1px solid #dee2e6', borderRadius: 8, display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', fontSize: '0.85rem' }}>
+                <label>행 <input type="number" min={1} max={20} value={tableRows} onChange={(e) => setTableRows(Number(e.target.value))} style={{ width: 44, height: 36 }} /></label>
+                <label>열 <input type="number" min={1} max={20} value={tableCols} onChange={(e) => setTableCols(Number(e.target.value))} style={{ width: 44, height: 36 }} /></label>
+                <button type="button" className="btn btn-primary btn-sm" style={{ minHeight: 36 }} onClick={() => { insertTable(tableRows, tableCols); setShowTable(false) }}>삽입</button>
+                <button type="button" className="btn btn-outline-warning btn-sm" style={{ minHeight: 36 }} onClick={() => { deleteTableAtCursor(); setShowTable(false) }}>삭제</button>
+              </div>
+            )}
+
+            {/* 그리기 (더보기에서 열렸을 때) */}
+            {showDraw && (
+              <div style={{ marginTop: 6, padding: 6, border: '1px solid #dee2e6', borderRadius: 8, display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', fontSize: '0.85rem' }}>
+                <button type="button" className={`btn btn-sm ${drawMode === 'free' ? 'btn-primary' : 'btn-outline-secondary'}`} style={{ minHeight: 36 }} onClick={() => setDrawMode('free')}>자유</button>
+                <button type="button" className={`btn btn-sm ${drawMode === 'line' ? 'btn-primary' : 'btn-outline-secondary'}`} style={{ minHeight: 36 }} onClick={() => setDrawMode('line')}>직선</button>
+                <button type="button" className={`btn btn-sm ${drawMode === 'circle' ? 'btn-primary' : 'btn-outline-secondary'}`} style={{ minHeight: 36 }} onClick={() => setDrawMode('circle')}>원형</button>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 2 }}>색상 <input type="color" value={drawColor} onChange={(e) => setDrawColor(e.target.value)} style={{ width: 36, height: 32 }} /></label>
+                <button type="button" className="btn btn-sm btn-success" style={{ minHeight: 36 }} onClick={applyDrawing}>본문에 넣기</button>
+                <button type="button" className="btn btn-sm btn-outline-secondary" style={{ minHeight: 36 }} onClick={() => { setShowDraw(false); setShowCanvas(false) }}>닫기</button>
+              </div>
+            )}
+          </div>
+        )}
+      </>
+      )}
+
+      <div className="mb-3" style={{ position: 'relative' }} ref={editorWrapperRef}>
         <div
           ref={editorRef}
           contentEditable
           className="form-control"
           style={{
-            minHeight: 250, maxHeight: 500, overflowY: 'auto',
-            borderRadius: 12, padding: 12,
+            minHeight: isMobile ? 200 : 250, maxHeight: 500, overflowY: 'auto',
+            borderRadius: 12, padding: isMobile ? 10 : 12,
           }}
           onPaste={handlePaste}
           onClick={detectImage}
           onMouseUp={saveSelection}
           onKeyUp={saveSelection}
           onBlur={saveSelection}
+          onFocus={() => { if (isMobile) setMobileToolbarOpen(false) }}
           data-placeholder={placeholder}
         />
         <canvas
@@ -1147,34 +1284,52 @@ const ContentEditor = forwardRef<ContentEditorHandle, ContentEditorProps>(functi
             <div style={{ position: 'absolute', inset: 0, border: '2px solid #2980b9', borderRadius: 6 }} />
             <div onPointerDown={e => onHandleDown(e, 'rotate')}
               style={{
-                position: 'absolute', left: '50%', top: -26,
+                position: 'absolute', left: '50%', top: isMobile ? -38 : -26,
                 transform: 'translateX(-50%)',
-                width: 24, height: 24, background: '#2980b9',
+                width: isMobile ? 36 : 24, height: isMobile ? 36 : 24, background: '#2980b9',
                 borderRadius: '50%', cursor: 'grab', zIndex: 5001, touchAction: 'none',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                color: '#fff', fontSize: 12, boxShadow: '0 2px 6px rgba(0,0,0,0.3)',
+                color: '#fff', fontSize: isMobile ? 16 : 12, boxShadow: '0 2px 6px rgba(0,0,0,0.3)',
                 pointerEvents: 'auto',
               }}>↻</div>
-            <div style={{ position: 'absolute', left: '50%', top: -15, width: 1, height: 15, background: '#2980b9', pointerEvents: 'none' }} />
+            <div style={{ position: 'absolute', left: '50%', top: isMobile ? -26 : -15, width: 1, height: isMobile ? 26 : 15, background: '#2980b9', pointerEvents: 'none' }} />
             {(['tl', 'tr', 'bl', 'br'] as const).map((corner) => {
+              const handleSize = isMobile ? 36 : 24
+              const offset = isMobile ? -10 : -6
               const cStyle: React.CSSProperties = {
                 position: 'absolute',
-                width: 24, height: 24, background: '#27ae60', borderRadius: '50%',
+                width: handleSize, height: handleSize, background: '#27ae60', borderRadius: '50%',
                 cursor: (corner === 'tl' || corner === 'br') ? 'nwse-resize' : 'nesw-resize',
                 zIndex: 5001, touchAction: 'none',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                color: '#fff', fontSize: 10, boxShadow: '0 2px 6px rgba(0,0,0,0.3)',
+                color: '#fff', fontSize: isMobile ? 14 : 10, boxShadow: '0 2px 6px rgba(0,0,0,0.3)',
                 pointerEvents: 'auto',
               }
-              if (corner === 'tl') { cStyle.left = -6; cStyle.top = -6 }
-              if (corner === 'tr') { cStyle.right = -6; cStyle.top = -6 }
-              if (corner === 'bl') { cStyle.left = -6; cStyle.bottom = -6 }
-              if (corner === 'br') { cStyle.right = -6; cStyle.bottom = -6 }
+              if (corner === 'tl') { cStyle.left = offset; cStyle.top = offset }
+              if (corner === 'tr') { cStyle.right = offset; cStyle.top = offset }
+              if (corner === 'bl') { cStyle.left = offset; cStyle.bottom = offset }
+              if (corner === 'br') { cStyle.right = offset; cStyle.bottom = offset }
               return (
                 <div key={corner} onPointerDown={e => onHandleDown(e, 'resize', corner)}
                   style={cStyle}>⤢</div>
               )
             })}
+
+            {/* 모바일: 이미지 편집 컨텍스트 바 (간소화) */}
+            {isMobile && (
+              <div style={{
+                position: 'absolute', bottom: -44, left: '50%', transform: 'translateX(-50%)',
+                display: 'flex', gap: 4, background: '#fff', border: '1px solid #ccc',
+                borderRadius: 8, padding: 4, zIndex: 5002, pointerEvents: 'auto',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+              }}>
+                <button type="button" className="btn btn-sm btn-outline-primary" style={{ minHeight: 34, fontSize: '0.8rem' }} onClick={() => applyImgAlign('left')}>왼쪽</button>
+                <button type="button" className="btn btn-sm btn-outline-primary" style={{ minHeight: 34, fontSize: '0.8rem' }} onClick={() => applyImgAlign('center')}>가운데</button>
+                <button type="button" className="btn btn-sm btn-outline-primary" style={{ minHeight: 34, fontSize: '0.8rem' }} onClick={() => applyImgAlign('right')}>오른쪽</button>
+                <button type="button" className="btn btn-sm btn-outline-primary" style={{ minHeight: 34, fontSize: '0.8rem' }} onClick={startCropActive}>자르기</button>
+                <button type="button" className="btn btn-sm btn-outline-danger" style={{ minHeight: 34, fontSize: '0.8rem' }} onClick={() => { activeImg?.remove(); setActiveImg(null) }}>삭제</button>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -1210,6 +1365,7 @@ const ContentEditor = forwardRef<ContentEditorHandle, ContentEditorProps>(functi
             value={addr}
             onChange={e => handleLocationInput('addr', e.target.value)}
           />
+          {!isMobile && (
           <div className="d-flex gap-2">
             <input
               type="number"
@@ -1228,7 +1384,8 @@ const ContentEditor = forwardRef<ContentEditorHandle, ContentEditorProps>(functi
               onChange={e => handleLocationInput('lng', e.target.value)}
             />
           </div>
-          <small className="text-muted d-block mt-1">주소 검색·수정 가능하며, GPS로 현재 위치를 자동 입력할 수 있습니다.</small>
+          )}
+          <small className="text-muted d-block mt-1">{isMobile ? 'GPS 버튼으로 위치를 자동 입력할 수 있습니다.' : '주소 검색·수정 가능하며, GPS로 현재 위치를 자동 입력할 수 있습니다.'}</small>
             </>
           )}
         </div>

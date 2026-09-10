@@ -414,9 +414,9 @@ def api_epub_ai_assist():
         '이 섹션에 어울리는 글쓰기 가이드와 초안을 작성하세요.\n'
         '구체적인 예시와 함께 3~5문장 정도의 초안을 제시하세요.')
     try:
-        r = _requests.post('https://chat.motiftech.io/openapi/v1/chat/completions',
+        r = _requests.post('https://api-cbt.morphfactory.io/v1/chat/completions',
             headers={'Authorization': 'Bearer ' + motif_key, 'Content-Type': 'application/json'},
-            json={'model': 'motif-12.7b',
+            json={'model': 'motif/motif-3',
                   'messages': [{'role': 'user', 'content': prompt}],
                   'temperature': 0.7}, timeout=30)
         suggestion = r.json()['choices'][0]['message']['content']
@@ -442,9 +442,9 @@ def api_epub_ai_headline():
         '주제: ' + topic + '\n'
         '각 줄에 하나씩, 따옴표 없이 출력하세요.')
     try:
-        r = _requests.post('https://chat.motiftech.io/openapi/v1/chat/completions',
+        r = _requests.post('https://api-cbt.morphfactory.io/v1/chat/completions',
             headers={'Authorization': 'Bearer ' + motif_key, 'Content-Type': 'application/json'},
-            json={'model': 'motif-12.7b',
+            json={'model': 'motif/motif-3',
                   'messages': [{'role': 'user', 'content': prompt}],
                   'temperature': 0.8}, timeout=20)
         out = r.json()['choices'][0]['message']['content']
@@ -469,9 +469,9 @@ def api_epub_ai_proofread():
         '원문의 의미를 유지하면서 자연스럽게 다듬어 주세요.\n'
         '교정된 텍스트만 출력하세요.\n\n' + text)
     try:
-        r = _requests.post('https://chat.motiftech.io/openapi/v1/chat/completions',
+        r = _requests.post('https://api-cbt.morphfactory.io/v1/chat/completions',
             headers={'Authorization': 'Bearer ' + motif_key, 'Content-Type': 'application/json'},
-            json={'model': 'motif-12.7b',
+            json={'model': 'motif/motif-3',
                   'messages': [{'role': 'user', 'content': prompt}],
                   'temperature': 0}, timeout=20)
         corrected = r.json()['choices'][0]['message']['content']

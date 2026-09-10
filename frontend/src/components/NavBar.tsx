@@ -347,7 +347,7 @@ export default function NavBar() {
                 admin_ai_train: ['admin_ai_train'],
               }
               const hasPage = (menuKey: string) => {
-                if (isAdminOrLeader) return true
+                if (user?.role === 'leader') return true
                 const aliases = pageToMenu[menuKey] || [menuKey]
                 return aliases.some(k => mp.includes(k))
               }

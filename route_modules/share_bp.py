@@ -908,9 +908,9 @@ def share_report_edit(report_id):
             lines = [l.strip() for l in menu_text.split('\n') if l.strip()]
             if lines:
                 try:
-                    r = _requests.post('https://chat.motiftech.io/openapi/v1/chat/completions',
+                    r = _requests.post('https://api-cbt.morphfactory.io/v1/chat/completions',
                         headers={'Authorization': 'Bearer ' + current_app.config.get('MOTIF_API_KEY',''), 'Content-Type': 'application/json'},
-                        json={'model': 'motif-12.7b',
+                        json={'model': 'motif/motif-3',
                               'messages': [{'role': 'user', 'content':
                                 '다음 메뉴 항목 각각을 "식사","음료","디저트","기타" 중 하나로 분류하세요. '
                                 '각 항목 앞에 라벨을 붙여 줄바꿈으로 출력하세요.\n' + '\n'.join(lines)}],
@@ -1691,9 +1691,9 @@ def api_menu_classify():
     if not motif_key:
         return jsonify({"labels": ["기타"]})
     try:
-        r = _requests.post('https://chat.motiftech.io/openapi/v1/chat/completions',
+        r = _requests.post('https://api-cbt.morphfactory.io/v1/chat/completions',
             headers={'Authorization': 'Bearer ' + motif_key, 'Content-Type': 'application/json'},
-            json={'model': 'motif-12.7b',
+            json={'model': 'motif/motif-3',
                   'messages': [{'role': 'user', 'content':
                     '다음 메뉴 항목 각각을 "식사","음료","디저트","기타" 중 하나로 분류하세요. '
                     '각 항목을 줄바꿈하고 가장 앞에 라벨을 붙이세요. 예시:\n식사: 된장찌개\n음료: 아메리카노\n디저트: 티라미수\n---\n' + text}],
@@ -1747,9 +1747,9 @@ def api_menu_search():
             ctx = '가게명: ' + store_name
             if store_info:
                 ctx += '\n주소: ' + store_info['address'] + '\n전화: ' + store_info['phone']
-            r = _requests.post('https://chat.motiftech.io/openapi/v1/chat/completions',
+            r = _requests.post('https://api-cbt.morphfactory.io/v1/chat/completions',
                 headers={'Authorization': 'Bearer ' + motif_key, 'Content-Type': 'application/json'},
-                json={'model': 'motif-12.7b',
+                json={'model': 'motif/motif-3',
                       'messages': [{'role': 'user', 'content':
                         '다음 가게의 대표 메뉴 5~10개를 JSON 배열로 출력하세요. '
                         '각 항목은 {"name": "메뉴명", "price": "가격(원)", "category": "식사/음료/디저트/기타"} 형식입니다. '

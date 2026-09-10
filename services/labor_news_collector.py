@@ -543,20 +543,35 @@ def collect_world_news():
                 art_summary = desc[:200]
                 art_content = f"<p>{desc[:1000]}</p>"
 
-                try:
-                    from services.news_service import ai_translate_and_format
-                    eng_ratio = sum(1 for c in title if c.isascii() and c.isalpha()) / max(sum(1 for c in title if c.isalpha()), 1)
-                    if eng_ratio > 0.5:
-                        tr = ai_translate_and_format(title, desc)
-                        if tr and isinstance(tr, dict):
-                            if tr.get('title'):
-                                art_title = f"[{source['name']}] {tr['title']}"
-                            if tr.get('summary'):
-                                art_summary = tr['summary'][:200]
-                            if tr.get('content'):
-                                art_content = tr['content'][:1000]
-                except Exception:
-                    pass
+                # 세계뉴스는 반드시 한글 번역 후 저장
+                eng_chars = sum(1 for c in title if c.isascii() and c.isalpha())
+                total_chars = max(sum(1 for c in title if c.isalpha()), 1)
+                eng_ratio = eng_chars / total_chars
+
+                if eng_ratio > 0.3:
+                    tr = None
+                    for attempt in range(2):
+                        try:
+                            from services.news_service import ai_translate_and_format
+                            tr = ai_translate_and_format(title, desc)
+                            if tr and isinstance(tr, dict) and tr.get('title'):
+                                break
+                            tr = None
+                        except Exception as e:
+                            print(f"[WORLD_NEWS] 번역 시도 {attempt+1} 실패 ({source['name']}): {e}")
+                            tr = None
+
+                    if tr and isinstance(tr, dict):
+                        if tr.get('title'):
+                            art_title = f"[{source['name']}] {tr['title']}"
+                        if tr.get('summary'):
+                            art_summary = tr['summary'][:200]
+                        if tr.get('content'):
+                            art_content = tr['content'][:1000]
+                    else:
+                        # 번역 실패 시 원본에 [미번역] 태그 추가
+                        art_title = f"[{source['name']}] [미번역] {title}"
+                        print(f"[WORLD_NEWS] 번역 실패 - 원본 저장: {title[:60]}")
 
                 article = NewsArticle(
                     title=art_title,

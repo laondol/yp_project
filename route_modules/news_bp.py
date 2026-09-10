@@ -130,16 +130,26 @@ def admin_news_ai_suggest():
                 raw_title = real.get('title', title)
                 raw_desc = real.get('description', '')
                 if tab == 'world' and raw_title:
-                    try:
-                        from services.news_service import ai_translate_and_format
-                        eng_ratio = sum(1 for c in raw_title if c.isascii() and c.isalpha()) / max(sum(1 for c in raw_title if c.isalpha()), 1)
-                        if eng_ratio > 0.5:
-                            tr = ai_translate_and_format(raw_title, raw_desc)
-                            if tr and isinstance(tr, dict):
-                                raw_title = tr.get('title', raw_title) or raw_title
-                                raw_desc = tr.get('summary', raw_desc) or raw_desc
-                    except:
-                        pass
+                    eng_chars = sum(1 for c in raw_title if c.isascii() and c.isalpha())
+                    total_chars = max(sum(1 for c in raw_title if c.isalpha()), 1)
+                    if eng_chars / total_chars > 0.3:
+                        tr = None
+                        for attempt in range(2):
+                            try:
+                                from services.news_service import ai_translate_and_format
+                                tr = ai_translate_and_format(raw_title, raw_desc)
+                                if tr and isinstance(tr, dict) and tr.get('title'):
+                                    break
+                                tr = None
+                            except Exception as e:
+                                print(f"[NEWS_AI_SUGGEST] 번역 시도 {attempt+1} 실패: {e}")
+                                tr = None
+                        if tr and isinstance(tr, dict):
+                            raw_title = tr.get('title', raw_title) or raw_title
+                            raw_desc = tr.get('summary', raw_desc) or raw_desc
+                        else:
+                            raw_title = f"[미번역] {raw_title}"
+                            print(f"[NEWS_AI_SUGGEST] 번역 실패 - 원본 저장: {raw_title[:60]}")
                 article = NewsArticle(
                     title=raw_title,
                     summary=(raw_desc or '')[:200],
@@ -313,9 +323,9 @@ def admin_news_edit(news_id):
             key = current_app.config.get('MOTIF_API_KEY','')
             if key:
                 prompt = f"다음 내용을 한국어로 번역하세요. 원문 그대로 상세히 번역하세요.\n\n{text}"
-                rr = req.post("https://chat.motiftech.io/openapi/v1/chat/completions",
+                rr = req.post("https://api-cbt.morphfactory.io/v1/chat/completions",
                     headers={"Authorization":f"Bearer {key}","Content-Type":"application/json"},
-                    json={"model":"motif-12.7b","messages":[{"role":"user","content":prompt}],"max_tokens":1500},
+                    json={"model":"motif/motif-3","messages":[{"role":"user","content":prompt}],"max_tokens":1500},
                     timeout=30)
                 if rr.status_code == 200:
                     translated = rr.json()["choices"][0]["message"]["content"]
@@ -410,23 +420,38 @@ def admin_news_translate_world():
     for a in articles:
         try:
             title_text = a.title or ''
-            eng_chars = sum(1 for c in title_text if c.isascii() and c.isalpha())
-            total_chars = sum(1 for c in title_text if c.isalpha())
-            if total_chars > 0 and eng_chars / total_chars < 0.5:
-                continue
-            result = ai_translate_and_format(a.title, a.content or a.summary or '')
+            # [미번역] 태그가 있으면 무조건 번역 대상
+            needs_translation = '[미번역]' in title_text
+            if not needs_translation:
+                eng_chars = sum(1 for c in title_text if c.isascii() and c.isalpha())
+                total_chars = sum(1 for c in title_text if c.isalpha())
+                if total_chars > 0 and eng_chars / total_chars < 0.3:
+                    continue
+            result = None
+            for attempt in range(2):
+                try:
+                    result = ai_translate_and_format(a.title, a.content or a.summary or '')
+                    if result and isinstance(result, dict) and result.get('title'):
+                        break
+                    result = None
+                except Exception as e:
+                    print(f"[TRANSLATE_WORLD] 시도 {attempt+1} 실패 #{a.id}: {e}")
+                    result = None
             if result and isinstance(result, dict):
                 new_title = result.get('title', '')
                 new_summary = result.get('summary', '')
                 new_content = result.get('content', '')
                 if new_title:
-                    a.title = new_title
+                    # [미번역] 태그 제거 후 번역 제목으로 교체
+                    a.title = new_title.replace('[미번역] ', '')
                 if new_summary:
                     a.summary = new_summary
                 if new_content:
                     a.content = new_content
                 a.updated_at = datetime.now()
                 count += 1
+            else:
+                errors.append(f"#{a.id}: 번역 실패")
             import time; time.sleep(1)
         except Exception as e:
             errors.append(f"#{a.id}: {str(e)[:50]}")

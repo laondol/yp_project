@@ -2,13 +2,13 @@ import json, re
 from datetime import datetime
 from openai import OpenAI
 
-MOTIF_MODEL = "motif-12.7b"
+MOTIF_MODEL = "motif/motif-3"
 
 def _motif_text(system, user, format_json=False, timeout=120):
     try:
         from flask import current_app
         key = current_app.config.get("MOTIF_API_KEY", "")
-        client = OpenAI(api_key=key, base_url="https://chat.motiftech.io/openapi/v1")
+        client = OpenAI(api_key=key, base_url="https://api-cbt.morphfactory.io/v1")
         kwargs = {
             "model": MOTIF_MODEL,
             "messages": [
@@ -117,7 +117,10 @@ def ai_translate_and_format(title, content, source_lang="en"):
 }}
 원본 제목: {title}
 원본 내용: {content[:3000]}"""
-    return _motif_text(system, prompt, format_json=True)
+    result = _motif_text(system, prompt, format_json=True)
+    if not result:
+        print(f"[NewsService] 번역 실패: {title[:50]}")
+    return result
 
 def ai_summarize_url(text):
     system = "당신은 기사 요약 전문가입니다. 한국어로 답변하세요. '본문바로가기','블로그','카테고리','검색','메뉴','이웃추가','공유하기','URL복사','신고하기','폰트크기' 등 블로그 UI/네비게이션 텍스트는 전부 무시하고, 오직 기사의 핵심 본문 내용만 요약하세요."
