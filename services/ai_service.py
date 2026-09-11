@@ -86,7 +86,7 @@ def _extract_json(text):
                     pass
     return None
 
-def _motif_json(system, user, model=MOTIF_MODEL, timeout=60):
+def _motif_json(system, user, model=MOTIF_MODEL, timeout=60, max_tokens=2000):
     try:
         client = _motif_client()
         resp = client.chat.completions.create(
@@ -96,6 +96,7 @@ def _motif_json(system, user, model=MOTIF_MODEL, timeout=60):
                 {"role": "user", "content": user}
             ],
             timeout=timeout,
+            max_tokens=max_tokens,
             response_format={"type": "json_object"}
         )
         data = _extract_json(resp.choices[0].message.content)

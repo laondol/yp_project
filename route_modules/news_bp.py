@@ -653,14 +653,19 @@ def api_news():
             or_(NewsArticle.is_selected == True, NewsArticle.world_admin_approved == True, NewsArticle.kr_yp_admin_approved == True)
         )
     articles = q.order_by(NewsArticle.created_at.desc()).paginate(page=page, per_page=20, error_out=False)
-    return jsonify([{
-        'id': a.id, 'title': a.title, 'summary': a.summary,
-        'source_name': a.source_name, 'source_url': a.source_url or '', 'category': a.category,
-        'image_path': a.image_path, 'ai_score': a.ai_score,
-        'like_count': a.like_count, 'dislike_count': a.dislike_count,
-        'created_at': a.created_at.isoformat() if a.created_at else None,
-        'published_at': a.published_at.isoformat() if a.published_at else None,
-    } for a in articles.items])
+    return jsonify({
+        'items': [{
+            'id': a.id, 'title': a.title, 'summary': a.summary,
+            'source_name': a.source_name, 'source_url': a.source_url or '', 'category': a.category,
+            'image_path': a.image_path, 'ai_score': a.ai_score,
+            'like_count': a.like_count, 'dislike_count': a.dislike_count,
+            'created_at': a.created_at.isoformat() if a.created_at else None,
+            'published_at': a.published_at.isoformat() if a.published_at else None,
+        } for a in articles.items],
+        'page': articles.page,
+        'pages': articles.pages,
+        'total': articles.total,
+    })
 
 @news_bp.route('/api/news/content/<int:news_id>')
 def api_news_content(news_id):

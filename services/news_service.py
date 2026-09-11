@@ -4,7 +4,7 @@ from openai import OpenAI
 
 MOTIF_MODEL = "motif/motif-3"
 
-def _motif_text(system, user, format_json=False, timeout=120):
+def _motif_text(system, user, format_json=False, timeout=120, max_tokens=2000):
     try:
         from flask import current_app
         key = current_app.config.get("MOTIF_API_KEY", "")
@@ -16,6 +16,7 @@ def _motif_text(system, user, format_json=False, timeout=120):
                 {"role": "user", "content": user}
             ],
             "timeout": timeout,
+            "max_tokens": max_tokens,
         }
         if format_json:
             kwargs["response_format"] = {"type": "json_object"}
