@@ -135,8 +135,62 @@ def _geocode_place(place):
         return None, None
 
 
-def _build_event_content(judge, desc):
-    """년월일 + 시작~종료시간 + 장소를 정리한 본문 생성"""
+def _ai_polish_content(title, desc, judge):
+    """AI로 스크랩 원본을 주민에게 보기 좋게 정리된 본문으로 변환"""
+    try:
+        from services.news_service import _motif_text
+        parts = []
+        d = judge.get('event_date_obj')
+        if d:
+            line = f"일시: {d.strftime('%Y년 %m월 %d일(%A)')}"
+            st, et = judge.get('start_time'), judge.get('end_time')
+            if st and et:
+                line += f" {st}~{et}"
+            elif st:
+                line += f" {st}"
+            parts.append(line)
+        if judge.get('event_place'):
+            parts.append(f"장소: {judge['event_place']}")
+        if judge.get('contact'):
+            parts.append(f"연락처: {judge['contact']}")
+        if judge.get('reserve_url'):
+            parts.append(f"신청/자세히보기: {judge['reserve_url']}")
+        meta = '\n'.join(parts)
+
+        result = _motif_text(
+            "당신은 양평 지역 주민을 위한 마당 소식 편집자입니다. 원본 내용을 읽고 주민이 한눈에 이해하도록 깔끔하게 정리하세요.",
+            f"""다음은 네이버 블로그/카페에서 수집한 양평 지역 행사/모임 소식입니다.
+원본 내용을 참고하여 주민이 쉽게 읽을 수 있도록 정리하세요.
+
+규칙:
+- 불필요한 HTML 태그, 광고 문구, 블로그 소개글, 구독 유도 등은 제거
+- 핵심 정보(일시, 장소, 참가대상, 참가방법, 비용, 준비물)만 추출하여 정리
+- 반말~ 존댓말 혼용 금지, ~합니다체로 통일
+- 500자 이내로 간결하게
+- 모임/행사명은 제목으로, 나머지는 본문으로 구분
+- 이미지만 붙여넣은 글, 의미 없는 글이면 원본 그대로 반환
+
+제목: {title[:200]}
+{meta}
+
+원본 내용:
+{desc[:1000]}
+
+위 내용을 정리하여 본문만 출력하세요.""",
+            format_json=False,
+            timeout=60,
+            max_tokens=1500,
+        )
+        if result and len(result.strip()) > 20:
+            return result.strip()
+    except Exception as e:
+        print(f'[YARD-AI] 본문 정리 오류: {e}')
+    # 실패 시 기본 포맷
+    return _build_event_content_fallback(judge, desc)
+
+
+def _build_event_content_fallback(judge, desc):
+    """년월일 + 시작~종료시간 + 장소를 정리한 본문 생성 (AI 실패 시)"""
     parts = []
     d = judge.get('event_date_obj')
     if d:
@@ -201,7 +255,7 @@ def _collect_org_rss():
 
                 p = YardPost(
                     title=title[:300],
-                    content=_build_event_content(judge, desc),
+                    content=_ai_polish_content(title, desc, judge),
                     source_type='sns_auto',
                     platform='naverblog',
                     source_url=link[:500],
@@ -311,7 +365,7 @@ def collect_yard_notices():
 
                 p = YardPost(
                     title=title[:300],
-                    content=_build_event_content(judge, desc[:200]),
+                    content=_ai_polish_content(title, desc[:200], judge),
                     source_type='sns_auto',
                     platform=platform,
                     source_url=url[:500],
