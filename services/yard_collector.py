@@ -31,10 +31,93 @@ EVENT_KEYWORDS = ['행사', '축제', '모집', '신청', '참가', '모임', '�
                   '교육', '공연', '마켓', '박람회', '세미나', '강좌', '상담', '설명회', '시장', '접수']
 
 
-def _ai_event_filter(title, desc):
+def _fetch_blog_content(url):
+    """블로그/카페/관공서 원본 본문 텍스트를 가져옴 (최대 2000자)"""
+    if not url:
+        return ''
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1',
+            'Accept': 'text/html,application/xhtml+xml',
+            'Accept-Language': 'ko-KR,ko;q=0.9',
+            'Referer': 'https://m.naver.com/',
+        }
+        # 관공서(yp21.go.kr) 처리
+        if 'yp21.go.kr' in url:
+            headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            headers['Referer'] = 'https://www.yp21.go.kr/'
+            res = requests.get(url, headers=headers, timeout=10, allow_redirects=True)
+            if res.status_code != 200:
+                return ''
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(res.text, 'html.parser')
+            content_td = soup.find('td', class_='p-table__content')
+            if content_td:
+                for tag in content_td.find_all(['script', 'style', 'iframe']):
+                    tag.decompose()
+                html_str = str(content_td)
+                html_str = html_str.replace('\u3000', ' ')  # fullwidth space → space
+                from bs4 import BeautifulSoup as _BS
+                text = _BS(html_str, 'html.parser').get_text(separator='\n', strip=True)
+            else:
+                content_div = soup.find('div', id='contents')
+                if content_div:
+                    for tag in content_div.find_all(['script', 'style', 'iframe']):
+                        tag.decompose()
+                    text = content_div.get_text(separator='\n', strip=True)
+                else:
+                    text = soup.get_text(separator='\n', strip=True)
+            lines = [l.strip() for l in text.split('\n') if l.strip()]
+            return '\n'.join(lines)[:2000]
+
+        # 모바일 URL로 변환 시도
+        mobile_url = url
+        if 'blog.naver.com/PostView.naver' in url:
+            import urllib.parse
+            parsed = urllib.parse.urlparse(url)
+            params = urllib.parse.parse_qs(parsed.query)
+            blog_id = params.get('blogId', [''])[0]
+            log_no = params.get('logNo', [''])[0]
+            if blog_id and log_no:
+                mobile_url = f'https://m.blog.naver.com/{blog_id}/{log_no}'
+        elif 'blog.naver.com' in url:
+            mobile_url = url.replace('blog.naver.com', 'm.blog.naver.com')
+
+        res = requests.get(mobile_url, headers=headers, timeout=10, allow_redirects=True)
+        if res.status_code != 200:
+            return ''
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(res.text, 'html.parser')
+        # 모바일 블로그 본문 영역 선택
+        content_div = (
+            soup.find('div', class_='se-main-container') or
+            soup.find('div', class_='post-view-area') or
+            soup.find('div', id='content') or
+            soup.find('div', class_='content_area') or
+            soup.find('div', class_='story_post') or
+            soup.find('article') or
+            soup.find('div', class_='entry-content')
+        )
+        if content_div:
+            for tag in content_div.find_all(['script', 'style', 'iframe', 'ins', 'aside']):
+                tag.decompose()
+            text = content_div.get_text(separator='\n', strip=True)
+        else:
+            text = soup.get_text(separator='\n', strip=True)
+        lines = [l.strip() for l in text.split('\n') if l.strip()]
+        return '\n'.join(lines)[:2000]
+    except Exception as e:
+        print(f'[YARD] 본문 가져오기 실패 ({url[:60]}): {e}')
+        return ''
+
+
+def _ai_event_filter(title, desc, full_content=''):
     """AI로 참여형 행사/공지 여부 판정 + 일시·장소 추출.
     단순 홍보·일반 정보·후기·지식 공유는 제외.
-    과거 일시의 행사도 제외. AI 실패 시 휴리스틱."""
+    과거 일시의 행사도 제외. AI 실패 시 휴리스틱.
+    full_content: 원본 블로그 본문 (있으면 AI 판정에 활용)"""
+    # 텍스트 본문 우선, 없으면 desc 사용
+    analysis_text = full_content[:1500] if full_content else desc[:500]
     try:
         from services.news_service import _motif_text
         result = _motif_text(
@@ -45,11 +128,13 @@ def _ai_event_filter(title, desc):
 일시·장소 정보가 있는 실제 참여형 소식만 true입니다.
 단순 홍보, 일반 정보(지식/상식), 후기, 소개 글, 이미 지나간 행사는 false입니다.
 event_date_iso의 연도는 반드시 오늘 날짜를 기준으로 판단하세요.
+이미지에만 정보가 있고 텍스트에 정보가 없으면 false로 판정하세요 (텍스트 정보 우선).
 JSON으로만 출력:
 {{"is_event": true 또는 false, "event_date": "표시용 일시 (예: 9/20, 없으면 빈 문자열)", "event_date_iso": "YYYY-MM-DD 형식 행사 날짜 (알 수 없으면 빈 문자열)", "start_time": "시작시간 HH:MM (없으면 빈 문자열)", "end_time": "종료시간 HH:MM (없으면 빈 문자열)", "event_place": "장소 (없으면 빈 문자열)", "contact": "연락처(전화번호) 또는 신청방법 (없으면 빈 문자열)", "reserve_url": "예약/신청 페이지 링크(http로 시작하는 주소, 없으면 빈 문자열)", "apply_start": "신청기간 시작 YYYY-MM-DD (없으면 빈 문자열)", "apply_end": "신청기간 종료 YYYY-MM-DD (없으면 빈 문자열)"}}
 
-제목: {title[:150]}
-내용: {desc[:500]}""",
+제목: {title[:200]}
+내용:
+{analysis_text}""",
             format_json=True,
         )
         if isinstance(result, dict) and 'is_event' in result:
@@ -247,15 +332,18 @@ def _collect_org_rss():
                     print(f'[YARD] 스킵(유사 제목): {norm_title[:40]}')
                     continue
 
+                # 원본 블로그 본문 가져오기 (AI 판정 + 본문 정리에 활용)
+                full_content = _fetch_blog_content(link)
+
                 # 행사/공지성 판정 (단순 홍보·일반 정보 제외)
-                judge = _ai_event_filter(title, desc)
+                judge = _ai_event_filter(title, desc, full_content)
                 if not judge['is_event']:
                     print(f'[YARD-ORG] 스킵(홍보/일반): {title[:40]}')
                     continue
 
                 p = YardPost(
                     title=title[:300],
-                    content=_ai_polish_content(title, desc, judge),
+                    content=_ai_polish_content(title, full_content or desc, judge),
                     source_type='sns_auto',
                     platform='naverblog',
                     source_url=link[:500],
@@ -354,8 +442,11 @@ def collect_yard_notices():
                     print(f'[YARD] 스킵(유사 제목): {norm_title[:40]}')
                     continue
 
+                # 원본 본문 가져오기 (AI 판정 + 본문 정리에 활용)
+                full_content = _fetch_blog_content(url)
+
                 # 행사/공지성 판정 (단순 홍보·일반 정보 제외)
-                judge = _ai_event_filter(title, desc)
+                judge = _ai_event_filter(title, desc, full_content)
                 if not judge['is_event']:
                     print(f'[YARD] 스킵(홍보/일반): {title[:40]}')
                     continue
@@ -365,7 +456,7 @@ def collect_yard_notices():
 
                 p = YardPost(
                     title=title[:300],
-                    content=_ai_polish_content(title, desc[:200], judge),
+                    content=_ai_polish_content(title, full_content or desc[:200], judge),
                     source_type='sns_auto',
                     platform=platform,
                     source_url=url[:500],
@@ -424,7 +515,15 @@ def collect_yard_notices():
     org_new = _collect_org_rss()
     total_new += org_new
 
-    print(f'[YARD] 마당 소식 자동 수집 완료: 신규 {total_new}건 (단체블로그 {org_new}건)')
+    # 4) 양평군청 공지사항 + 입찰공고 수집
+    gov_new = _collect_yp_gov()
+    total_new += gov_new
+
+    # 5) 양평매력캠퍼스(평생학습센터) 강좌 + 공지사항 수집
+    edu_new = _collect_yp_edu()
+    total_new += edu_new
+
+    print(f'[YARD] 마당 소식 자동 수집 완료: 신규 {total_new}건 (단체블로그 {org_new}건, 군청 {gov_new}건, 평생학습 {edu_new}건)')
     return total_new
 
 def _title_similarity_blocked(title):
@@ -442,3 +541,315 @@ def _title_similarity_blocked(title):
         if difflib.SequenceMatcher(None, norm, t).ratio() >= 0.8:
             return True
     return False
+
+
+def _collect_yp_gov():
+    """양평군청 공지사항 + 입찰공고 수집"""
+    from models import YardPost, db
+
+    total = 0
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'text/html,application/xhtml+xml',
+        'Accept-Language': 'ko-KR,ko;q=0.9',
+    }
+
+    # 1) 공지사항 수집
+    try:
+        res = requests.get(
+            'https://www.yp21.go.kr/www/selectBbsNttList.do',
+            params={'bbsNo': 1, 'key': 1111, 'pageIndex': 1},
+            headers=headers, timeout=15
+        )
+        if res.status_code == 200:
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(res.text, 'html.parser')
+            rows = soup.select('table.board_list tbody tr') or soup.select('table tbody tr')
+            saved = 0
+            for row in rows[:10]:
+                cols = row.find_all('td')
+                if len(cols) < 3:
+                    continue
+                a_tag = row.find('a')
+                if not a_tag:
+                    continue
+                title = a_tag.get_text(strip=True)
+                if len(title) < 5:
+                    continue
+                link = a_tag.get('href', '')
+                if link and not link.startswith('http'):
+                    if link.startswith('./'):
+                        link = link[2:]  # ./ → /selectBbsNttView...
+                    link = f'https://www.yp21.go.kr/www/{link}'
+                # 중복 체크
+                if YardPost.query.filter_by(source_url=link).first():
+                    continue
+                if _title_similarity_blocked(f'[군청] {title}'):
+                    continue
+                # 날짜 추출
+                date_text = cols[-1].get_text(strip=True) if cols else ''
+                event_dt = None
+                for fmt in ('%Y-%m-%d', '%Y.%m.%d', '%Y/%m/%d'):
+                    try:
+                        event_dt = datetime.strptime(date_text[:10], fmt)
+                        break
+                    except ValueError:
+                        continue
+                # 본문 가져오기
+                full_content = _fetch_blog_content(link)
+                desc = full_content[:1500] if full_content else title
+
+                # 마감된 자료 수집 방지 (날짜가 있고 오늘 이전이면 스킵)
+                if event_dt and event_dt.date() < datetime.now().date():
+                    print(f'[YARD-GOV] 스킵(마감): {title[:40]}')
+                    continue
+
+                # AI 판정 + 정리
+                judge = _ai_event_filter(title, desc, full_content)
+                if event_dt:
+                    judge['event_date_obj'] = event_dt
+                polished = _ai_polish_content(title, desc, judge)
+
+                p = YardPost(
+                    title=f'[군청공지] {title}',
+                    content=polished,
+                    source_type='gov_auto',
+                    platform='yp21',
+                    source_url=link[:500],
+                    author_name='양평군청',
+                    event_date=judge.get('event_date_obj') or event_dt,
+                    event_place=judge.get('event_place') or None,
+                    contact=(judge.get('contact') or None),
+                    reserve_url=(judge.get('reserve_url') or None),
+                    is_approved=False,  # 관리자 승인 후 공개
+                    category='event',
+                    created_at=datetime.now(),
+                )
+                db.session.add(p)
+                total += 1
+                saved += 1
+            db.session.commit()
+            print(f'[YARD-GOV] 공지사항: 확인 {len(rows[:10])}건, 신규 {saved}건')
+    except Exception as e:
+        print(f'[YARD-GOV] 공지사항 수집 오류: {e}')
+
+    # 2) 입찰공고 수집
+    try:
+        res = requests.get(
+            'http://27.101.129.102/contract/l4170000/bidInfoURL.do',
+            headers=headers, timeout=15
+        )
+        if res.status_code == 200:
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(res.text, 'html.parser')
+            rows = soup.select('table tbody tr')
+            saved = 0
+            for row in rows[:10]:
+                cols = row.find_all('td')
+                if len(cols) < 4:
+                    continue
+                a_tag = row.find('a')
+                if not a_tag:
+                    continue
+                title = a_tag.get_text(strip=True)
+                if len(title) < 5:
+                    continue
+                link = a_tag.get('href', '')
+                if link and not link.startswith('http'):
+                    link = f'http://27.101.129.102{link}'
+                # 중복 체크
+                if YardPost.query.filter_by(source_url=link).first():
+                    continue
+                if _title_similarity_blocked(f'[입찰] {title}'):
+                    continue
+                # 날짜 추출
+                date_text = cols[-1].get_text(strip=True) if cols else ''
+                event_dt = None
+                for fmt in ('%Y-%m-%d', '%Y.%m.%d', '%Y/%m/%d'):
+                    try:
+                        event_dt = datetime.strptime(date_text[:10], fmt)
+                        break
+                    except ValueError:
+                        continue
+                # 금액 추출
+                amount = ''
+                for col in cols:
+                    txt = col.get_text(strip=True)
+                    if '원' in txt or txt.replace(',', '').replace('.', '').isdigit():
+                        amount = txt
+                        break
+
+                # 마감된 자료 수집 방지
+                if event_dt and event_dt.date() < datetime.now().date():
+                    print(f'[YARD-GOV] 스킵(마감): {title[:40]}')
+                    continue
+
+                p = YardPost(
+                    title=f'[입찰] {title}',
+                    content=f'입찰금액: {amount}' if amount else title,
+                    source_type='gov_auto',
+                    platform='yp21_bid',
+                    source_url=link[:500],
+                    author_name='양평군청',
+                    event_date=event_dt,
+                    is_approved=False,
+                    category='bid',
+                    created_at=datetime.now(),
+                )
+                db.session.add(p)
+                total += 1
+                saved += 1
+            db.session.commit()
+            print(f'[YARD-GOV] 입찰공고: 확인 {len(rows[:10])}건, 신규 {saved}건')
+    except Exception as e:
+        print(f'[YARD-GOV] 입찰공고 수집 오류: {e}')
+
+    return total
+
+
+def _collect_yp_edu():
+    """양평매력캠퍼스(평생학습센터) 강좌 + 공지사항 수집 — AI 정리 포함"""
+    from models import YardPost, db
+
+    total = 0
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'text/html,application/xhtml+xml',
+        'Accept-Language': 'ko-KR,ko;q=0.9',
+    }
+
+    # 1) 오프라인 강좌 수집
+    try:
+        res = requests.get(
+            'https://ypedu.gseek.kr/user/course/offline/list',
+            headers=headers, timeout=15
+        )
+        if res.status_code == 200:
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(res.text, 'html.parser')
+            cards = soup.select('.course-item, .card, .list-item, article, .item')
+            if not cards:
+                cards = soup.select('a[href*="/user/course/offline/"]')
+            saved = 0
+            for card in cards[:15]:
+                a_tag = card if card.name == 'a' else card.find('a')
+                if not a_tag:
+                    continue
+                title = a_tag.get_text(strip=True)
+                if len(title) < 5 or '전체' in title or '목록' in title:
+                    continue
+                link = a_tag.get('href', '')
+                if link and not link.startswith('http'):
+                    link = f'https://ypedu.gseek.kr{link}'
+                if not link or len(link) < 10:
+                    continue
+                if YardPost.query.filter_by(source_url=link).first():
+                    continue
+                if _title_similarity_blocked(f'[평생학습] {title}'):
+                    continue
+                # 원본 본문 가져오기
+                full_content = _fetch_blog_content(link)
+                if not full_content:
+                    parent = card.parent or card
+                    full_content = parent.get_text(separator=' ', strip=True)[:500] if parent else title
+
+                # AI 판정 + 정리
+                judge = _ai_event_filter(title, full_content, full_content)
+                polished = _ai_polish_content(title, full_content, judge)
+
+                p = YardPost(
+                    title=f'[평생학습] {title}',
+                    content=polished,
+                    source_type='edu_auto',
+                    platform='ypedu',
+                    source_url=link[:500],
+                    author_name='양평매력캠퍼스',
+                    event_date=judge.get('event_date_obj'),
+                    event_end=judge.get('event_end_obj'),
+                    event_place=judge.get('event_place') or None,
+                    contact=(judge.get('contact') or None),
+                    reserve_url=(judge.get('reserve_url') or None),
+                    apply_start=_parse_dt(judge.get('apply_start')),
+                    apply_end=_parse_dt(judge.get('apply_end')),
+                    is_approved=False,
+                    category='event',
+                    created_at=datetime.now(),
+                )
+                db.session.add(p)
+                total += 1
+                saved += 1
+            db.session.commit()
+            print(f'[YARD-EDU] 오프라인 강좌: 확인 {len(cards[:15])}건, 신규 {saved}건')
+    except Exception as e:
+        print(f'[YARD-EDU] 오프라인 강좌 수집 오류: {e}')
+
+    # 2) 공지사항 수집
+    try:
+        res = requests.get(
+            'https://ypedu.gseek.kr/user/board/notice/list',
+            headers=headers, timeout=15
+        )
+        if res.status_code == 200:
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(res.text, 'html.parser')
+            rows = soup.select('table tbody tr')
+            saved = 0
+            for row in rows[:10]:
+                a_tag = row.find('a')
+                if not a_tag:
+                    continue
+                title = a_tag.get_text(strip=True)
+                if len(title) < 5:
+                    continue
+                link = a_tag.get('href', '')
+                if link and not link.startswith('http'):
+                    link = f'https://ypedu.gseek.kr{link}'
+                if YardPost.query.filter_by(source_url=link).first():
+                    continue
+                if _title_similarity_blocked(f'[평생학습공지] {title}'):
+                    continue
+                cols = row.find_all('td')
+                date_text = cols[-1].get_text(strip=True) if cols else ''
+                event_dt = None
+                for fmt in ('%Y-%m-%d', '%Y.%m.%d', '%Y/%m/%d'):
+                    try:
+                        event_dt = datetime.strptime(date_text[:10], fmt)
+                        break
+                    except ValueError:
+                        continue
+
+                # 원본 본문 가져오기
+                full_content = _fetch_blog_content(link)
+                if not full_content:
+                    full_content = title
+
+                # AI 판정 + 정리
+                judge = _ai_event_filter(title, full_content, full_content)
+                if event_dt:
+                    judge['event_date_obj'] = event_dt
+                polished = _ai_polish_content(title, full_content, judge)
+
+                p = YardPost(
+                    title=f'[평생학습공지] {title}',
+                    content=polished,
+                    source_type='edu_auto',
+                    platform='ypedu_notice',
+                    source_url=link[:500],
+                    author_name='양평매력캠퍼스',
+                    event_date=judge.get('event_date_obj') or event_dt,
+                    event_place=judge.get('event_place') or None,
+                    contact=(judge.get('contact') or None),
+                    reserve_url=(judge.get('reserve_url') or None),
+                    is_approved=False,
+                    category='event',
+                    created_at=datetime.now(),
+                )
+                db.session.add(p)
+                total += 1
+                saved += 1
+            db.session.commit()
+            print(f'[YARD-EDU] 공지사항: 확인 {len(rows[:10])}건, 신규 {saved}건')
+    except Exception as e:
+        print(f'[YARD-EDU] 공지사항 수집 오류: {e}')
+
+    return total

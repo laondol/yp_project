@@ -42,8 +42,8 @@ export default function SchedulePage() {
   const [formTitle, setFormTitle] = useState('')
   const [formDate, setFormDate] = useState('')
   const [formEndDate, setFormEndDate] = useState('')
-  const [formStartTime, setFormStartTime] = useState('')
-  const [formEndTime, setFormEndTime] = useState('')
+  const [formStartTime, setFormStartTime] = useState('00:00')
+  const [formEndTime, setFormEndTime] = useState('00:00')
   const [formLocation, setFormLocation] = useState('')
   const [formMemo, setFormMemo] = useState('')
   const [formAccommodation, setFormAccommodation] = useState('')
@@ -664,7 +664,7 @@ export default function SchedulePage() {
           <div className="row g-2 mb-2">
             <div className="col-5">
               <label className="small d-block">날짜</label>
-              <input type="date" className="form-control form-control-sm" value={formDate} onChange={e => { setFormDate(e.target.value); setShowAccommodation(!!e.target.value && !!formEndDate && e.target.value !== formEndDate) }} />
+              <input type="date" className="form-control form-control-sm" value={formDate} onChange={e => { setFormDate(e.target.value); if (!formEndDate) setFormEndDate(e.target.value); setShowAccommodation(!!e.target.value && !!formEndDate && e.target.value !== formEndDate) }} />
             </div>
             <div className="col-4">
               <label className="small d-block">시간</label>

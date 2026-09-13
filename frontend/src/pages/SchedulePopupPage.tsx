@@ -77,7 +77,7 @@ export default function SchedulePopupPage() {
 
   const [formTitle, setFormTitle] = useState('')
   const [formDate, setFormDate] = useState('')
-  const [formTime, setFormTime] = useState('')
+  const [formTime, setFormTime] = useState('00:00')
   const [formLocation, setFormLocation] = useState('')
   const [formMemo, setFormMemo] = useState('')
   const [saving, setSaving] = useState(false)

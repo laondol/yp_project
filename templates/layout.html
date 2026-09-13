@@ -120,9 +120,8 @@
                 }
             }
             </script>
-            <!-- 오른쪽: AI + 회원정보 + 삼선 -->
+            <!-- 오른쪽: 회원정보 + 삼선 -->
             <div class="d-flex align-items-center flex-shrink-0 position-relative">
-            <a href="/ai/chat" class="btn btn-sm btn-outline-success px-2 py-0" style="font-size:1.1rem; border-radius:50%; width:34px; height:34px; line-height:1;" title="양평AI">🤖</a>
             {% if session.get('user_id') %}
             <a href="/friends" class="text-decoration-none ms-2 d-none d-lg-inline" title="벗" id="friendIcon">👥</a>
             <a href="/message/inbox" class="text-decoration-none ms-2 position-relative d-none d-lg-inline" title="쪽지" id="msgIcon" style="display:none;">💬<span id="msgBadge" class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger" style="display:none;font-size:0.6rem;">0</span></a>

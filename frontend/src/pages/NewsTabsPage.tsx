@@ -12,6 +12,7 @@ interface NewsItem {
   source_url?: string
   category?: string
   image_path?: string
+  ai_score?: number
   like_count?: number
   dislike_count?: number
   created_at?: string
@@ -34,49 +35,34 @@ export default function NewsTabsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [page, setPage] = useState(1)
-  const [hasMore, setHasMore] = useState(false)
-  const [loadingMore, setLoadingMore] = useState(false)
+  const [totalPages, setTotalPages] = useState(1)
+  const [total, setTotal] = useState(0)
 
   const load = useCallback(async () => {
-    setLoading(true); setError(''); setPage(1)
+    setLoading(true); setError('')
     try {
       const params = new URLSearchParams()
       if (tab) params.set('category', tab)
-      params.set('page', '1')
+      params.set('page', String(page))
       const res = await fetch(`/api/news?${params.toString()}`)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = await res.json()
       if (data && data.items) {
         setArticles(data.items)
-        setHasMore(data.page < data.pages)
+        setTotalPages(data.pages || 1)
+        setTotal(data.total || 0)
       } else {
         setArticles(Array.isArray(data) ? data : [])
-        setHasMore(false)
+        setTotalPages(1)
+        setTotal(Array.isArray(data) ? data.length : 0)
       }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : '불러오기 실패')
     } finally { setLoading(false) }
-  }, [tab])
-
-  useEffect(() => { load() }, [load])
-
-  const loadMore = useCallback(async () => {
-    setLoadingMore(true)
-    try {
-      const params = new URLSearchParams()
-      if (tab) params.set('category', tab)
-      params.set('page', String(page + 1))
-      const res = await fetch(`/api/news?${params.toString()}`)
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const data = await res.json()
-      if (data && data.items) {
-        setArticles(prev => [...prev, ...data.items])
-        setPage(data.page)
-        setHasMore(data.page < data.pages)
-      }
-    } catch { /* ignore */ }
-    finally { setLoadingMore(false) }
   }, [tab, page])
+
+  useEffect(() => { setPage(1) }, [tab])
+  useEffect(() => { load() }, [load])
 
   const handleVote = async (id: number, vote: 'like' | 'dislike') => {
     try {
@@ -93,8 +79,12 @@ export default function NewsTabsPage() {
   }
 
   return (
-    <div>
-      <h3 className="fw-bold mb-4">📰 소식</h3>
+    <div className="container mt-4">
+      <div className="d-flex justify-content-between align-items-center mb-4">
+        <h3 className="fw-bold mb-0">📰 소식</h3>
+        <small className="text-muted">{total}건</small>
+      </div>
+
       <ul className="nav nav-tabs mb-4">
         {TABS.map(t => (
           <li className="nav-item" key={t.key}>
@@ -159,12 +149,27 @@ export default function NewsTabsPage() {
               </div>
             ))}
           </div>
-          {hasMore && (
-            <div className="text-center mt-4">
-              <button className="btn btn-outline-success px-4" onClick={loadMore} disabled={loadingMore}>
-                {loadingMore ? '불러오는 중...' : '더보기'}
-              </button>
-            </div>
+
+          {totalPages > 1 && (
+            <nav className="mt-4">
+              <ul className="pagination justify-content-center">
+                <li className={`page-item ${page <= 1 ? 'disabled' : ''}`}>
+                  <button className="page-link" onClick={() => setPage(page - 1)}>이전</button>
+                </li>
+                {Array.from({ length: totalPages }, (_, i) => i + 1)
+                  .filter(p => Math.abs(p - page) <= 3 || p === 1 || p === totalPages)
+                  .map((p, idx, arr) => (
+                    <li key={p} className="page-item">
+                      {idx > 0 && arr[idx - 1] !== p - 1 && <span className="page-link">...</span>}
+                      <button className={`page-link ${p === page ? 'active' : ''}`} onClick={() => setPage(p)}>{p}</button>
+                    </li>
+                  ))
+                }
+                <li className={`page-item ${page >= totalPages ? 'disabled' : ''}`}>
+                  <button className="page-link" onClick={() => setPage(page + 1)}>다음</button>
+                </li>
+              </ul>
+            </nav>
           )}
         </>
       )}

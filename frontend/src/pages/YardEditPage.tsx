@@ -27,8 +27,8 @@ export default function YardEditPage() {
   const [fRepeatDays, setFRepeatDays] = useState<number[]>([])  // 요일 인덱스 (0=월)
   const [fRepeatWeeks, setFRepeatWeeks] = useState<number[]>([])   // 0=매주, 1~5=N째주 (다중 선택)
   const [fRepeatDates, setFRepeatDates] = useState('')  // 월별 날짜 "1,6"
-  const [fRepStart, setFRepStart] = useState('')   // 반복 시작시간 HH:MM
-  const [fRepEnd, setFRepEnd] = useState('')       // 반복 종료시간 HH:MM
+  const [fRepStart, setFRepStart] = useState('00:00')   // 반복 시작시간 HH:MM
+  const [fRepEnd, setFRepEnd] = useState('00:00')       // 반복 종료시간 HH:MM
   const [fPlace, setFPlace] = useState('')
   const [fApplyStart, setFApplyStart] = useState('')
   const [fApplyEnd, setFApplyEnd] = useState('')
@@ -159,7 +159,10 @@ export default function YardEditPage() {
             <div className="col-6">
               <label className="small text-muted mb-1" title="시간을 입력하지 않으면 종일로 자동 표시됩니다">📅 시작년월일시</label>
               <input type="datetime-local" className="form-control" value={fStartDt}
-                onChange={e => setFStartDt(e.target.value)} title="시간을 입력하지 않으면 종일로 자동 표시됩니다" />
+                onChange={e => {
+                  setFStartDt(e.target.value)
+                  if (!fEndDt) setFEndDt(e.target.value)
+                }} title="시간을 입력하지 않으면 종일로 자동 표시됩니다" />
             </div>
             <div className="col-6">
               <label className="small text-muted mb-1">📅 종료년월일시</label>

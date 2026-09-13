@@ -322,6 +322,7 @@ def api_yard_list():
             'review_count': _yard_review_count(p.id),
             'distance_km': dist_km,
             'created_at': p.created_at.isoformat() if p.created_at else '',
+            'category': p.category or 'event',
         })
     # 마을지기 마을행사 (진행 예정/진행중)
     for ev in VillageEvent.query.filter(VillageEvent.status.in_(['upcoming', 'ongoing'])).order_by(VillageEvent.created_at.desc()).limit(30).all():

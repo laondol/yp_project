@@ -492,6 +492,7 @@ class YardPost(db.Model):
     longitude = db.Column(db.Float)
     is_approved = db.Column(db.Boolean, default=False)  # 관리자 승인 후 공개 (자동수집건)
     is_active = db.Column(db.Boolean, default=True)
+    category = db.Column(db.String(20), default='event')  # event(행사/소식), bid(입찰/공고)
     created_by = db.Column(db.Integer, db.ForeignKey('user.id'))
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)

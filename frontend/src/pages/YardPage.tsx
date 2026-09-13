@@ -27,6 +27,7 @@ interface YardItem {
   review_count?: number
   distance_km?: number | null
   created_at: string
+  category?: string  // event(행사/소식), bid(입찰/공고)
 }
 
 interface YardComment {
@@ -40,6 +41,7 @@ export default function YardPage() {
   const [items, setItems] = useState<YardItem[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('all')
+  const [tab, setTab] = useState<'event' | 'bid'>('event')
   const [me, setMe] = useState<{ id: number } | null>(null)
 
   // 댓글 모달
@@ -73,11 +75,16 @@ export default function YardPage() {
     }
   }, [])
 
-  const filtered = items.filter(i =>
-    filter === 'all' ? true :
-    filter === 'past' ? !!i.is_past :
-    filter === 'event' ? i.kind === 'event' : i.kind === 'post' && i.platform === filter
-  )
+  const filtered = items.filter(i => {
+    // 탭 필터 (행사/입찰)
+    if (tab === 'bid') return i.category === 'bid'
+    // 행사 탭에서는 입찰 제외
+    if (i.category === 'bid') return false
+    // 하위 필터
+    return filter === 'all' ? true :
+      filter === 'past' ? !!i.is_past :
+      filter === 'event' ? i.kind === 'event' : i.kind === 'post' && i.platform === filter
+  })
 
   const vote = (it: YardItem, v: 'like' | 'dislike') => {
     if (!me) { alert('로그인 후 이용하세요.'); return }
@@ -226,17 +233,35 @@ export default function YardPage() {
         마음에 드는 소식에 좋아요를 누르고 댓글로 소통하세요.
       </div>
 
-      {/* 필터 */}
-      <div className="d-flex gap-2 flex-wrap mb-3">
-        {[
-          { key: 'all', label: '전체' },
-          { key: 'event', label: '🌾 마을행사' },
-          { key: 'past', label: '⭐ 지나간 행사' },
-        ].map(f => (
-          <button key={f.key} className={`btn btn-sm ${filter === f.key ? 'btn-success' : 'btn-outline-success'}`}
-            onClick={() => setFilter(f.key)}>{f.label}</button>
-        ))}
-      </div>
+      {/* 탭: 행사 / 입찰 */}
+      <ul className="nav nav-tabs mb-3">
+        <li className="nav-item">
+          <button className={`nav-link ${tab === 'event' ? 'active fw-bold' : ''}`}
+            onClick={() => { setTab('event'); setFilter('all') }}>
+            🌾 행사·소식
+          </button>
+        </li>
+        <li className="nav-item">
+          <button className={`nav-link ${tab === 'bid' ? 'active fw-bold' : ''}`}
+            onClick={() => { setTab('bid'); setFilter('all') }}>
+            📋 입찰·공고
+          </button>
+        </li>
+      </ul>
+
+      {/* 하위 필터 (행사 탭일 때만) */}
+      {tab === 'event' && (
+        <div className="d-flex gap-2 flex-wrap mb-3">
+          {[
+            { key: 'all', label: '전체' },
+            { key: 'event', label: '🌾 마을행사' },
+            { key: 'past', label: '⭐ 지나간 행사' },
+          ].map(f => (
+            <button key={f.key} className={`btn btn-sm ${filter === f.key ? 'btn-success' : 'btn-outline-success'}`}
+              onClick={() => setFilter(f.key)}>{f.label}</button>
+          ))}
+        </div>
+      )}
 
       {loading ? (
         <div className="text-center py-5 text-muted"><div className="spinner-border" /></div>

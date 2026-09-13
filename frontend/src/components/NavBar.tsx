@@ -230,7 +230,6 @@ export default function NavBar() {
   const totalMemos = notif.memos
   const totalNotices = notif.notices
   const totalFriendReqs = notif.friend_requests
-  const totalAiBroadcasts = notif.ai_broadcasts
 
   return (
     <nav className="navbar navbar-expand-lg sticky-top mb-1">
@@ -384,20 +383,8 @@ export default function NavBar() {
           </ul>
         </div>
 
-        {/* Right: AI(관리자/마을지기만) + Notification hub + Profile */}
+        {/* Right: Notification hub + Profile */}
         <div className="d-flex align-items-center flex-shrink-0">
-          {user?.role === 'admin' || user?.role === 'leader' ? (
-          <a href="/ai/chat" className="btn btn-sm btn-outline-success px-2 py-0 position-relative"
-            style={{ fontSize: '1.1rem', borderRadius: '50%', width: 34, height: 34, lineHeight: '1' }} title="양평AI">
-            🤖
-            {totalAiBroadcasts > 0 && (
-              <span className="position-absolute top-0 start-100 translate-middle badge rounded-pill"
-                style={{ fontSize: '0.5rem', background: '#20c997', minWidth: 14, padding: '1px 4px', lineHeight: '1.2' }}>
-                {totalAiBroadcasts}
-              </span>
-            )}
-          </a>
-          ) : null}
           {!loading && user?.id ? (
             <div className="d-flex align-items-center ms-1 gap-1">
               {/* Friend requests */}

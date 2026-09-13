@@ -95,13 +95,17 @@ export default function AdminYard() {
   const [rDays, setRDays] = useState<number[]>([]) // 요일 인덱스 (0=월)
   const [rWeeks, setRWeeks] = useState<number[]>([])  // 0=매주, 1~5=N째주 (다중 선택)
   const [rDates, setRDates] = useState('')         // 월별 날짜 "1,6"
-  const [rStart, setRStart] = useState('')
-  const [rEnd, setREnd] = useState('')
+  const [rStart, setRStart] = useState('00:00')
+  const [rEnd, setREnd] = useState('00:00')
   const [rContact, setRContact] = useState('')
   const [rLink, setRLink] = useState('')
   const [rSaving, setRSaving] = useState(false)
   const [rMsg, setRMsg] = useState('')
   const [rMsgOk, setRMsgOk] = useState(false)
+
+  const PAGE_SIZE = 10
+  const [pendingPage, setPendingPage] = useState(1)
+  const [approvedPage, setApprovedPage] = useState(1)
 
   const handleRepeatCreate = async () => {
     if (!rTitle.trim()) { alert('제목을 입력하세요.'); return }
@@ -159,7 +163,7 @@ export default function AdminYard() {
       const res = await fetch(`/api/yard/${fid}/approve`, { method: 'POST' })
       const data = await res.json()
       setMsg(data.msg || ''); setMsgOk(data.status === 'success')
-      if (data.status === 'success') load()
+      if (data.status === 'success') { setPendingPage(1); setApprovedPage(1); load() }
     } catch { setMsg('승인 오류'); setMsgOk(false) }
   }
 
@@ -169,12 +173,37 @@ export default function AdminYard() {
       const res = await fetch(`/api/yard/${fid}`, { method: 'DELETE' })
       const data = await res.json()
       setMsg(data.msg || '삭제'); setMsgOk(data.status === 'success')
-      if (data.status === 'success') load()
+      if (data.status === 'success') { setPendingPage(1); setApprovedPage(1); load() }
     } catch { setMsg('삭제 오류'); setMsgOk(false) }
   }
 
   const pending = items.filter(i => !i.is_approved)
   const approved = items.filter(i => i.is_approved)
+  const pendingPages = Math.ceil(pending.length / PAGE_SIZE)
+  const approvedPages = Math.ceil(approved.length / PAGE_SIZE)
+  const pendingSlice = pending.slice((pendingPage - 1) * PAGE_SIZE, pendingPage * PAGE_SIZE)
+  const approvedSlice = approved.slice((approvedPage - 1) * PAGE_SIZE, approvedPage * PAGE_SIZE)
+
+  const [winWidth, setWinWidth] = useState(window.innerWidth)
+  useEffect(() => {
+    const onResize = () => setWinWidth(window.innerWidth)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+  const maxVisible = winWidth < 500 ? 5 : winWidth < 768 ? 7 : 9
+
+  const pageRange = (current: number, total: number) => {
+    if (total <= maxVisible) return Array.from({ length: total }, (_, i) => i + 1)
+    const half = Math.floor((maxVisible - 2) / 2)
+    const pages: (number | '...')[] = [1]
+    const start = Math.max(2, current - half)
+    const end = Math.min(total - 1, current + half)
+    if (start > 2) pages.push('...')
+    for (let i = start; i <= end; i++) pages.push(i)
+    if (end < total - 1) pages.push('...')
+    pages.push(total)
+    return pages
+  }
 
   return (
     <div className="container mt-4">
@@ -328,8 +357,9 @@ export default function AdminYard() {
         ) : pending.length === 0 ? (
           <div className="text-center text-muted small py-2">승인 대기 중인 소식이 없습니다.</div>
         ) : (
+          <>
           <div className="row g-3">
-            {pending.map(p => (
+            {pendingSlice.map(p => (
               <div key={p.id} className="col-12 col-md-6 col-lg-4" style={{ minWidth: 340 }}>
                 <div className="card border-0 shadow-sm h-100" style={{ borderRadius: 16 }}>
                   <div className="card-body p-3 d-flex flex-column">
@@ -386,6 +416,21 @@ export default function AdminYard() {
               </div>
             ))}
           </div>
+          {pendingPages > 1 && (
+            <div className="d-flex justify-content-center align-items-center gap-1 mt-3" style={{ overflowX: 'auto', flexWrap: 'nowrap' }}>
+              <button className="btn btn-sm btn-outline-secondary" disabled={pendingPage <= 1}
+                onClick={() => setPendingPage(p => p - 1)}>◀</button>
+              {pageRange(pendingPage, pendingPages).map((pg, i) =>
+                pg === '...' ? <span key={`e${i}`} className="px-1 text-muted">...</span> :
+                <button key={pg}
+                  className={`btn btn-sm ${pendingPage === pg ? 'btn-success' : 'btn-outline-secondary'}`}
+                  onClick={() => setPendingPage(pg)}>{pg}</button>
+              )}
+              <button className="btn btn-sm btn-outline-secondary" disabled={pendingPage >= pendingPages}
+                onClick={() => setPendingPage(p => p + 1)}>▶</button>
+            </div>
+          )}
+          </>
         )}
       </div>
 
@@ -397,8 +442,9 @@ export default function AdminYard() {
         ) : approved.length === 0 ? (
           <div className="text-center text-muted small py-2">공개 중인 소식이 없습니다.</div>
         ) : (
+          <>
           <div className="row g-3">
-            {approved.map(p => (
+            {approvedSlice.map(p => (
               <div key={p.id} className="col-12 col-md-6 col-lg-4" style={{ minWidth: 340 }}>
                 <div className="card border-0 shadow-sm h-100" style={{ borderRadius: 16 }}>
                   <div className="card-body p-3 d-flex flex-column">
@@ -455,6 +501,21 @@ export default function AdminYard() {
               </div>
             ))}
           </div>
+          {approvedPages > 1 && (
+            <div className="d-flex justify-content-center align-items-center gap-1 mt-3" style={{ overflowX: 'auto', flexWrap: 'nowrap' }}>
+              <button className="btn btn-sm btn-outline-secondary" disabled={approvedPage <= 1}
+                onClick={() => setApprovedPage(p => p - 1)}>◀</button>
+              {pageRange(approvedPage, approvedPages).map((pg, i) =>
+                pg === '...' ? <span key={`e${i}`} className="px-1 text-muted">...</span> :
+                <button key={pg}
+                  className={`btn btn-sm ${approvedPage === pg ? 'btn-success' : 'btn-outline-secondary'}`}
+                  onClick={() => setApprovedPage(pg)}>{pg}</button>
+              )}
+              <button className="btn btn-sm btn-outline-secondary" disabled={approvedPage >= approvedPages}
+                onClick={() => setApprovedPage(p => p + 1)}>▶</button>
+            </div>
+          )}
+          </>
         )}
       </div>
     </div>
