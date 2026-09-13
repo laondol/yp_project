@@ -523,7 +523,11 @@ def collect_yard_notices():
     edu_new = _collect_yp_edu()
     total_new += edu_new
 
-    print(f'[YARD] 마당 소식 자동 수집 완료: 신규 {total_new}건 (단체블로그 {org_new}건, 군청 {gov_new}건, 평생학습 {edu_new}건)')
+    # 6) 양평관광(tour.yp21.go.kr) 공지사항 수집
+    tour_new = _collect_yp_tour()
+    total_new += tour_new
+
+    print(f'[YARD] 마당 소식 자동 수집 완료: 신규 {total_new}건 (단체블로그 {org_new}건, 군청 {gov_new}건, 평생학습 {edu_new}건, 관광 {tour_new}건)')
     return total_new
 
 def _title_similarity_blocked(title):
@@ -851,5 +855,101 @@ def _collect_yp_edu():
             print(f'[YARD-EDU] 공지사항: 확인 {len(rows[:10])}건, 신규 {saved}건')
     except Exception as e:
         print(f'[YARD-EDU] 공지사항 수집 오류: {e}')
+
+    return total
+
+
+def _collect_yp_tour():
+    """양평관광(tour.yp21.go.kr) 공지사항 수집 — AI 정리 포함"""
+    from models import YardPost, db
+
+    total = 0
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'text/html,application/xhtml+xml',
+        'Accept-Language': 'ko-KR,ko;q=0.9',
+    }
+
+    try:
+        res = requests.get(
+            'https://tour.yp21.go.kr/www/selectBbsNttList.do',
+            params={'bbsNo': 1, 'key': 66, 'pageIndex': 1},
+            headers=headers, timeout=15
+        )
+        if res.status_code != 200:
+            print(f'[YARD-TOUR] 접근 실패: {res.status_code}')
+            return 0
+
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(res.text, 'html.parser')
+        rows = soup.select('table tbody tr')
+        saved = 0
+
+        for row in rows[:10]:
+            cols = row.find_all('td')
+            if len(cols) < 3:
+                continue
+            a_tag = row.find('a')
+            if not a_tag:
+                continue
+            title = a_tag.get_text(strip=True)
+            if len(title) < 5:
+                continue
+
+            link = a_tag.get('href', '')
+            if link and not link.startswith('http'):
+                if link.startswith('./'):
+                    link = link[2:]
+                link = f'https://tour.yp21.go.kr/www/{link}'
+
+            if YardPost.query.filter_by(source_url=link).first():
+                continue
+            if _title_similarity_blocked(f'[관광] {title}'):
+                continue
+
+            date_text = cols[-1].get_text(strip=True) if cols else ''
+            event_dt = None
+            for fmt in ('%Y-%m-%d', '%Y.%m.%d', '%Y/%m/%d'):
+                try:
+                    event_dt = datetime.strptime(date_text[:10], fmt)
+                    break
+                except ValueError:
+                    continue
+
+            full_content = _fetch_blog_content(link)
+            desc = full_content[:1500] if full_content else title
+
+            if event_dt and event_dt.date() < datetime.now().date():
+                print(f'[YARD-TOUR] 스킵(마감): {title[:40]}')
+                continue
+
+            judge = _ai_event_filter(title, desc, full_content)
+            if event_dt:
+                judge['event_date_obj'] = event_dt
+            polished = _ai_polish_content(title, desc, judge)
+
+            p = YardPost(
+                title=f'[관광] {title}',
+                content=polished,
+                source_type='tour_auto',
+                platform='tour_yp21',
+                source_url=link[:500],
+                author_name='양평관광',
+                event_date=judge.get('event_date_obj') or event_dt,
+                event_place=judge.get('event_place') or None,
+                contact=(judge.get('contact') or None),
+                reserve_url=(judge.get('reserve_url') or None),
+                is_approved=False,
+                category='event',
+                created_at=datetime.now(),
+            )
+            db.session.add(p)
+            total += 1
+            saved += 1
+
+        db.session.commit()
+        print(f'[YARD-TOUR] 관광공지: 확인 {len(rows[:10])}건, 신규 {saved}건')
+    except Exception as e:
+        print(f'[YARD-TOUR] 관광공지 수집 오류: {e}')
 
     return total
