@@ -31,6 +31,27 @@ export default function LegalIssuesAdminPage() {
   const [suggesting, setSuggesting] = useState(false)
   const [collecting, setCollecting] = useState(false)
 
+  const [winWidth, setWinWidth] = useState(window.innerWidth)
+  useEffect(() => {
+    const onResize = () => setWinWidth(window.innerWidth)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+  const maxVisible = winWidth < 500 ? 5 : winWidth < 768 ? 7 : 9
+
+  const pageRange = (current: number, total: number) => {
+    if (total <= maxVisible) return Array.from({ length: total }, (_, i) => i + 1)
+    const half = Math.floor((maxVisible - 2) / 2)
+    const pages: (number | '...')[] = [1]
+    const start = Math.max(2, current - half)
+    const end = Math.min(total - 1, current + half)
+    if (start > 2) pages.push('...')
+    for (let i = start; i <= end; i++) pages.push(i)
+    if (end < total - 1) pages.push('...')
+    pages.push(total)
+    return pages
+  }
+
   useEffect(() => {
     if (!authLoading && (!user || (user.role !== 'admin' && user.role !== 'leader'))) {
       navigate('/legal/issues')
@@ -272,12 +293,19 @@ export default function LegalIssuesAdminPage() {
       {/* Pagination */}
       {totalPages > 1 && (
         <nav className="mt-3">
-          <ul className="pagination justify-content-center">
-            {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
-              <li key={p} className={`page-item ${p === page ? 'active' : ''}`}>
-                <button className="page-link" onClick={() => setPage(p)}>{p}</button>
+          <ul className="pagination justify-content-center flex-nowrap" style={{ overflowX: 'auto' }}>
+            <li className={`page-item ${page <= 1 ? 'disabled' : ''}`}>
+              <button className="page-link" onClick={() => setPage(p => Math.max(1, p - 1))}>◀</button>
+            </li>
+            {pageRange(page, totalPages).map((pg, i) =>
+              pg === '...' ? <li key={`e${i}`} className="page-item disabled"><span className="page-link">...</span></li> :
+              <li key={pg} className={`page-item ${pg === page ? 'active' : ''}`}>
+                <button className="page-link" onClick={() => setPage(pg)}>{pg}</button>
               </li>
-            ))}
+            )}
+            <li className={`page-item ${page >= totalPages ? 'disabled' : ''}`}>
+              <button className="page-link" onClick={() => setPage(p => Math.min(totalPages, p + 1))}>▶</button>
+            </li>
           </ul>
         </nav>
       )}
