@@ -95,26 +95,181 @@ def api_messages():
     if not uid: return jsonify({'error': 'login'}), 401
     tab = request.args.get('tab', 'received')
     role = session.get('role', 'user')
+
+    # 친구 ID 목록
+    friend_ids = set()
+    for f in Friend.query.filter(
+        Friend.status == 'accepted',
+        ((Friend.requester_id == uid) | (Friend.receiver_id == uid))
+    ).all():
+        friend_ids.add(f.requester_id if f.receiver_id == uid else f.receiver_id)
+
     if tab == 'received':
+        # 벗으로부터: 친구가 보낸 읽지 않은 **새 편지만** (회신/답신 제외)
+        if not friend_ids:
+            msgs = []
+        else:
+            msgs = Message.query.filter(
+                Message.receiver_id == uid,
+                Message.is_read == False,
+                Message.sender_id.in_(friend_ids),
+                Message.reply_to_id.is_(None),
+            ).order_by(Message.created_at.desc()).limit(50).all()
+
+    elif tab == 'sent':
+        # 벗에게: 내가 친구에게 보낸 읽지 않은 **새 편지만** (회신/답신 제외)
+        if not friend_ids:
+            msgs = []
+        else:
+            msgs = Message.query.filter(
+                Message.sender_id == uid,
+                Message.receiver_id.in_(friend_ids),
+                Message.is_read == False,
+                Message.reply_to_id.is_(None),
+            ).order_by(Message.created_at.desc()).limit(50).all()
+
+    elif tab == 'notice':
+        # 공지: 비친구가 보낸 편지 + 내가 비친구에게 보낸 편지 + 관리자 공개편지
         msgs = Message.query.filter(
-            (Message.receiver_id == uid) |
-            ((Message.is_public == True) & (role in ['admin', 'leader']))
+            Message.id != 0,
+            Message.sender_id != uid,
+        ).filter(
+            ~Message.sender_id.in_(friend_ids) if friend_ids else Message.id != 0,
         ).order_by(Message.created_at.desc()).limit(50).all()
+
+    elif tab == 'archive':
+        # 보관함: 읽은 모든 편지 + 읽지 않은 회신/답신 (reply_to_id가 있는 것)
+        msgs = Message.query.filter(
+            (Message.receiver_id == uid) | (Message.sender_id == uid),
+            (Message.is_read == True) | (Message.reply_to_id.isnot(None)),
+        ).order_by(Message.created_at.desc()).limit(100).all()
+
     else:
-        msgs = Message.query.filter_by(sender_id=uid).order_by(Message.created_at.desc()).limit(50).all()
+        msgs = []
+
     result = []
     for m in msgs:
         sender = User.query.get(m.sender_id)
         receiver = User.query.get(m.receiver_id)
+        direction = 'sent' if m.sender_id == uid else 'received'
         result.append({
             'id': m.id, 'subject': m.subject, 'content': m.content,
+            'sender_id': m.sender_id, 'receiver_id': m.receiver_id,
             'sender_name': sender.real_name or sender.username if sender else '알수없음',
-            'receiver_name': receiver.real_name or receiver.username if receiver else '알수없음',
             'sender_role': m.sender_role, 'letter_type': m.letter_type,
+            'receiver_name': receiver.real_name or receiver.username if receiver else '알수없음',
             'is_read': m.is_read, 'is_public': m.is_public,
+            'direction': direction, 'reply_to_id': m.reply_to_id,
             'created_at': m.created_at.isoformat() if m.created_at else None,
         })
-    return jsonify(result)
+    return jsonify({'my_id': uid, 'messages': result})
+
+@message_bp.route('/api/messages/archive-count')
+def api_messages_archive_count():
+    """보관함에서 읽지 않은 회신/답신 개수 반환"""
+    uid = session.get('user_id')
+    if not uid: return jsonify({'count': 0})
+    # 상대가 보낸 읽지 않은 회신/답신 (reply_to_id가 있고, 받은 사람만 카운트)
+    count = Message.query.filter(
+        Message.receiver_id == uid,
+        Message.reply_to_id.isnot(None),
+        Message.is_read == False,
+    ).count()
+    return jsonify({'count': count})
+
+@message_bp.route('/api/message/<int:msg_id>')
+def api_message_detail(msg_id):
+    """단일 편지 조회 (회신용)"""
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({'error': 'login'}), 401
+    m = Message.query.get(msg_id)
+    if not m:
+        return jsonify({'error': 'not found'}), 404
+    # 수신자 또는 발신자만 조회 가능
+    if m.receiver_id != uid and m.sender_id != uid:
+        role = session.get('role', 'user')
+        if not (m.is_public and role in ('admin', 'leader')):
+            return jsonify({'error': 'forbidden'}), 403
+    sender = User.query.get(m.sender_id)
+    receiver = User.query.get(m.receiver_id)
+
+    # 관리자/마을지기가 보낸 편지 → 회신은 받은 사람의 마을지기에게
+    reply_to_id = m.sender_id
+    reply_to_name = sender.real_name or sender.username if sender else '알수없음'
+    sender_is_admin = bool(sender and sender.role in ('admin', 'leader'))
+
+    if sender_is_admin and receiver:
+        # 받은 사람의 마을지기 찾기
+        me = User.query.get(uid)
+        if me and me.town and me.village:
+            leader = User.query.filter(
+                User.role == 'leader', User.town == me.town, User.village == me.village
+            ).first()
+            if leader:
+                reply_to_id = leader.id
+                reply_to_name = '함께사는양평'
+
+    return jsonify({
+        'id': m.id, 'subject': m.subject, 'content': m.content,
+        'sender_id': m.sender_id,
+        'sender_name': '함께사는양평' if sender_is_admin else (sender.real_name or sender.username if sender else '알수없음'),
+        'receiver_id': m.receiver_id,
+        'receiver_name': receiver.real_name or receiver.username if receiver else '알수없음',
+        'reply_to_id': reply_to_id,
+        'reply_to_name': reply_to_name,
+        'sender_is_admin': sender_is_admin,
+        'created_at': m.created_at.isoformat() if m.created_at else None,
+    })
+
+@message_bp.route('/api/message/<int:msg_id>/thread')
+def api_message_thread(msg_id):
+    """특정 편지의 전체 스레드(원문~가장 최근 회신) 조회 — 최신이 위"""
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({'error': 'login'}), 401
+    m = Message.query.get(msg_id)
+    if not m:
+        return jsonify({'error': 'not found'}), 404
+    if m.receiver_id != uid and m.sender_id != uid:
+        role = session.get('role', 'user')
+        if not (m.is_public and role in ('admin', 'leader')):
+            return jsonify({'error': 'forbidden'}), 403
+
+    def _msg_dict(msg):
+        s = User.query.get(msg.sender_id)
+        return {
+            'id': msg.id, 'subject': msg.subject, 'content': msg.content,
+            'sender_id': msg.sender_id,
+            'sender_name': s.real_name or s.username if s else '알수없음',
+            'sender_role': msg.sender_role,
+            'sender_is_admin': bool(s and s.role in ('admin', 'leader')),
+            'created_at': msg.created_at.isoformat() if msg.created_at else None,
+        }
+
+    def _get_root(msg):
+        cur = msg
+        seen = set()
+        while cur.reply_to_id and cur.id not in seen:
+            seen.add(cur.id)
+            parent = Message.query.get(cur.reply_to_id)
+            if not parent:
+                break
+            cur = parent
+        return cur
+
+    root = _get_root(m)
+
+    def _get_children(msg):
+        children = Message.query.filter_by(reply_to_id=msg.id).order_by(Message.created_at.asc()).all()
+        result = [_msg_dict(msg)]
+        for c in children:
+            result.extend(_get_children(c))
+        return result
+
+    thread = _get_children(root)
+    thread.reverse()
+    return jsonify({'my_id': uid, 'thread': thread})
 
 @message_bp.route('/api/message/send', methods=['POST'])
 def api_message_send():
@@ -123,6 +278,8 @@ def api_message_send():
     ids_raw = request.form.get('receiver_ids') or request.form.get('receiver_id')
     subject = request.form.get('subject', '').strip()
     content = request.form.get('content', '').strip()
+    reply_to_id_raw = request.form.get('reply_to_id')
+    reply_to_id = int(reply_to_id_raw) if reply_to_id_raw and reply_to_id_raw.isdigit() else None
     if not ids_raw or not content:
         return jsonify({'status': 'error', 'msg': '받는 사람과 내용을 입력하세요.'}), 400
     try:
@@ -153,11 +310,20 @@ def api_message_send():
             receiver_id=receiver.id,
             subject=subject,
             content=content,
-            letter_type='normal'
+            letter_type='normal',
+            reply_to_id=reply_to_id,
         )
         db.session.add(msg)
         sent += 1
     db.session.commit()
+
+    # 회신/답신 시 원문 자동 읽음 처리
+    if reply_to_id:
+        orig = Message.query.get(reply_to_id)
+        if orig and not orig.is_read and (orig.receiver_id == uid or orig.sender_id == uid):
+            orig.is_read = True
+            db.session.commit()
+
     if sent == 0:
         return jsonify({'status': 'error', 'msg': '전송할 대상을 찾지 못했습니다.'}), 400
     return jsonify({'status': 'success', 'msg': f'{sent}명에게 편지가 전송되었습니다.'})

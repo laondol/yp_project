@@ -32,8 +32,8 @@ export default function NavBar() {
   const siteName = host === 'localhost' || host === '127.0.0.1' ? '함께사는로컬'
     : host === 'test.unocum.kr' ? '함께사는테스트' : '함께사는양평'
 
-  const [notif, setNotif] = useState({ memos: 0, notices: 0, friend_requests: 0, ai_broadcasts: 0 })
-  const prevRef = useRef({ memos: 0, notices: 0, friend_requests: 0, ai_broadcasts: 0 })
+  const [notif, setNotif] = useState({ memos: 0, notices: 0, friend_requests: 0, ai_broadcasts: 0, unread_friend_letters: 0, unread_notices: 0 })
+  const prevRef = useRef({ memos: 0, notices: 0, friend_requests: 0, ai_broadcasts: 0, unread_friend_letters: 0, unread_notices: 0 })
   const [toasts, setToasts] = useState<{ id: number; type: string; msg: string }[]>([])
   const toastIdRef = useRef(0)
   const [searchOpen, setSearchOpen] = useState(false)
@@ -184,6 +184,16 @@ export default function NavBar() {
             notifBeep(523, [0.2, 0.15, 0.2, 0.15, 0.2])
             showToast('🤖', `${n}개의 새 AI 이야기`)
           }
+          if (d.unread_friend_letters > prev.unread_friend_letters) {
+            const n = d.unread_friend_letters - prev.unread_friend_letters
+            notifBeep(784, [0.12, 0.06, 0.12, 0.06, 0.12])
+            showToast('✉️', `${n}통의 새 벗 편지`)
+          }
+          if (d.unread_notices > prev.unread_notices) {
+            const n = d.unread_notices - prev.unread_notices
+            notifBeep(660, [0.3])
+            showToast('📢', `${n}개의 새 공지`)
+          }
           prevRef.current = d
           setNotif(d)
         })
@@ -228,7 +238,6 @@ export default function NavBar() {
   }, [user?.id])
 
   const totalMemos = notif.memos
-  const totalNotices = notif.notices
   const totalFriendReqs = notif.friend_requests
 
   return (
@@ -410,10 +419,16 @@ export default function NavBar() {
               {/* 편지 */}
               <a href="/message/inbox" className="text-decoration-none position-relative ms-1" title="편지">
                 <span style={{ fontSize: '1.1rem' }}>✉️</span>
-                {totalNotices > 0 && (
-                  <span className="position-absolute top-0 start-100 translate-middle badge rounded-pill"
-                    style={{ fontSize: '0.5rem', background: '#0d6efd', minWidth: 14, padding: '1px 4px', lineHeight: '1.2' }}>
-                    {totalNotices}
+                {notif.unread_friend_letters > 0 && (
+                  <span className="position-absolute badge rounded-pill"
+                    style={{ top: -4, right: -8, fontSize: '0.5rem', background: '#27ae60', minWidth: 14, padding: '1px 4px', lineHeight: '1.2' }}>
+                    {notif.unread_friend_letters}
+                  </span>
+                )}
+                {notif.unread_notices > 0 && (
+                  <span className="position-absolute badge rounded-pill"
+                    style={{ top: -4, left: 10, fontSize: '0.5rem', background: '#0d6efd', minWidth: 14, padding: '1px 4px', lineHeight: '1.2' }}>
+                    {notif.unread_notices}
                   </span>
                 )}
               </a>

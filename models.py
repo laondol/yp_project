@@ -314,6 +314,7 @@ class Message(db.Model):
     sender_name = db.Column(db.String(50))
     sender_role = db.Column(db.String(20))
     receiver_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    reply_to_id = db.Column(db.Integer, db.ForeignKey('message.id'), nullable=True)
     subject = db.Column(db.String(200))
     content = db.Column(db.Text)
     is_read = db.Column(db.Boolean, default=False)

@@ -95,14 +95,42 @@ def api_user_dashboard():
 def api_user_notification_summary():
     uid = session.get('user_id')
     if not uid:
-        return jsonify({'memos': 0, 'notices': 0, 'friend_requests': 0, 'ai_broadcasts': 0})
+        return jsonify({'memos': 0, 'notices': 0, 'friend_requests': 0, 'ai_broadcasts': 0, 'unread_friend_letters': 0, 'unread_notices': 0})
     from models import Friend, TongBotMemo, VillageAlert, AiBroadcast
     memos = TongBotMemo.query.filter_by(user_id=uid, seen=False).count()
-    unread_msgs = Message.query.filter_by(receiver_id=uid, is_read=False).count()
-    notices = VillageAlert.query.filter_by(is_active=True).count() + unread_msgs
+    notices = VillageAlert.query.filter_by(is_active=True).count()
     friend_requests = Friend.query.filter_by(receiver_id=uid, status='pending').count()
     ai_broadcasts = AiBroadcast.query.filter_by(is_active=True).count()
-    return jsonify({'memos': memos, 'notices': notices, 'friend_requests': friend_requests, 'ai_broadcasts': ai_broadcasts})
+
+    # 친구 ID 목록
+    friend_ids = set()
+    for f in Friend.query.filter(
+        Friend.status == 'accepted',
+        ((Friend.requester_id == uid) | (Friend.receiver_id == uid))
+    ).all():
+        friend_ids.add(f.requester_id if f.receiver_id == uid else f.receiver_id)
+
+    unread_friend_letters = 0
+    unread_notices = 0
+    if friend_ids:
+        unread_friend_letters = Message.query.filter(
+            Message.receiver_id == uid, Message.is_read == False,
+            Message.sender_id.in_(friend_ids),
+            Message.reply_to_id.is_(None),
+        ).count()
+    # 공지: 비친구가 보낸 읽지 않은 편지
+    unread_notices = Message.query.filter(
+        Message.receiver_id == uid, Message.is_read == False,
+        Message.sender_id != uid,
+        ~Message.sender_id.in_(friend_ids) if friend_ids else True,
+    ).count() + notices
+
+    return jsonify({
+        'memos': memos, 'notices': notices, 'friend_requests': friend_requests,
+        'ai_broadcasts': ai_broadcasts,
+        'unread_friend_letters': unread_friend_letters,
+        'unread_notices': unread_notices,
+    })
 
 @user_bp.route('/api/user/<int:user_id>/profile')
 def api_user_profile(user_id):

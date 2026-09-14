@@ -332,10 +332,14 @@ def spa_fallback(path):
     _file = os.path.normpath(os.path.join(_dist, path))
     # dist 내부 실제 파일이면 우선 서빙 (경로 탈출 방지)
     if path and _file.startswith(_dist) and os.path.isfile(_file):
-        return send_file(_file)
+        resp = send_file(_file)
+        resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        return resp
     _idx = os.path.join(_dist, 'index.html')
     if os.path.exists(_idx):
-        return send_file(_idx)
+        resp = send_file(_idx)
+        resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        return resp
     return 'Not Found', 404
 
 @app.after_request
