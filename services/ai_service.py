@@ -1,7 +1,7 @@
 import json, os, base64, threading, subprocess, tempfile
 from datetime import datetime, timedelta
 from openai import OpenAI
-from models import db, Post, User, ShareReport
+from models import db, Post, User, ShareReport, YardPost
 from services.naver_news import get_local_share_context
 from services.geocode import gps_to_town_village
 
@@ -310,13 +310,19 @@ def background_process_share(app, report_id, title, description, latitude, longi
             prompt = f"양평군 공유 내용을 분석해주세요.\n제목: {title or '제목 없음'}\n내용: {description or '내용 없음'}\n위치: {location_info}\n이미지: {'있음' if image_path else '없음'}\n그리기: {'있음' if drawing_path else '없음'}\n\nJSON: {{{{'category': '사건/풍경/장소/맛집/기타', 'summary': '3줄 요약', 'confidence': 0.0~1.0, 'danger_alert': true/false}}}}"
             data = _motif_json("양평군 공유 분석 AI입니다.", prompt)
             if isinstance(data, str): data = json.loads(data)
-            report.ai_category = data.get('category', '기타')
+            # 마당 행사 연결 글은 카테고리 보존 (행사후기/마을후기)
+            if report.yard_event_id:
+                _ypv = YardPost.query.get(report.yard_event_id)
+                report.ai_category = '마을후기' if (_ypv and _ypv.platform == 'village_event') else '행사후기'
+            else:
+                report.ai_category = data.get('category', '기타')
             report.ai_summary = data.get('summary', '')
             report.ai_confidence = data.get('confidence', 0.5)
             report.ai_danger_alert = data.get('danger_alert', False)
         except Exception as e:
             print(f"[BG PROCESS] classify error: {e}")
-            report.ai_category = '기타'
+            if not report.yard_event_id:
+                report.ai_category = '기타'
 
         if latitude and longitude:
             tw, vl = gps_to_town_village(latitude, longitude)

@@ -2,7 +2,7 @@ from flask import Blueprint, render_template, request, redirect, url_for, jsonif
 from datetime import datetime, timezone, timedelta
 from urllib.parse import quote
 from sqlalchemy import or_
-from models import db, ConstructionNotice, StoreInfo, VillageAlert, HeritageStamp, User, Message, ShareReport, VillageCache, PublicFacility, FacilityReport
+from models import db, ConstructionNotice, StoreInfo, VillageAlert, HeritageStamp, User, Message, ShareReport, VillageCache, PublicFacility, FacilityReport, StoreSuggestion, StoreMenu, StoreNameVote, StoreInfoVote, StoreInfoReview
 from services.construction import sync_construction_notices, sync_traffic_incidents, sync_congestion_info, sync_building_permits
 from services.transit import haversine_km
 from config import Config
@@ -333,17 +333,19 @@ def construction_local_stores():
     stores = ShareReport.query.filter_by(
         town=town, village=village, status='approved'
     ).order_by(ShareReport.created_at.desc()).limit(50).all()
-    # 그룹화: 100m 이내 같은 위치 → 하나의 가게
+    # 그룹화: 150m 이내 같은 위치 → 하나의 가게 (클러스터 중심 좌표 사용)
     from services.transit import haversine_km
     grouped = {}
     for s in stores:
         slat = s.latitude or 0
         slng = s.longitude or 0
+        if not slat or not slng:
+            continue
         matched_key = None
         for gk, gv in grouped.items():
-            if slat and slng and gv["lat"] and gv["lng"]:
+            if gv["lat"] and gv["lng"]:
                 d = haversine_km(float(gv["lat"]), float(gv["lng"]), slat, slng)
-                if d <= 0.1:
+                if d <= 0.15:
                     matched_key = gk
                     break
         if matched_key:
@@ -355,6 +357,10 @@ def construction_local_stores():
             })
             if s.image_path and not g["image"]:
                 g["image"] = s.image_path
+            # 중심 좌표 업데이트 (평균)
+            n = len(g["posts"])
+            g["lat"] = float(g["lat"]) * (n - 1) / n + slat / n
+            g["lng"] = float(g["lng"]) * (n - 1) / n + slng / n
         else:
             key = f"{round(slat,4)}|{round(slng,4)}"
             grouped[key] = {
@@ -367,17 +373,100 @@ def construction_local_stores():
                 "image": s.image_path,
                 "lat": s.latitude, "lng": s.longitude,
             }
-    # StoreInfo 매칭: 각 그룹 좌표와 가장 가까운 StoreInfo(100m 이내) 찾기
-    store_infos = StoreInfo.query.filter_by(town=town, village=village).all()
+    # StoreInfo 매칭: 각 그룹 좌표와 가장 가까운 StoreInfo(150m 이내) 찾기
+    # town만으로 먼저 검색 (village 불일치 허용)
+    store_infos = StoreInfo.query.filter_by(town=town).all()
+    if not store_infos:
+        store_infos = StoreInfo.query.all()  # fallback: 전체 검색
     for gk, gv in grouped.items():
+        if not gv.get("lat") or not gv.get("lng"):
+            gv["name"] = "위치 확인 불가"
+            gv["name_status"] = "unknown"
+            continue
+        matched = False
         for si in store_infos:
-            if si.latitude and si.longitude and gv["lat"] and gv["lng"]:
+            if si.latitude and si.longitude:
                 d = haversine_km(si.latitude, si.longitude, float(gv["lat"]), float(gv["lng"]))
-                if d <= 0.1:
+                if d <= 0.005:
                     gv["name"] = si.name
+                    gv["name_status"] = "confirmed"
+                    gv["phone"] = si.phone or None
                     gv["store_link"] = si.our_link or si.store_homepage or si.smartplace or None
                     gv["link_label"] = "🏠 가게소개" if si.our_link else ("🌐 홈페이지" if si.store_homepage else ("📍 스마트플레이스" if si.smartplace else None))
+                    matched = True
                     break
+        if not matched:
+            gv["name"] = "위치 확인 불가"
+            gv["name_status"] = "unknown"
+
+    # StoreSuggestion 매칭: StoreInfo에 없으면 회원 제안(카카오) 가게에서 찾기
+    all_sugs = StoreSuggestion.query.filter(
+        StoreSuggestion.lat.isnot(None), StoreSuggestion.lon.isnot(None)
+    ).all()
+    for gk, gv in grouped.items():
+        if not gv.get("lat") or not gv.get("lng"):
+            continue
+        # 이미 StoreInfo로 완전 매칭됐으면 건너뜀 (phone 있으면 확정)
+        if gv.get("phone") and gv.get("store_link"):
+            continue
+        for sg in all_sugs:
+            if sg.lat and sg.lon:
+                d = haversine_km(sg.lat, sg.lon, float(gv["lat"]), float(gv["lng"]))
+                if d <= 0.005:
+                    gv["name"] = sg.top_name or sg.name
+                    if sg.phone:
+                        gv["phone"] = sg.phone
+                    if sg.address:
+                        gv["address"] = sg.address
+                    if sg.place_url:
+                        gv["place_url"] = sg.place_url
+                        if not gv.get("store_link"):
+                            gv["store_link"] = sg.place_url
+                            gv["link_label"] = "📍 카카오맵"
+                    break
+
+    # 투표 정보 추가 (StoreInfo 미매칭 그룹)
+    from sqlalchemy import func
+    for gk, gv in grouped.items():
+        if gv.get("name_status") == "confirmed":
+            continue
+        if not gv.get("lat") or not gv.get("lng"):
+            continue
+        gkey = f"{round(float(gv['lat']), 3)}_{round(float(gv['lng']), 3)}"
+        rows = (
+            db.session.query(StoreNameVote.name, func.count(StoreNameVote.id).label('votes'))
+            .filter_by(group_key=gkey)
+            .group_by(StoreNameVote.name)
+            .order_by(func.count(StoreNameVote.id).desc())
+            .all()
+        )
+        total_users = db.session.query(func.count(db.distinct(StoreNameVote.user_id))).filter_by(group_key=gkey).scalar() or 0
+        if rows:
+            top_name = rows[0][0]
+            top_votes = rows[0][1]
+            gv["name"] = top_name
+            gv["name_status"] = "voting"
+            gv["name_votes"] = top_votes
+            gv["name_total"] = total_users
+            gv["name_options"] = [{"name": r[0], "votes": r[1]} for r in rows]
+
+    # StoreMenu 매칭: 가게 메뉴 정보 추가
+    for gk, gv in grouped.items():
+        if not gv.get("lat") or not gv.get("lng"):
+            continue
+        for sg in all_sugs:
+            if sg.lat and sg.lon:
+                d = haversine_km(sg.lat, sg.lon, float(gv["lat"]), float(gv["lng"]))
+                if d <= 0.15 and sg.place_id:
+                    menus = StoreMenu.query.filter_by(place_id=sg.place_id).order_by(StoreMenu.sub_category).limit(10).all()
+                    if menus:
+                        gv["menus"] = [{"name": m.name, "category": m.sub_category, "price": m.price} for m in menus]
+                    break
+
+    # 사진 수 표시
+    for gk, gv in grouped.items():
+        gv["photo_count"] = len(gv.get("posts", []))
+
     result = {
         "town": town, "village": village,
         "stores": list(grouped.values())[:20],
@@ -402,7 +491,7 @@ def construction_store_detail(store_name):
     for s in stores:
         if s.latitude and s.longitude and target_lat_f and target_lng_f:
             d = haversine_km(target_lat_f, target_lng_f, s.latitude, s.longitude)
-            if d <= 0.1:
+            if d <= 0.15:
                 grouped.append(s)
     if not grouped:
         from urllib.parse import unquote
@@ -415,14 +504,32 @@ def construction_store_detail(store_name):
     store_link = None
     link_label = None
     display_name = store_name
+    store_phone = None
+    store_address = ''
     if target_lat_f and target_lng_f:
-        sis = StoreInfo.query.filter_by(town=town, village=village).all()
+        sis = StoreInfo.query.filter_by(town=town).all()
+        if not sis:
+            sis = StoreInfo.query.all()
         for si in sis:
             if si.latitude and si.longitude:
-                if haversine_km(si.latitude, si.longitude, target_lat_f, target_lng_f) <= 0.1:
+                if haversine_km(si.latitude, si.longitude, target_lat_f, target_lng_f) <= 0.005:
                     display_name = si.name
                     store_link = si.our_link or si.store_homepage or si.smartplace or None
                     link_label = "🏠 가게소개" if si.our_link else ("🌐 홈페이지" if si.store_homepage else ("📍 스마트플레이스" if si.smartplace else None))
+                    store_phone = si.phone
+                    break
+        # StoreSuggestion 매칭 (StoreInfo에 없으면)
+        if not store_link:
+            sugs = StoreSuggestion.query.filter(
+                StoreSuggestion.lat.isnot(None), StoreSuggestion.lon.isnot(None)
+            ).all()
+            for sg in sugs:
+                if sg.lat and sg.lon and haversine_km(sg.lat, sg.lon, target_lat_f, target_lng_f) <= 0.005:
+                    display_name = sg.top_name or sg.name
+                    store_phone = sg.phone or store_phone
+                    store_address = sg.address or ''
+                    store_link = sg.place_url or store_link
+                    link_label = link_label or ("📍 카카오맵" if sg.place_url else None)
                     break
 
     naver_map = f'https://map.naver.com/p?c={target_lng},{target_lat},16,0,0,0,dh' if target_lat_f and target_lng_f else None
@@ -447,6 +554,142 @@ def construction_store_detail(store_name):
     if not store_address:
         store_address = f'{town} {village}'
     return _serve_spa()
+
+
+# ─── 가게 상세 JSON API ────────────────────────────────────────────────
+@construction_bp.route('/construction/store-info-json')
+def store_info_json():
+    """가게 상세 정보 JSON: 사진, StoreInfo, 투표 현황"""
+    uid = session.get('user_id')
+    lat = request.args.get('lat', type=float)
+    lng = request.args.get('lng', type=float)
+    town = request.args.get('town', '')
+    village = request.args.get('village', '')
+
+    if not lat or not lng:
+        return jsonify({"error": "좌표가 필요합니다."}), 400
+
+    # 30m 이내 사진 + 투표 현황
+    photos = ShareReport.query.filter_by(town=town, village=village, status='approved').all()
+    gallery = []
+    for p in photos:
+        if p.latitude and p.longitude and haversine_km(lat, lng, p.latitude, p.longitude) <= 0.005:
+            if p.image_path and p.image_path not in [g["image"] for g in gallery]:
+                up = StoreInfoVote.query.filter_by(photo_id=p.id, vote_type='up').count()
+                down = StoreInfoVote.query.filter_by(photo_id=p.id, vote_type='down').count()
+                my_vote = None
+                my_comment = None
+                if uid:
+                    v = StoreInfoVote.query.filter_by(photo_id=p.id, user_id=uid).first()
+                    my_vote = v.vote_type if v else None
+                    my_comment = v.comment if v else None
+                # 코멘트 목록 (틀린정보)
+                comments = StoreInfoVote.query.filter_by(
+                    photo_id=p.id, vote_type='down'
+                ).filter(StoreInfoVote.comment.isnot(None), StoreInfoVote.comment != '').order_by(StoreInfoVote.created_at.desc()).limit(5).all()
+                comment_list = [{"user": User.query.get(c.user_id).nickname if User.query.get(c.user_id) else "익명", "text": c.comment, "date": c.created_at.strftime('%m/%d') if c.created_at else ""} for c in comments]
+
+                gallery.append({
+                    "image": p.image_path, "title": p.title or "", "id": p.id,
+                    "up_count": up, "down_count": down, "my_vote": my_vote,
+                    "my_comment": my_comment, "comments": comment_list,
+                })
+
+    # StoreInfo 매칭
+    store_info = None
+    all_si = StoreInfo.query.all()
+    for si in all_si:
+        if si.latitude and si.longitude and haversine_km(lat, lng, si.latitude, si.longitude) <= 0.005:
+            store_info = si
+            break
+
+    # StoreSuggestion 매칭 (StoreInfo 없으면)
+    suggestion = None
+    if not store_info:
+        all_sugs = StoreSuggestion.query.filter(
+            StoreSuggestion.lat.isnot(None), StoreSuggestion.lon.isnot(None)
+        ).all()
+        for sg in all_sugs:
+            if sg.lat and sg.lon and haversine_km(lat, lng, sg.lat, sg.lon) <= 0.005:
+                suggestion = sg
+                break
+
+    # 투표 현황 (전체 합산)
+    photo_ids = [g["id"] for g in gallery]
+    if photo_ids:
+        correct_count = StoreInfoVote.query.filter(StoreInfoVote.photo_id.in_(photo_ids), StoreInfoVote.vote_type=='up').count()
+        wrong_count = StoreInfoVote.query.filter(StoreInfoVote.photo_id.in_(photo_ids), StoreInfoVote.vote_type=='down').count()
+    else:
+        correct_count = 0
+        wrong_count = 0
+
+    user_points = 0
+    if uid:
+        u = User.query.get(uid)
+        user_points = u.points if u else 0
+
+    return jsonify({
+        "store_name": store_info.name if store_info else (suggestion.top_name if suggestion else ""),
+        "phone": store_info.phone if store_info else (suggestion.phone if suggestion else None),
+        "address": (store_info.town or '') + ' ' + (store_info.village or '') if store_info else (suggestion.address if suggestion else ""),
+        "store_link": (store_info.our_link or store_info.smartplace) if store_info else (suggestion.place_url if suggestion else None),
+        "gallery": gallery,
+        "correct_count": correct_count,
+        "wrong_count": wrong_count,
+        "user_points": user_points,
+    })
+
+
+@construction_bp.route('/construction/store-vote', methods=['POST'])
+def store_info_vote():
+    """사진 정보 맞/틀림 투표 (1니아 소모)"""
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({"error": "로그인이 필요합니다."}), 401
+
+    data = request.get_json(force=True)
+    photo_id = data.get('photo_id')
+    vote_type = data.get('vote_type', '')
+    comment = (data.get('comment') or '').strip()
+
+    if vote_type not in ('up', 'down'):
+        return jsonify({"error": "잘못된 투표 유형입니다."}), 400
+    if not photo_id:
+        return jsonify({"error": "사진이 없습니다."}), 400
+
+    user = User.query.get(uid)
+    if not user or (user.points or 0) < 1:
+        return jsonify({"error": "니아가 부족합니다."}), 400
+
+    existing = StoreInfoVote.query.filter_by(photo_id=photo_id, user_id=uid).first()
+    if existing:
+        if existing.vote_type == vote_type and existing.comment == comment:
+            return jsonify({"error": "이미 투표하셨습니다."}), 400
+        existing.vote_type = vote_type
+        if comment:
+            existing.comment = comment
+    else:
+        v = StoreInfoVote(photo_id=photo_id, user_id=uid, vote_type=vote_type, comment=comment or None, cost=1)
+        db.session.add(v)
+
+    user.points = (user.points or 0) - 1
+    db.session.commit()
+
+    # 틀린정보 + 코멘트 → 관리자 검토 요청 생성
+    review_msg = ""
+    if vote_type == 'down' and comment:
+        existing_review = StoreInfoReview.query.filter_by(photo_id=photo_id, reporter_id=uid, status='pending').first()
+        if not existing_review:
+            review = StoreInfoReview(photo_id=photo_id, reporter_id=uid, comment=comment)
+            db.session.add(review)
+            db.session.commit()
+            review_msg = " → 관리자 검토 요청 전송"
+
+    return jsonify({
+        "success": True,
+        "msg": f"투표 완료 (1니아 차감, 잔여 {user.points}니아){review_msg}",
+        "user_points": user.points,
+    })
 
 @construction_bp.route('/construction/local-scenery')
 def construction_local_scenery():
@@ -1007,3 +1250,395 @@ def refresh_facilities():
     from services.construction import sync_public_facilities
     sync_public_facilities(current_app._get_current_object(), key)
     return jsonify({"status": "success", "msg": "편의시설 동기화 완료"})
+
+
+# ── 네이버 플레이스 자동 검색 ──
+
+@construction_bp.route('/construction/naver-search')
+def naver_place_search():
+    """좌표 기반 네이버 로컬 검색 — 가게 자동 등록용"""
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({"error": "로그인이 필요합니다."}), 401
+    lat = request.args.get('lat', type=float)
+    lng = request.args.get('lng', type=float)
+    query = request.args.get('query', '').strip()
+    if not lat or not lng:
+        return jsonify({"error": "좌표가 필요합니다."}), 400
+
+    naver_id = Config.NAVER_SEARCH_CLIENT_ID or getattr(Config, 'NAVER_CLIENT_ID', '')
+    naver_secret = Config.NAVER_SEARCH_CLIENT_SECRET or getattr(Config, 'NAVER_CLIENT_SECRET', '')
+
+    # 1) 역지오코딩으로 주소 획득
+    from services.transit import reverse_geocode
+    geo = reverse_geocode(lat, lng, naver_id=naver_id, naver_secret=naver_secret)
+    address = geo.get('address', '') if geo else ''
+
+    # 2) 네이버 로컬 검색
+    results = []
+    if naver_id and naver_secret:
+        import requests as _req
+        search_query = query or address or f"양평 음식점"
+        try:
+            r = _req.get(
+                'https://openapi.naver.com/v1/search/local.json',
+                headers={
+                    'X-Naver-Client-Id': naver_id,
+                    'X-Naver-Client-Secret': naver_secret,
+                },
+                params={'query': search_query, 'display': 10,
+                        'x': str(lng), 'y': str(lat)},
+                timeout=10,
+            )
+            if r.status_code == 200:
+                items = r.json().get('items', [])
+                for item in items:
+                    results.append({
+                        'name': item.get('title', '').replace('<b>', '').replace('</b>', ''),
+                        'category': item.get('category', ''),
+                        'address': item.get('address', '') or item.get('roadAddress', ''),
+                        'phone': item.get('telephone', ''),
+                        'link': item.get('link', ''),
+                        'mapx': item.get('mapx', ''),
+                        'mapy': item.get('mapy', ''),
+                        'dist': item.get('distance', ''),
+                    })
+        except Exception as e:
+            current_app.logger.warning(f"네이버 로컬 검색 실패: {e}")
+
+    return jsonify({
+        'address': address,
+        'results': results,
+    })
+
+
+@construction_bp.route('/construction/photo-nearby-stores')
+def photo_nearby_stores():
+    """사진 좌표 기반 네이버맵 100m 이내 가게 검색 (전체 또는 특정 사진)"""
+    naver_id = Config.NAVER_SEARCH_CLIENT_ID or getattr(Config, 'NAVER_CLIENT_ID', '')
+    naver_secret = Config.NAVER_SEARCH_CLIENT_SECRET or getattr(Config, 'NAVER_CLIENT_SECRET', '')
+    if not naver_id or not naver_secret:
+        return jsonify({"error": "네이버 API 키가 설정되지 않았습니다."}), 500
+
+    import requests as _req
+
+    photo_id = request.args.get('photo_id', type=int)
+    town = request.args.get('town', '')
+    village = request.args.get('village', '')
+
+    if photo_id:
+        photos = [ShareReport.query.get(photo_id)]
+        photos = [p for p in photos if p and p.latitude and p.longitude]
+    else:
+        q = ShareReport.query.filter_by(status='approved')
+        if town:
+            q = q.filter_by(town=town)
+        if village:
+            q = q.filter_by(village=village)
+        photos = q.filter(ShareReport.latitude.isnot(None), ShareReport.longitude.isnot(None)).all()
+
+    results = []
+    for p in photos[:30]:  # 최대 30장
+        try:
+            r = _req.get(
+                'https://openapi.naver.com/v1/search/local.json',
+                headers={
+                    'X-Naver-Client-Id': naver_id,
+                    'X-Naver-Client-Secret': naver_secret,
+                },
+                params={
+                    'query': f'{p.town or "양평"} 음식점 카페',
+                    'display': 10,
+                    'x': str(p.longitude),
+                    'y': str(p.latitude),
+                },
+                timeout=8,
+            )
+            if r.status_code == 200:
+                items = r.json().get('items', [])
+                stores = []
+                for item in items:
+                    mapx = int(item.get('mapx', 0)) / 1e7  # 네이버 microdegree → 도
+                    mapy = int(item.get('mapy', 0)) / 1e7
+                    dist_m = int(haversine_km(mapy, mapx, p.latitude, p.longitude) * 1000)
+                    if dist_m <= 100:
+                        stores.append({
+                            'name': item.get('title', '').replace('<b>', '').replace('</b>', ''),
+                            'category': item.get('category', ''),
+                            'phone': item.get('telephone', ''),
+                            'address': item.get('address', '') or item.get('roadAddress', ''),
+                            'distance': dist_m,
+                        })
+                results.append({
+                    'photo_id': p.id,
+                    'title': p.title,
+                    'lat': p.latitude,
+                    'lng': p.longitude,
+                    'stores': stores,
+                })
+        except Exception as e:
+            current_app.logger.warning(f"사진 {p.id} 네이버 검색 실패: {e}")
+
+    return jsonify({"results": results, "total": len(results)})
+
+
+@construction_bp.route('/construction/auto-register-store', methods=['POST'])
+def auto_register_store():
+    """네이버 플레이스 검색 결과로 StoreInfo 자동 등록"""
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({"error": "로그인이 필요합니다."}), 401
+    user = User.query.get(uid)
+    if not user:
+        return jsonify({"error": "사용자 없음"}), 400
+    town = user.town or user.curr_town
+    village = user.village or user.curr_village
+
+    data = request.get_json() or {}
+    name = data.get('name', '').strip()
+    phone = data.get('phone', '').strip()
+    address = data.get('address', '').strip()
+    link = data.get('link', '').strip()
+    mapx = data.get('mapx')  # 경도 (네이버 API 형식: 정수 * 10000000)
+    mapy = data.get('mapy')  # 위도
+
+    if not name:
+        return jsonify({"error": "가게 이름이 필요합니다."}), 400
+
+    # 네이버 좌표 → 십진수 변환
+    lng = float(mapx) / 1e7 if mapx else None
+    lat = float(mapy) / 1e7 if mapy else None
+
+    # 중복 체크 (같은 이름 + 같은 동네)
+    existing = StoreInfo.query.filter_by(name=name, town=town, village=village).first()
+    if existing:
+        return jsonify({"error": "이미 등록된 가게입니다.", "id": existing.id}), 409
+
+    si = StoreInfo(
+        name=name,
+        latitude=lat,
+        longitude=lng,
+        town=town,
+        village=village,
+        phone=phone or None,
+        our_link=link or None,
+    )
+    db.session.add(si)
+    db.session.commit()
+    return jsonify({"success": True, "id": si.id, "msg": f"'{name}' 가게가 등록되었습니다."})
+
+
+# ─── 가게 이름 추천/투표 ───────────────────────────────────────────────
+def _make_group_key(lat, lng):
+    """좌표를 소수점 3자리로 반올림하여 그룹 키 생성 (约 110m 격자)"""
+    return f"{round(float(lat), 3)}_{round(float(lng), 3)}"
+
+
+@construction_bp.route('/construction/store-name-recommendations')
+def store_name_recommendations():
+    """특정 좌표 근처 가게 이름 추천 목록 반환"""
+    lat = request.args.get('lat', '0')
+    lng = request.args.get('lng', '0')
+    group_key = _make_group_key(lat, lng)
+
+    # 투표된 이름 목록 (vote_count 기준)
+    from sqlalchemy import func
+    rows = (
+        db.session.query(StoreNameVote.name, func.count(StoreNameVote.id).label('votes'))
+        .filter_by(group_key=group_key)
+        .group_by(StoreNameVote.name)
+        .order_by(func.count(StoreNameVote.id).desc())
+        .all()
+    )
+    # 사용자 투표 현황
+    uid = session.get('user_id')
+    my_votes = set()
+    if uid:
+        my_votes = {v.name for v in StoreNameVote.query.filter_by(group_key=group_key, user_id=uid).all()}
+
+    total_users = db.session.query(func.count(db.distinct(StoreNameVote.user_id))).filter_by(group_key=group_key).scalar() or 0
+
+    recommendations = []
+    for r in rows:
+        pct = round(r.votes / total_users * 100, 1) if total_users else 0
+        recommendations.append({
+            "name": r.name,
+            "votes": r.votes,
+            "pct": pct,
+            "voted": r.name in my_votes,
+        })
+
+    return jsonify({
+        "group_key": group_key,
+        "recommendations": recommendations,
+        "total_users": total_users,
+        "my_votes": list(my_votes),
+    })
+
+
+@construction_bp.route('/construction/store-name-suggest', methods=['POST'])
+def store_name_suggest():
+    """가게 이름 추천 등록 (또는 기존 이름에 투표)"""
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({"error": "로그인이 필요합니다"}), 401
+
+    data = request.get_json(force=True)
+    name = (data.get('name') or '').strip()
+    lat = data.get('lat', 0)
+    lng = data.get('lng', 0)
+
+    if not name:
+        return jsonify({"error": "이름을 입력하세요"}), 400
+    if len(name) > 50:
+        return jsonify({"error": "이름은 50자 이내로 입력하세요"}), 400
+
+    group_key = _make_group_key(lat, lng)
+
+    # 이미 해당 가게에서 이 이름을 추천했는지 확인
+    existing = StoreNameVote.query.filter_by(group_key=group_key, name=name, user_id=uid).first()
+    if existing:
+        return jsonify({"error": "이미 추천하셨습니다", "voted": True}), 200
+
+    vote = StoreNameVote(group_key=group_key, name=name, user_id=uid)
+    db.session.add(vote)
+    db.session.commit()
+    return jsonify({"success": True, "msg": f"'{name}'을(를) 추천했습니다."})
+
+
+@construction_bp.route('/construction/store-name-cancel-vote', methods=['POST'])
+def store_name_cancel_vote():
+    """추천 취소"""
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({"error": "로그인이 필요합니다"}), 401
+
+    data = request.get_json(force=True)
+    name = (data.get('name') or '').strip()
+    lat = data.get('lat', 0)
+    lng = data.get('lng', 0)
+    group_key = _make_group_key(lat, lng)
+
+    vote = StoreNameVote.query.filter_by(group_key=group_key, name=name, user_id=uid).first()
+    if vote:
+        db.session.delete(vote)
+        db.session.commit()
+    return jsonify({"success": True})
+
+
+@construction_bp.route('/construction/store-name-apply', methods=['POST'])
+def store_name_apply():
+    """최다 득표 이름을 StoreInfo 이름으로 반영 (관리자 또는 일정 투표 수 이상)"""
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({"error": "로그인이 필요합니다"}), 401
+
+    data = request.get_json(force=True)
+    lat = data.get('lat', 0)
+    lng = data.get('lng', 0)
+    town = data.get('town', '')
+    village = data.get('village', '')
+    group_key = _make_group_key(lat, lng)
+
+    # 최다 득표 이름 찾기
+    from sqlalchemy import func
+    top = (
+        db.session.query(StoreNameVote.name, func.count(StoreNameVote.id).label('votes'))
+        .filter_by(group_key=group_key)
+        .group_by(StoreNameVote.name)
+        .order_by(func.count(StoreNameVote.id).desc())
+        .first()
+    )
+    if not top:
+        return jsonify({"error": "추천된 이름이 없습니다"}), 400
+
+    # 150m 이내 StoreInfo 찾아서 이름 업데이트
+    store_infos = StoreInfo.query.filter_by(town=town, village=village).all()
+    target = None
+    for si in store_infos:
+        if si.latitude and si.longitude:
+            d = haversine_km(si.latitude, si.longitude, float(lat), float(lng))
+            if d <= 0.15:
+                target = si
+                break
+
+    if target:
+        target.name = top[0]
+        db.session.commit()
+        return jsonify({"success": True, "name": top[0], "msg": f"가게 이름이 '{top[0]}'(으)로 변경되었습니다."})
+
+    # StoreInfo 없으면 새로 생성
+    si = StoreInfo(name=top[0], town=town, village=village, latitude=float(lat), longitude=float(lng))
+    db.session.add(si)
+    db.session.commit()
+    return jsonify({"success": True, "name": top[0], "msg": f"가게 '{top[0]}'이(가) 새로 등록되었습니다."})
+
+
+# ─── 관리자: 사진 정보 수정 검토 ──────────────────────────────────────
+@construction_bp.route('/construction/admin/reviews')
+def admin_store_reviews():
+    """관리자용 검토 대기 목록"""
+    uid = session.get('user_id')
+    user = User.query.get(uid) if uid else None
+    if not user or not user.is_admin:
+        return jsonify({"error": "관리자만 접근 가능합니다."}), 403
+
+    status = request.args.get('status', 'pending')
+    reviews = StoreInfoReview.query.filter_by(status=status).order_by(StoreInfoReview.created_at.desc()).all()
+
+    result = []
+    for r in reviews:
+        photo = ShareReport.query.get(r.photo_id)
+        reporter = User.query.get(r.reporter_id)
+        result.append({
+            "id": r.id,
+            "photo_id": r.photo_id,
+            "photo_image": photo.image_path if photo else None,
+            "photo_title": photo.title if photo else "",
+            "store_name": "",
+            "comment": r.comment,
+            "reporter_name": reporter.nickname if reporter else "익명",
+            "status": r.status,
+            "created_at": r.created_at.strftime('%m/%d %H:%M') if r.created_at else "",
+        })
+        # 사진 좌표로 StoreInfo 매칭
+        if photo and photo.latitude and photo.longitude:
+            for si in StoreInfo.query.all():
+                if si.latitude and si.longitude and haversine_km(photo.latitude, photo.longitude, si.latitude, si.longitude) <= 0.15:
+                    result[-1]["store_name"] = si.name
+                    break
+
+    return jsonify({"reviews": result, "total": len(result)})
+
+
+@construction_bp.route('/construction/admin/review/<int:review_id>/<string:action>', methods=['POST'])
+def admin_review_action(review_id, action):
+    """관리자 검토 반영/반려"""
+    uid = session.get('user_id')
+    user = User.query.get(uid) if uid else None
+    if not user or not user.is_admin:
+        return jsonify({"error": "관리자만 접근 가능합니다."}), 403
+
+    review = StoreInfoReview.query.get(review_id)
+    if not review:
+        return jsonify({"error": "검토 요청을 찾을 수 없습니다."}), 404
+    if review.status != 'pending':
+        return jsonify({"error": "이미 처리된 요청입니다."}), 400
+
+    review.status = 'approved' if action == 'approve' else 'rejected'
+    review.reviewed_by = uid
+    review.reviewed_at = datetime.now()
+
+    # 반영 시: 정보 제공자에게 1니아 보상
+    if action == 'approve':
+        reporter = User.query.get(review.reporter_id)
+        if reporter:
+            reporter.points = (reporter.points or 0) + 1
+            review.reward_given = True
+
+    db.session.commit()
+
+    return jsonify({
+        "success": True,
+        "msg": f"{'반영' if action == 'approve' else '반려'} 완료" + (f" (제공자 {review.reporter_id}번에게 1니아 지급)" if action == 'approve' else ""),
+    })

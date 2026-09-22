@@ -6,7 +6,7 @@ from flask import Blueprint, render_template, request, redirect, url_for, jsonif
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import or_
 from werkzeug.utils import secure_filename
-from models import db, User, ShareReport, ShareComment, ShareVote, Message, Post, Comment, NewsArticle, VillagePage, RampApplication, PointHistory, Friend, VillageWish, LegalPost, ChatMessage, FriendGroup, LegalAppointment, TongBot, TongBotDraft, ConstructionNotice, GpsCalibration, StoreSuggestion, StoreMenu
+from models import db, User, ShareReport, ShareComment, ShareVote, Message, Post, Comment, NewsArticle, VillagePage, RampApplication, PointHistory, Friend, VillageWish, LegalPost, ChatMessage, FriendGroup, LegalAppointment, TongBot, TongBotDraft, ConstructionNotice, GpsCalibration, StoreSuggestion, StoreMenu, YardPost
 from services.security import save_village_file
 from services.ai_service import background_process_share, moderate_image
 from services.geocode import haversine, gps_to_town_village, gps_to_address, get_nearby_reports, is_in_yangpyeong, YANGPYEONG_BOUNDS, YANGPYEONG_VILLAGES
@@ -329,6 +329,7 @@ def share_report_auto_save():
     if not os.path.exists(img_dir): os.makedirs(img_dir)
 
     if not report:
+        _ye0 = request.form.get('yard_event_id', '').strip()
         report = ShareReport(
             user_id=uid,
             author_name=user.username if user else '익명',
@@ -343,7 +344,8 @@ def share_report_auto_save():
             moderation_result='auto_sent',
             moderation_reason='자동보관 - 공유접수하기 버튼으로 심사받기',
             is_moderated=True,
-            auto_sent=True
+            auto_sent=True,
+            yard_event_id=int(_ye0) if _ye0.isdigit() else None
         )
         db.session.add(report)
         db.session.flush()
@@ -483,6 +485,66 @@ def share_report_auto_save_remove(report_id):
         return jsonify({"status": "success", "msg": "삭제되었습니다."})
     return jsonify({"status": "error", "msg": "삭제 실패"}), 400
 
+
+def _stamp_event_exif(report):
+    """행사 사진 EXIF에 좌표/날짜 기입 (이미 있으면 건너뜀)"""
+    if not report.yard_event_id:
+        return
+    yp = YardPost.query.get(report.yard_event_id)
+    if not yp:
+        return
+    lat = report.latitude or (yp.latitude if yp.latitude else None)
+    lon = report.longitude or (yp.longitude if yp.longitude else None)
+    dt = yp.event_date or report.created_at
+    if not lat or not lon:
+        return
+    try:
+        import piexif
+        from PIL import Image
+    except ImportError:
+        return
+
+    def _dms(val):
+        d = abs(val)
+        deg = int(d)
+        mins = (d - deg) * 60
+        m = int(mins)
+        sec = int((mins - m) * 60 * 10000)
+        return ((deg, 1, 0), (m, 1, 0), (sec, 10000, 0))
+
+    gps_ifd = {
+        piexif.GPSIFD.GPSLatitudeRef: b'N' if lat >= 0 else b'S',
+        piexif.GPSIFD.GPSLatitude: _dms(lat),
+        piexif.GPSIFD.GPSLongitudeRef: b'E' if lon >= 0 else b'W',
+        piexif.GPSIFD.GPSLongitude: _dms(lon),
+    }
+    date_str = dt.strftime('%Y:%m:%d %H:%M:%S') if dt else None
+
+    all_paths = [report.image_path]
+    if report.extra_images:
+        all_paths += [p.strip() for p in report.extra_images.split(',') if p.strip()]
+
+    base = _share_upload_base()
+    for p in all_paths:
+        if not p:
+            continue
+        fname = os.path.basename(p)
+        abs_path = os.path.join(base, fname)
+        if not os.path.exists(abs_path):
+            continue
+        try:
+            img = Image.open(abs_path)
+            exif = img.getexif()
+            existing_gps = exif.get(0x8825)
+            if not existing_gps:
+                exif[0x8825] = gps_ifd
+            if date_str and 0x9003 not in exif:
+                exif[0x9003] = date_str
+                exif[0x9004] = date_str
+            img.save(abs_path, exif=exif.tobytes())
+        except Exception:
+            pass
+
 @share_bp.route('/share-report/notify/<int:report_id>', methods=['POST'])
 def share_report_notify(report_id):
     """관리자/책임자가 자동보관(draft) 작성자에게 안내 쪽지를 수동 발송.
@@ -518,6 +580,10 @@ def share_report_confirm_auto(report_id):
         report.title = title
     if description is not None:
         report.description = description
+    # 마당 행사 연결 저장 (draft 생성 시 누락 보완)
+    _ye = request.form.get('yard_event_id', '').strip()
+    if _ye.isdigit():
+        report.yard_event_id = int(_ye)
 
     drawing = request.form.get('drawing_data')
     if drawing and len(drawing) > 2000:
@@ -537,9 +603,27 @@ def share_report_confirm_auto(report_id):
         report.latitude, report.longitude = calibrate_gps(latitude, longitude)
         resolved_town, resolved_village = gps_to_town_village(report.latitude, report.longitude)
         report.town = resolved_town or (user.town if (user := User.query.get(uid)) else '')
-        report.village = resolved_village or (user.village if (user := User.query.get(uid)) else '')
+        report.village = resolved_town or (user.village if (user := User.query.get(uid)) else '')
         report.address = gps_to_address(report.latitude, report.longitude) or \
             f"경기도 양평군 {report.town} {report.village}".strip()
+    elif report.yard_event_id:
+        yp = YardPost.query.get(report.yard_event_id)
+        if yp and yp.latitude and yp.longitude:
+            report.latitude = yp.latitude
+            report.longitude = yp.longitude
+            report.town = yp.town or ''
+            report.village = yp.village or ''
+            report.address = yp.event_place or f"경기도 양평군 {yp.town} {yp.village}".strip()
+
+    # 사진 EXIF에 행사 좌표/날짜 기입 (위치/날짜 없는 사진)
+    if report.yard_event_id:
+        _stamp_event_exif(report)
+        # 마당 행사 연결 시 카테고리 자동 설정
+        yp_cat = request.form.get('yard_event_category', '')
+        if yp_cat == 'village':
+            report.ai_category = '마을후기'
+        else:
+            report.ai_category = '행사후기'
 
     _move_report_files(report, 'review')
     report.auto_sent = False
@@ -908,9 +992,9 @@ def share_report_edit(report_id):
             lines = [l.strip() for l in menu_text.split('\n') if l.strip()]
             if lines:
                 try:
-                    r = _requests.post('https://api-cbt.morphfactory.io/v1/chat/completions',
+                    r = _requests.post('https://chat.motiftech.io/openapi/v1/chat/completions',
                         headers={'Authorization': 'Bearer ' + current_app.config.get('MOTIF_API_KEY',''), 'Content-Type': 'application/json'},
-                        json={'model': 'motif/motif-3',
+                        json={'model': 'motif-12.7b',
                               'messages': [{'role': 'user', 'content':
                                 '다음 메뉴 항목 각각을 "식사","음료","디저트","기타" 중 하나로 분류하세요. '
                                 '각 항목 앞에 라벨을 붙여 줄바꿈으로 출력하세요.\n' + '\n'.join(lines)}],
@@ -929,6 +1013,13 @@ def share_report_edit(report_id):
                         store_suggestion_id=report.store_suggestion_id,
                         place_id=(report.store_suggestion_id and str(report.store_suggestion_id) or None),
                         name=l, sub_category=(labels[i] if i < len(labels) else '기타'), ai_generated=True))
+
+        # 작성자가 수정하면 다시 심사 중으로 변경
+        if is_author and not is_admin and report.status == 'approved':
+            report.status = 'pending'
+            report.moderation_result = 'pending'
+            report.moderation_reason = '작성자 수정으로 재심사'
+            report.is_moderated = False
 
         db.session.commit()
         return jsonify({"status": "success", "msg": "수정되었습니다."})
@@ -970,8 +1061,10 @@ def api_share_reports():
     town = request.args.get('town', '')
     village = request.args.get('village', '')
     category = request.args.get('category', '')
+    lat = request.args.get('lat', type=float)
+    lon = request.args.get('lon', type=float)
     uid = session.get('user_id')
-    
+
     if uid:
         query = ShareReport.query.filter(
             db.or_(ShareReport.status == 'approved', ShareReport.user_id == uid)
@@ -981,27 +1074,87 @@ def api_share_reports():
     if town: query = query.filter_by(town=town)
     if village: query = query.filter_by(village=village)
     if category: query = query.filter_by(ai_category=category)
-    # 마당 행사 연결 후기만 조회 (?yard_event=ID)
-    yard_event = request.args.get('yard_event', type=int)
-    if yard_event:
-        query = query.filter(ShareReport.yard_event_id == yard_event)
 
-    reports = query.order_by(ShareReport.created_at.desc()).limit(50).all()
-    return jsonify([{
+    reports = query.limit(200).all() if (lat and lon) else query.order_by(ShareReport.created_at.desc()).limit(100).all()
+
+    import re as _re
+    from models import Note, YardPost
+    now = datetime.now()
+    review_notes = Note.query.filter(
+        Note.yard_event_id.isnot(None), Note.is_public == True
+    ).order_by(Note.created_at.desc()).limit(100).all()
+    review_items = []
+    for n in review_notes:
+        yp = YardPost.query.get(n.yard_event_id) if n.yard_event_id else None
+        if yp and yp.event_end and yp.event_end > now:
+            continue
+        m = _re.search(r'<img[^>]+src=["\']([^"\']+)["\']', n.content or '')
+        img = m.group(1) if m else ''
+        if not img:
+            continue
+        desc = _re.sub(r'<[^>]+>', '', n.content or '')[:200]
+        u = User.query.get(n.user_id) if n.user_id else None
+        review_items.append({
+            "id": f"n{n.id}", "title": n.title or "[행사후기]",
+            "description": desc,
+            "image_path": img, "extra_images": '', "drawing_path": None,
+            "video_path": None,
+            "latitude": n.latitude, "longitude": n.longitude,
+            "town": '', "village": '',
+            "address": n.address or (yp.event_place if yp else '') or '',
+            "author_name": (u.username if u else '') or '익명',
+            "author_email": _author_email(n.user_id),
+            "ai_category": "행사후기", "ai_summary": desc,
+            "ai_region_news": '', "ai_news_links": '',
+            "like_count": 0, "dislike_count": 0,
+            "status": "approved", "user_id": n.user_id or 0,
+            "auto_sent": False,
+            "created_at": n.created_at.strftime('%Y-%m-%d %H:%M') if n.created_at else None,
+            "event_date": yp.event_date.strftime('%Y-%m-%d %H:%M') if yp and yp.event_date else None,
+            "yard_event_id": n.yard_event_id,
+        })
+
+    share_items = [{
         "id": r.id, "title": r.title, "description": r.description,
-        "yard_event_id": r.yard_event_id,
         "image_path": r.image_path, "extra_images": r.extra_images or '',
         "drawing_path": r.drawing_path,
-        "video_path": r.video_path, "latitude": r.latitude,
-        "longitude": r.longitude, "town": r.town, "village": r.village,
-        "address": r.address, "author_name": r.author_name,
+        "video_path": r.video_path,
+        "latitude": r.latitude or (yp.latitude if (r.yard_event_id and (yp := YardPost.query.get(r.yard_event_id)) and yp.latitude) else None),
+        "longitude": r.longitude or (yp.longitude if (r.yard_event_id and (yp := YardPost.query.get(r.yard_event_id)) and yp.longitude) else None),
+        "town": r.town or '', "village": r.village or '',
+        "address": r.address or (yp.event_place if (r.yard_event_id and (yp := YardPost.query.get(r.yard_event_id))) else '') or '',
+        "author_name": r.author_name,
         "author_email": _author_email(r.user_id),
         "ai_category": r.ai_category, "ai_summary": r.ai_summary,
+        "ai_region_news": '', "ai_news_links": '',
         "like_count": r.like_count, "dislike_count": r.dislike_count,
         "status": r.status, "user_id": r.user_id,
+        "is_pending": r.status != 'approved',
         "auto_sent": getattr(r, 'auto_sent', False) or False,
-        "created_at": r.created_at.strftime('%Y-%m-%d %H:%M') if r.created_at else None
-    } for r in reports])
+        "created_at": r.created_at.strftime('%Y-%m-%d %H:%M') if r.created_at else None,
+        "event_date": (yp.event_date.strftime('%Y-%m-%d %H:%M') if yp and yp.event_date else None) if (r.yard_event_id and (yp := YardPost.query.get(r.yard_event_id))) else None,
+        "yard_event_id": r.yard_event_id,
+    } for r in reports]
+
+    all_items = share_items + review_items
+
+    if lat and lon:
+        in_yp = is_in_yangpyeong(lat, lon)
+        def _dist(item):
+            if item["latitude"] and item["longitude"]:
+                return haversine(lat, lon, item["latitude"], item["longitude"])
+            return 9999
+        if in_yp:
+            yp_towns = set(YANGPYEONG_VILLAGES.keys())
+            yp = sorted([i for i in all_items if i.get("town") in yp_towns], key=_dist)
+            outside = sorted([i for i in all_items if i.get("town") not in yp_towns], key=_dist)
+            all_items = yp + outside
+        else:
+            all_items = sorted(all_items, key=_dist)
+    else:
+        all_items.sort(key=lambda x: x.get("created_at") or "", reverse=True)
+
+    return jsonify(all_items[:50])
 
 @share_bp.route('/api/share/towns')
 def api_share_towns():
@@ -1259,7 +1412,11 @@ def share_mosaic(report_id):
 def api_share_detail(report_id):
     r = ShareReport.query.get_or_404(report_id)
     uid = session.get('user_id')
-    
+
+    # 비공개 글: 작성자 본인만 열람 가능
+    if r.status != 'approved' and r.user_id != uid:
+        return jsonify({"status": "error", "msg": "심사 중인 글입니다."}), 404
+
     # 가까운 공유
     nearby_shares = []
     if r.latitude and r.longitude and r.town:
@@ -1316,12 +1473,17 @@ def api_share_detail(report_id):
         menus = StoreMenu.query.filter_by(store_suggestion_id=r.store_suggestion_id).all()
         store_menus_data = [{"id": m.id, "name": m.name, "price": m.price, "sub_category": m.sub_category, "ai_generated": m.ai_generated} for m in menus]
 
+    # 마당 행사 연결: 위치/날짜 자동 보충
+    yp_event = YardPost.query.get(r.yard_event_id) if r.yard_event_id else None
+
     return jsonify({
         "id": r.id, "title": r.title, "description": r.description,
         "image_path": r.image_path, "extra_images": r.extra_images,
         "drawing_path": r.drawing_path, "video_path": r.video_path,
-        "latitude": r.latitude, "longitude": r.longitude,
-        "town": r.town, "village": r.village, "address": r.address,
+        "latitude": r.latitude or (yp_event.latitude if yp_event and yp_event.latitude else None),
+        "longitude": r.longitude or (yp_event.longitude if yp_event and yp_event.longitude else None),
+        "town": r.town or '', "village": r.village or '',
+        "address": r.address or (yp_event.event_place if yp_event else '') or '',
         "author_name": r.author_name, "user_id": r.user_id,
         "author_email": _author_email(r.user_id),
         "ai_category": r.ai_category, "ai_summary": r.ai_summary,
@@ -1332,6 +1494,7 @@ def api_share_detail(report_id):
         "auto_sent": getattr(r, 'auto_sent', False) or False,
         "rejected_at": r.rejected_at.strftime('%Y-%m-%d') if getattr(r, 'rejected_at', None) else None,
         "created_at": r.created_at.strftime('%Y-%m-%d %H:%M') if r.created_at else None,
+        "event_date": yp_event.event_date.strftime('%Y-%m-%d %H:%M') if yp_event and yp_event.event_date else None,
         "moderation_at": r.moderation_at.strftime('%Y-%m-%d') if r.moderation_at else None,
         "store_suggestion_id": r.store_suggestion_id,
         "store_menus": store_menus_data,
@@ -1691,9 +1854,9 @@ def api_menu_classify():
     if not motif_key:
         return jsonify({"labels": ["기타"]})
     try:
-        r = _requests.post('https://api-cbt.morphfactory.io/v1/chat/completions',
+        r = _requests.post('https://chat.motiftech.io/openapi/v1/chat/completions',
             headers={'Authorization': 'Bearer ' + motif_key, 'Content-Type': 'application/json'},
-            json={'model': 'motif/motif-3',
+            json={'model': 'motif-12.7b',
                   'messages': [{'role': 'user', 'content':
                     '다음 메뉴 항목 각각을 "식사","음료","디저트","기타" 중 하나로 분류하세요. '
                     '각 항목을 줄바꿈하고 가장 앞에 라벨을 붙이세요. 예시:\n식사: 된장찌개\n음료: 아메리카노\n디저트: 티라미수\n---\n' + text}],
@@ -1747,9 +1910,9 @@ def api_menu_search():
             ctx = '가게명: ' + store_name
             if store_info:
                 ctx += '\n주소: ' + store_info['address'] + '\n전화: ' + store_info['phone']
-            r = _requests.post('https://api-cbt.morphfactory.io/v1/chat/completions',
+            r = _requests.post('https://chat.motiftech.io/openapi/v1/chat/completions',
                 headers={'Authorization': 'Bearer ' + motif_key, 'Content-Type': 'application/json'},
-                json={'model': 'motif/motif-3',
+                json={'model': 'motif-12.7b',
                       'messages': [{'role': 'user', 'content':
                         '다음 가게의 대표 메뉴 5~10개를 JSON 배열로 출력하세요. '
                         '각 항목은 {"name": "메뉴명", "price": "가격(원)", "category": "식사/음료/디저트/기타"} 형식입니다. '

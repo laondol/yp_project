@@ -1,12 +1,17 @@
 from flask import Blueprint, render_template, request, redirect, url_for, jsonify, session, current_app, send_file
-from models import db, Message, User, Friend, PointHistory
-from datetime import datetime
+from models import db, Message, User, Friend, PointHistory, BlockedEmail, EmailRateLimit
+from datetime import datetime, timedelta
+import re
 
 message_bp = Blueprint('message', __name__)
 
 LETTER_COST = 10  # 편지 1通당 닢 10 차감
 INTERNAL_ADMIN_ID = 1  # 전체관리자 수신용 내부 ID (운영 db의 admin1)
 INTERNAL_AI_ADMIN_ID = 9  # AI관리자 발송용 내부 ID (herb2727)
+
+EMAIL_REGEX = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
+EMAIL_RATE_LIMIT_PER_MIN = 5  # 분당 최대 발송 건수
+EMAIL_RATE_LIMIT_PER_DAY = 30  # 일당 최대 발송 건수
 
 
 def _get_balance(uid):
@@ -276,46 +281,114 @@ def api_message_send():
     uid = session.get('user_id')
     if not uid: return jsonify({'status': 'error', 'msg': '로그인이 필요합니다.'}), 401
     ids_raw = request.form.get('receiver_ids') or request.form.get('receiver_id')
+    external_email = request.form.get('external_email', '').strip()
     subject = request.form.get('subject', '').strip()
     content = request.form.get('content', '').strip()
     reply_to_id_raw = request.form.get('reply_to_id')
     reply_to_id = int(reply_to_id_raw) if reply_to_id_raw and reply_to_id_raw.isdigit() else None
-    if not ids_raw or not content:
-        return jsonify({'status': 'error', 'msg': '받는 사람과 내용을 입력하세요.'}), 400
-    try:
-        ids = [int(x.strip()) for x in ids_raw.split(',') if x.strip()]
-    except ValueError:
-        return jsonify({'status': 'error', 'msg': '받는 사람 형식이 올바르지 않습니다.'}), 400
-    if not ids:
-        return jsonify({'status': 'error', 'msg': '받는 사람을 선택하세요.'}), 400
-    ids = list(dict.fromkeys(ids))          # 중복 제거
-    ids = [i for i in ids if i != uid]        # 자기 자신 제외
-    if not ids:
-        return jsonify({'status': 'error', 'msg': '받는 사람을 선택하세요.'}), 400
-    total = LETTER_COST * len(ids)
-    balance = _get_balance(uid)
-    if balance < total:
-        return jsonify({'status': 'error', 'msg': f'닢이 부족합니다. (현재 {balance}닢, 필요 {total}닢)'}), 400
+
+    has_internal = bool(ids_raw and ids_raw.strip())
+    has_external = bool(external_email)
+
+    if not has_internal and not has_external:
+        return jsonify({'status': 'error', 'msg': '받는 사람 또는 이메일을 입력하세요.'}), 400
+    if not content:
+        return jsonify({'status': 'error', 'msg': '내용을 입력하세요.'}), 400
+
+    # ── 외부 이메일: 스팸 필터 ──
+    if has_external:
+        if not EMAIL_REGEX.match(external_email):
+            return jsonify({'status': 'error', 'msg': '올바른 이메일 형식이 아닙니다.'}), 400
+        if BlockedEmail.query.filter_by(email=external_email).first():
+            return jsonify({'status': 'error', 'msg': '차단된 이메일입니다.'}), 400
+        # 분당 발송 제한
+        one_min_ago = datetime.now() - timedelta(minutes=1)
+        recent_count = EmailRateLimit.query.filter(
+            EmailRateLimit.user_id == uid,
+            EmailRateLimit.sent_at >= one_min_ago
+        ).count()
+        if recent_count >= EMAIL_RATE_LIMIT_PER_MIN:
+            return jsonify({'status': 'error', 'msg': f'분당 {EMAIL_RATE_LIMIT_PER_MIN}건까지만 발송 가능합니다.'}), 429
+        # 일당 발송 제한
+        today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        day_count = EmailRateLimit.query.filter(
+            EmailRateLimit.user_id == uid,
+            EmailRateLimit.sent_at >= today_start
+        ).count()
+        if day_count >= EMAIL_RATE_LIMIT_PER_DAY:
+            return jsonify({'status': 'error', 'msg': f'일일 {EMAIL_RATE_LIMIT_PER_DAY}건 발송 제한을 초과했습니다.'}), 429
+
+    # ── 내부 편지 처리 ──
+    ids = []
     sent = 0
-    for rid in ids:
-        receiver = User.query.get(rid)
-        if not receiver:
-            continue
-        if not _deduct_points(uid, LETTER_COST, f'편지 발송 → {rid}'):
-            continue
-        msg = Message(
+    if has_internal:
+        try:
+            ids = [int(x.strip()) for x in ids_raw.split(',') if x.strip()]
+        except ValueError:
+            return jsonify({'status': 'error', 'msg': '받는 사람 형식이 올바르지 않습니다.'}), 400
+        ids = list(dict.fromkeys(ids))
+        ids = [i for i in ids if i != uid]
+        if ids:
+            total = LETTER_COST * len(ids)
+            balance = _get_balance(uid)
+            if balance < total:
+                return jsonify({'status': 'error', 'msg': f'屃이 부족합니다. (현재 {balance}屃, 필요 {total}屃)'}), 400
+            for rid in ids:
+                receiver = User.query.get(rid)
+                if not receiver:
+                    continue
+                if not _deduct_points(uid, LETTER_COST, f'편지 발송 → {rid}'):
+                    continue
+                msg = Message(
+                    sender_id=uid,
+                    sender_name=session.get('real_name', session['username']),
+                    sender_role=session.get('role', 'user'),
+                    receiver_id=receiver.id,
+                    subject=subject,
+                    content=content,
+                    letter_type='normal',
+                    reply_to_id=reply_to_id,
+                )
+                db.session.add(msg)
+                sent += 1
+            db.session.commit()
+
+    # ── 외부 이메일 발송 ──
+    email_sent = False
+    if has_external:
+        from services.email_service import EmailService
+        sender_name = session.get('real_name', session.get('username', '함께사는양평'))
+        email_subject = subject or f'[함께사는양평] {sender_name}님의 편지'
+        email_body = (
+            f"보낸 사람: {sender_name}\n"
+            f"제목: {subject or '(제목 없음)'}\n"
+            f"{'─' * 40}\n\n"
+            f"{content}\n\n"
+            f"{'─' * 40}\n"
+            f"함께사는양평 편지함에서 확인하세요.\n"
+            f"{current_app.config.get('SITE_URL', 'https://unocum.kr')}/message/inbox"
+        )
+        # 이메일 발송 시 Message 레코드도 저장 (발신 기록)
+        sender_user = User.query.get(uid)
+        msg_ext = Message(
             sender_id=uid,
-            sender_name=session.get('real_name', session['username']),
+            sender_name=sender_name,
             sender_role=session.get('role', 'user'),
-            receiver_id=receiver.id,
+            receiver_id=uid,  # 발신자가 수신자 기록 (보낸 편지함용)
             subject=subject,
             content=content,
             letter_type='normal',
             reply_to_id=reply_to_id,
+            external_email=external_email,
+            email_status='sent' if EmailService.send(external_email, email_subject, email_body) else 'failed',
         )
-        db.session.add(msg)
-        sent += 1
-    db.session.commit()
+        db.session.add(msg_ext)
+        db.session.commit()
+        email_sent = msg_ext.email_status == 'sent'
+        # 발송 빈도 기록
+        rate = EmailRateLimit(user_id=uid)
+        db.session.add(rate)
+        db.session.commit()
 
     # 회신/답신 시 원문 자동 읽음 처리
     if reply_to_id:
@@ -324,9 +397,14 @@ def api_message_send():
             orig.is_read = True
             db.session.commit()
 
-    if sent == 0:
+    msgs = []
+    if sent > 0:
+        msgs.append(f'{sent}명에게 편지가 전송되었습니다.')
+    if has_external:
+        msgs.append(f'외부 이메일({external_email}) {"발송 완료" if email_sent else "발송 실패"}')
+    if not msgs:
         return jsonify({'status': 'error', 'msg': '전송할 대상을 찾지 못했습니다.'}), 400
-    return jsonify({'status': 'success', 'msg': f'{sent}명에게 편지가 전송되었습니다.'})
+    return jsonify({'status': 'success', 'msg': ' '.join(msgs)})
 
 import os as _os
 import uuid
@@ -796,4 +874,44 @@ def admin_reject_pending(msg_id):
     msg.rejection_reason = reason
     db.session.commit()
     
+    return jsonify({'success': True})
+
+
+# ── 차단 이메일 관리 (관리자) ──
+
+@message_bp.route('/api/admin/blocked-emails')
+def api_blocked_emails_list():
+    if session.get('role') not in ('admin', 'leader'):
+        return jsonify({'error': 'forbidden'}), 403
+    items = BlockedEmail.query.order_by(BlockedEmail.created_at.desc()).all()
+    return jsonify([{
+        'id': b.id, 'email': b.email, 'reason': b.reason,
+        'created_at': b.created_at.isoformat() if b.created_at else None,
+    } for b in items])
+
+@message_bp.route('/api/admin/blocked-emails', methods=['POST'])
+def api_blocked_email_add():
+    if session.get('role') not in ('admin', 'leader'):
+        return jsonify({'error': 'forbidden'}), 403
+    data = request.get_json() or {}
+    email = (data.get('email') or '').strip().lower()
+    reason = (data.get('reason') or '').strip()
+    if not email:
+        return jsonify({'error': '이메일을 입력하세요'}), 400
+    if BlockedEmail.query.filter_by(email=email).first():
+        return jsonify({'error': '이미 차단된 이메일입니다'}), 409
+    b = BlockedEmail(email=email, reason=reason)
+    db.session.add(b)
+    db.session.commit()
+    return jsonify({'success': True, 'id': b.id})
+
+@message_bp.route('/api/admin/blocked-emails/<int:bid>', methods=['DELETE'])
+def api_blocked_email_delete(bid):
+    if session.get('role') not in ('admin', 'leader'):
+        return jsonify({'error': 'forbidden'}), 403
+    b = BlockedEmail.query.get(bid)
+    if not b:
+        return jsonify({'error': 'not found'}), 404
+    db.session.delete(b)
+    db.session.commit()
     return jsonify({'success': True})

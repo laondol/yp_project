@@ -3,6 +3,7 @@ import os
 import re
 from flask import Blueprint, request, jsonify, session, current_app
 from models import db, YardPost, YardComment, YardOrg, YardSchedule, VillageEvent, User
+from route_modules.common import author_email_for
 from datetime import datetime, timedelta
 
 yard_bp = Blueprint('yard_bp', __name__)
@@ -280,18 +281,27 @@ def api_yard_list():
     for p in YardPost.query.filter_by(is_active=True, is_approved=True).order_by(YardPost.created_at.desc()).limit(100).all():
         # 후기 모드 판정: 1차 일정 + 모든 추가 일정이 지났으면 지나간 행사
         scheds = _post_schedules(p.id)
-        primary_past = bool(p.event_date and p.event_date < now)
+        # is_past: 종료시각(event_end) 기준, 추가 일정이 남아있으면 아직 진행중
+        end_dt = p.event_end or p.event_date
+        primary_past = bool(end_dt and end_dt < now)
         extra_ongoing = any(
             s.get('event_start_iso') and _dt.fromisoformat(s['event_start_iso']) >= now
             for s in scheds
         )
         is_past = primary_past and not extra_ongoing
+        # event_started: 시작시각 기준 (후기 버튼 표시용)
+        event_started = bool(p.event_date and p.event_date < now)
         dist_km = None
         if has_gps and p.latitude and p.longitude:
             try:
                 dist_km = round(haversine(gps_lat, gps_lng, p.latitude, p.longitude), 1)
             except Exception:
                 dist_km = None
+        # 작성자 마스킹: author_name이 회원 본인 이름일 때만 마스킹 이메일 제공 (SNS 출처명은 유지)
+        _pau = User.query.get(p.created_by) if p.created_by else None
+        _pamail = ''
+        if _pau and (p.author_name or '') in ((_pau.username or ''), (_pau.real_name or ''), ''):
+            _pamail = author_email_for(_pau.id)
         items.append({
             'id': f'p{p.id}', 'db_id': p.id,
             'kind': 'post',
@@ -300,6 +310,8 @@ def api_yard_list():
             'source_url': p.source_url or '',
             'reserve_url': p.reserve_url or '',
             'author_name': p.author_name or '',
+            'author_email': _pamail,
+            'user_id': p.created_by,
             'like_count': p.like_count or 0, 'dislike_count': p.dislike_count or 0,
             'event_date_display': _event_display(p),
             'event_place': p.event_place or '',
@@ -319,6 +331,7 @@ def api_yard_list():
             'repeat_next_list': _next_repeat_dates(p),
             'extra_schedules': scheds,
             'is_past': is_past,
+            'event_started': event_started,
             'review_count': _yard_review_count(p.id),
             'distance_km': dist_km,
             'created_at': p.created_at.isoformat() if p.created_at else '',
@@ -816,6 +829,7 @@ def api_yard_get(post_id):
         uname = (user.name or user.username) if user else (c.author_name or '익명')
         comments.append({
             'id': c.id, 'user_id': c.user_id, 'author_name': uname or '익명',
+            'author_email': author_email_for(c.user_id),
             'content': c.content or '', 'image_path': c.image_path or '',
             'link_url': c.link_url or '',
             'like_count': c.like_count or 0, 'dislike_count': c.dislike_count or 0,
@@ -910,6 +924,7 @@ def api_yard_comment(post_id):
     return jsonify({
         "status": "success", "id": c.id,
         "comment": {'id': c.id, 'user_id': c.user_id, 'author_name': c.author_name,
+                    'author_email': author_email_for(c.user_id),
                     'content': c.content, 'image_path': c.image_path, 'link_url': c.link_url,
                     'like_count': 0, 'dislike_count': 0,
                     'created_at': c.created_at.isoformat() if c.created_at else ''},

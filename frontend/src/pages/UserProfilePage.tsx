@@ -265,7 +265,7 @@ export default function UserProfilePage() {
                         👥 벗채팅
                       </button>
                       <button className="btn btn-sm btn-outline-secondary"
-                        onClick={() => openPopup('/schedule2', 'schedPopup', 'width=700,height=700,left=100,top=50')}>
+                        onClick={() => openPopup('/schedule2?popup=1', 'schedPopup', 'width=550,height=550,left=100,top=50')}>
                         📅 일정
                       </button>
                     </div>

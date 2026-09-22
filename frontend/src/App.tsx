@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { AuthProvider } from './contexts/AuthContext'
 import NavBar from './components/NavBar'
 import ProtectedRoute from './components/ProtectedRoute'
+import LegalLayout from './components/LegalLayout'
 import RoleRoute from './components/RoleRoute'
 import ShareList from './pages/ShareList'
 import ShareDetail from './pages/ShareDetail'
@@ -32,6 +33,8 @@ import FriendsList from './pages/FriendsList'
 import FriendsMap from './pages/FriendsMap'
 import MessageInbox from './pages/MessageInbox'
 import MessageSend from './pages/MessageSend'
+import DiscussionListPage from './pages/DiscussionListPage'
+import DiscussionRoomPage from './pages/DiscussionRoomPage'
 import ConstructionPage from './pages/ConstructionPage'
 import SchedulePage from './pages/SchedulePage'
 import AdminDashboard from './pages/AdminDashboard'
@@ -43,6 +46,7 @@ import YardEditPage from './pages/YardEditPage'
 import AdminYard from './pages/AdminYard'
 import AdminShareReports from './pages/AdminShareReports'
 import AdminStores from './pages/AdminStores'
+import AdminStoreReviews from './pages/AdminStoreReviews'
 import AdminAlerts from './pages/AdminAlerts'
 import AdminConstructionNotices from './pages/AdminConstructionNotices'
 import AdminAiChat from './pages/AdminAiChat'
@@ -121,12 +125,22 @@ function Footer() {
   const host = window.location.hostname
   const name = host === 'localhost' || host === '127.0.0.1' ? '함께사는로컬'
     : host === 'test.unocum.kr' ? '함께사는테스트' : '함께사는양평'
+  const path = window.location.pathname
+  const isLegalPage = path.startsWith('/legal') || path.startsWith('/service/legal')
   return (
     <footer className="text-center py-4 border-top" style={{ background: '#f8f9fa' }}>
       <div className="container">
-        <span className="fw-bold text-success">{name}</span>
-        <span className="text-muted mx-2">|</span>
-        <a href="mailto:admin@unocum.kr" className="text-muted text-decoration-none small">admin@unocum.kr</a>
+        {isLegalPage ? (
+          <span className="text-muted small">
+            {name} : 이훈노무사법률사무소 : All Rights Reserved
+          </span>
+        ) : (
+          <>
+            <span className="fw-bold text-success">{name}</span>
+            <span className="text-muted mx-2">|</span>
+            <a href="mailto:admin@unocum.kr" className="text-muted text-decoration-none small">admin@unocum.kr</a>
+          </>
+        )}
       </div>
     </footer>
   )
@@ -145,7 +159,7 @@ export default function App() {
         {isPopup && <PopupBar />}
         {!isPopup && <NavBar />}
         {!isPopup && <FloatingMemo />}
-        <div className={isPopup ? '' : 'container pb-5'}>
+        <div className={isPopup ? '' : 'container pb-5'} style={isPopup ? { paddingTop: 5, paddingBottom: 5, paddingLeft: 10, paddingRight: 10 } : undefined}>
           <Routes>
             {/* Public: intro / auth / share (공유마당) */}
             <Route path="/" element={<IntroPage />} />
@@ -173,8 +187,8 @@ export default function App() {
             <Route path="/proposal" element={<ProposalPage />} />
             <Route path="/all-proposals" element={<AllProposalsPage />} />
             <Route path="/main" element={<MainPage />} />
-            <Route path="/service/legal" element={<ServiceLegalPage />} />
-            <Route path="/service/legal/edit" element={<ProtectedRoute><ServiceLegalEditPage /></ProtectedRoute>} />
+            <Route path="/service/legal" element={<LegalLayout><ServiceLegalPage /></LegalLayout>} />
+            <Route path="/service/legal/edit" element={<ProtectedRoute><LegalLayout><ServiceLegalEditPage /></LegalLayout></ProtectedRoute>} />
             <Route path="/service/psycho" element={<ServicePsychoPage />} />
             <Route path="/service/psycho/edit" element={<ProtectedRoute><ServicePsychoEditPage /></ProtectedRoute>} />
             <Route path="/service/ramp" element={<ServiceRampPage />} />
@@ -208,16 +222,16 @@ export default function App() {
             <Route path="/world-news" element={<NewsTabsPage />} />
             <Route path="/yp-news" element={<NewsTabsPage />} />
             <Route path="/kr-yp-news" element={<NewsTabsPage />} />
-            <Route path="/legal/issues/admin" element={<ProtectedRoute><LegalIssuesAdminPage /></ProtectedRoute>} />
-            <Route path="/legal/issues/write" element={<ProtectedRoute><LegalIssueWritePage /></ProtectedRoute>} />
-            <Route path="/legal/issues/:postId" element={<ProtectedRoute><LegalIssueDetailPage /></ProtectedRoute>} />
-            <Route path="/legal/issues" element={<ProtectedRoute><LegalIssuesPage /></ProtectedRoute>} />
-            <Route path="/legal" element={<ProtectedRoute><LegalList /></ProtectedRoute>} />
-            <Route path="/legal/write" element={<ProtectedRoute><LegalWrite /></ProtectedRoute>} />
-            <Route path="/legal/schedule" element={<ProtectedRoute><LegalSchedule /></ProtectedRoute>} />
-            <Route path="/legal/edit/:id" element={<ProtectedRoute><LegalWrite /></ProtectedRoute>} />
-            <Route path="/legal/:id" element={<ProtectedRoute><LegalDetail /></ProtectedRoute>} />
-            <Route path="/legal/appointment/edit/:id" element={<ProtectedRoute><LegalAppointmentEditPage /></ProtectedRoute>} />
+            <Route path="/legal/issues/admin" element={<ProtectedRoute><LegalLayout><LegalIssuesAdminPage /></LegalLayout></ProtectedRoute>} />
+            <Route path="/legal/issues/write" element={<ProtectedRoute><LegalLayout><LegalIssueWritePage /></LegalLayout></ProtectedRoute>} />
+            <Route path="/legal/issues/:postId" element={<ProtectedRoute><LegalLayout><LegalIssueDetailPage /></LegalLayout></ProtectedRoute>} />
+            <Route path="/legal/issues" element={<ProtectedRoute><LegalLayout><LegalIssuesPage /></LegalLayout></ProtectedRoute>} />
+            <Route path="/legal/write" element={<ProtectedRoute><LegalLayout><LegalWrite /></LegalLayout></ProtectedRoute>} />
+            <Route path="/legal/schedule" element={<ProtectedRoute><LegalLayout><LegalSchedule /></LegalLayout></ProtectedRoute>} />
+            <Route path="/legal/edit/:id" element={<ProtectedRoute><LegalLayout><LegalWrite /></LegalLayout></ProtectedRoute>} />
+            <Route path="/legal/:id" element={<ProtectedRoute><LegalLayout><LegalDetail /></LegalLayout></ProtectedRoute>} />
+            <Route path="/legal/appointment/edit/:id" element={<ProtectedRoute><LegalLayout><LegalAppointmentEditPage /></LegalLayout></ProtectedRoute>} />
+            <Route path="/legal" element={<ProtectedRoute><LegalLayout><LegalList /></LegalLayout></ProtectedRoute>} />
             <Route path="/psycho/admin/appointments" element={<ProtectedRoute><PsychoAdminAppointmentsPage /></ProtectedRoute>} />
             <Route path="/psycho/admin" element={<ProtectedRoute><PsychoAdminPage /></ProtectedRoute>} />
             <Route path="/psycho" element={<ProtectedRoute><PsychoList /></ProtectedRoute>} />
@@ -248,6 +262,8 @@ export default function App() {
             <Route path="/message/send/global" element={<ProtectedRoute><MessageSend /></ProtectedRoute>} />
             <Route path="/message/send/admin" element={<ProtectedRoute><MessageSend /></ProtectedRoute>} />
             <Route path="/message/send/village_leader" element={<ProtectedRoute><MessageSend /></ProtectedRoute>} />
+            <Route path="/discussion" element={<ProtectedRoute><DiscussionListPage /></ProtectedRoute>} />
+            <Route path="/discussion/:id" element={<ProtectedRoute><DiscussionRoomPage /></ProtectedRoute>} />
             <Route path="/message/admin/pending" element={<ProtectedRoute><AdminPendingLetters /></ProtectedRoute>} />
             <Route path="/construction" element={<ConstructionPage />} />
             <Route path="/construction/store/:storeName" element={<StoreDetailPage />} />
@@ -267,6 +283,7 @@ export default function App() {
             <Route path="/admin/news/recommendations" element={<ProtectedRoute><AdminNewsRecommendations /></ProtectedRoute>} />
             <Route path="/admin/share-reports" element={<ProtectedRoute><AdminShareReports /></ProtectedRoute>} />
             <Route path="/admin/stores" element={<ProtectedRoute><AdminStores /></ProtectedRoute>} />
+            <Route path="/admin/store-reviews" element={<ProtectedRoute><AdminStoreReviews /></ProtectedRoute>} />
             <Route path="/admin/stores/new" element={<ProtectedRoute><AdminStoreEdit /></ProtectedRoute>} />
             <Route path="/admin/stores/edit/:id" element={<ProtectedRoute><AdminStoreEdit /></ProtectedRoute>} />
             <Route path="/admin/alerts" element={<ProtectedRoute><AdminAlerts /></ProtectedRoute>} />

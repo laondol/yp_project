@@ -328,6 +328,9 @@ class Message(db.Model):
     original_receiver_type = db.Column(db.String(20))  # 'global', 'village'
     moderation_status = db.Column(db.String(20), default='approved')  # 'approved', 'pending', 'rejected'
     rejection_reason = db.Column(db.Text)
+    # 외부 이메일 발송 관련
+    external_email = db.Column(db.String(100), nullable=True)  # 외부 수신자 이메일
+    email_status = db.Column(db.String(20), default='none')  # 'none', 'sent', 'failed'
 
 class ShareReport(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -398,6 +401,33 @@ class StoreInfo(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.now)
 
 
+class StoreInfoVote(db.Model):
+    """가게 사진 맞/틀림 투표 (사진별)"""
+    __tablename__ = 'store_info_vote'
+    id = db.Column(db.Integer, primary_key=True)
+    photo_id = db.Column(db.Integer, db.ForeignKey('share_report.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    vote_type = db.Column(db.String(10), nullable=False)  # 'up' or 'down'
+    comment = db.Column(db.String(200))  # 틀린정보 시 실제 가게명/설명
+    cost = db.Column(db.Integer, default=1)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    __table_args__ = (db.UniqueConstraint('photo_id', 'user_id', name='uq_photo_vote_user'),)
+
+
+class StoreInfoReview(db.Model):
+    """가게 사진 정보 수정 요청 (관리자 검토 대기)"""
+    __tablename__ = 'store_info_review'
+    id = db.Column(db.Integer, primary_key=True)
+    photo_id = db.Column(db.Integer, db.ForeignKey('share_report.id'), nullable=False)
+    reporter_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    comment = db.Column(db.String(200), nullable=False)  # 제안된 가게명/설명
+    status = db.Column(db.String(20), default='pending')  # pending / approved / rejected
+    reviewed_by = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    reviewed_at = db.Column(db.DateTime, nullable=True)
+    reward_given = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+
 class StoreSuggestion(db.Model):
     """회원이 제안한 가게명 + 투표(경쟁 요소). place_id(카카오) 기준으로 묶음."""
     id = db.Column(db.Integer, primary_key=True)
@@ -420,6 +450,17 @@ class StoreSuggestion(db.Model):
                         .filter_by(place_id=self.place_id).group_by(StoreSuggestion.name)\
                         .order_by(func.sum(StoreSuggestion.vote_count).desc()).first()
         return row[0] if row else self.name
+
+
+class StoreNameVote(db.Model):
+    """가게 이름 추천 투표 (위치 기반, 동일 좌표 반경 그룹)"""
+    __tablename__ = 'store_name_vote'
+    id = db.Column(db.Integer, primary_key=True)
+    group_key = db.Column(db.String(50), nullable=False, index=True)  # "lat5_lng5" 반올림 키
+    name = db.Column(db.String(200), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    __table_args__ = (db.UniqueConstraint('group_key', 'name', 'user_id', name='uq_vote_group_name_user'),)
 
 
 class StoreMenu(db.Model):
@@ -1102,6 +1143,12 @@ class BlockedEmail(db.Model):
     reason = db.Column(db.String(200))
     created_at = db.Column(db.DateTime, default=datetime.now)
 
+class EmailRateLimit(db.Model):
+    __tablename__ = 'email_rate_limit'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    sent_at = db.Column(db.DateTime, default=datetime.now)
+
 class TempEmailVerify(db.Model):
     __tablename__ = 'temp_email_verify'
     id = db.Column(db.Integer, primary_key=True)
@@ -1332,3 +1379,106 @@ class FacilityReport(db.Model):
 
     facility = db.relationship('PublicFacility', backref='reports')
     user = db.relationship('User', backref='facility_reports')
+
+
+# ── 토론방 관련 모델 ──
+
+class DiscussionRoom(db.Model):
+    """토론방"""
+    __tablename__ = 'discussion_room'
+    id = db.Column(db.Integer, primary_key=True)
+    topic = db.Column(db.String(200), nullable=False)
+    description = db.Column(db.Text, default='')
+    created_by = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    status = db.Column(db.String(20), default='open')  # open, closed
+    letter_root_id = db.Column(db.Integer, db.ForeignKey('message.id'), nullable=True)
+    end_at = db.Column(db.DateTime, nullable=True)
+    summary_text = db.Column(db.Text, default='')
+    summary_confirmed = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+    creator = db.relationship('User', backref='created_discussions')
+    messages = db.relationship('DiscussionMessage', backref='room', lazy='dynamic')
+    participants = db.relationship('DiscussionParticipant', backref='room', lazy='dynamic')
+
+
+class DiscussionParticipant(db.Model):
+    """토론방 참여자"""
+    __tablename__ = 'discussion_participant'
+    id = db.Column(db.Integer, primary_key=True)
+    room_id = db.Column(db.Integer, db.ForeignKey('discussion_room.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    role = db.Column(db.String(20), default='member')  # creator, member
+    invited_via = db.Column(db.String(20), default='friend_select')  # friend_select, link, thread
+    joined_at = db.Column(db.DateTime, default=datetime.now)
+
+    user = db.relationship('User', backref='discussion_participations')
+
+    __table_args__ = (
+        db.UniqueConstraint('room_id', 'user_id', name='uq_discussion_participant'),
+    )
+
+
+class DiscussionMessage(db.Model):
+    """토론 메시지 (이미지/파일 첨부 가능, 회신/답신 스레드)"""
+    __tablename__ = 'discussion_message'
+    id = db.Column(db.Integer, primary_key=True)
+    room_id = db.Column(db.Integer, db.ForeignKey('discussion_room.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    content = db.Column(db.Text, nullable=False)
+    content_type = db.Column(db.String(20), default='text')  # text, image, file
+    reply_to_id = db.Column(db.Integer, db.ForeignKey('discussion_message.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+    user = db.relationship('User', backref='discussion_messages')
+    replies = db.relationship('DiscussionMessage', backref=db.backref('parent', remote_side=[id]), lazy='dynamic')
+
+
+class DiscussionVote(db.Model):
+    """토론 메시지 좋아요/싫어요"""
+    __tablename__ = 'discussion_vote'
+    id = db.Column(db.Integer, primary_key=True)
+    message_id = db.Column(db.Integer, db.ForeignKey('discussion_message.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    vote = db.Column(db.String(10), nullable=False)  # like, dislike
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+    message = db.relationship('DiscussionMessage', backref='votes')
+
+    __table_args__ = (
+        db.UniqueConstraint('message_id', 'user_id', name='uq_discussion_vote'),
+    )
+
+
+class DiscussionProposal(db.Model):
+    """토론 제안 (편지 스레드에서 토론 개설 제안)"""
+    __tablename__ = 'discussion_proposal'
+    id = db.Column(db.Integer, primary_key=True)
+    thread_root_id = db.Column(db.Integer, db.ForeignKey('message.id'), nullable=False)
+    proposed_by = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    required_agree_count = db.Column(db.Integer, default=2)
+    status = db.Column(db.String(20), default='voting')  # voting, approved, rejected, expired
+    voting_end_at = db.Column(db.DateTime, nullable=True)
+    room_id = db.Column(db.Integer, db.ForeignKey('discussion_room.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+    proposer = db.relationship('User', backref='discussion_proposals')
+    thread_root = db.relationship('Message', backref='discussion_proposals')
+    room = db.relationship('DiscussionRoom', backref='proposal')
+
+
+class DiscussionProposalVote(db.Model):
+    """토론 제안 투표"""
+    __tablename__ = 'discussion_proposal_vote'
+    id = db.Column(db.Integer, primary_key=True)
+    proposal_id = db.Column(db.Integer, db.ForeignKey('discussion_proposal.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    vote = db.Column(db.String(10), nullable=False)  # agree, disagree
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+    proposal = db.relationship('DiscussionProposal', backref='votes')
+
+    __table_args__ = (
+        db.UniqueConstraint('proposal_id', 'user_id', name='uq_discussion_proposal_vote'),
+    )

@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { formatKST } from '../utils/format'
+import ShareReport from './ShareReport'
+import ShareEdit from './ShareEdit'
+import AuthorName from '../components/AuthorName'
+import { useAuth } from '../contexts/AuthContext'
 
 interface YardExtraSchedule {
   id: number; display: string
@@ -12,6 +16,7 @@ interface YardItem {
   title: string; content: string
   source_type?: string; platform?: string
   source_url?: string; reserve_url?: string; author_name?: string
+  author_email?: string; user_id?: number
   contact?: string
   like_count?: number; dislike_count?: number
   event_date?: string; event_date_display?: string; event_date_iso?: string; event_end_iso?: string
@@ -24,25 +29,29 @@ interface YardItem {
   repeat_next_list?: string[]
   extra_schedules?: YardExtraSchedule[]
   is_past?: boolean
+  event_started?: boolean
   review_count?: number
+  latitude?: number; longitude?: number
   distance_km?: number | null
   created_at: string
   category?: string  // event(행사/소식), bid(입찰/공고)
 }
 
 interface YardComment {
-  id: number; user_id: number; author_name: string; content: string
+  id: number; user_id: number; author_name: string; content: string; author_email?: string
   image_path?: string; link_url?: string
   like_count?: number; dislike_count?: number; created_at: string
 }
 
 export default function YardPage() {
   const navigate = useNavigate()
+  const { user: authUser } = useAuth()
   const [items, setItems] = useState<YardItem[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('all')
   const [tab, setTab] = useState<'event' | 'bid'>('event')
   const [me, setMe] = useState<{ id: number } | null>(null)
+  const myId = me?.id ?? (authUser as any)?.id ?? null
 
   // 댓글 모달
   const [commentPost, setCommentPost] = useState<YardItem | null>(null)
@@ -53,6 +62,112 @@ export default function YardPage() {
   const [commentImage, setCommentImage] = useState<File | null>(null)
   const [sending, setSending] = useState(false)
   const [addedSchedule, setAddedSchedule] = useState<Record<string, boolean>>({})
+  // 후기 모달
+  const [reviewItem, setReviewItem] = useState<YardItem | null>(null)
+  const [reviewPhotos, setReviewPhotos] = useState<any[]>([])
+  const [reviewLoading, setReviewLoading] = useState(false)
+  const [reviewView, setReviewView] = useState<'list' | 'detail'>('list')
+  const [selectedPhoto, setSelectedPhoto] = useState<any>(null)
+  const [detailData, setDetailData] = useState<any>(null)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [reviewCommentText, setReviewCommentText] = useState('')
+  const [reviewReplyTo, setReviewReplyTo] = useState<number | null>(null)
+  const [reviewSending, setReviewSending] = useState(false)
+  const [reviewWrite, setReviewWrite] = useState(false)
+  const [reviewEdit, setReviewEdit] = useState(false)
+
+  const openReviewModal = (item: YardItem) => {
+    setReviewItem(item)
+    setReviewView('list')
+    setSelectedPhoto(null)
+    setDetailData(null)
+    setReviewWrite(false)
+    setReviewEdit(false)
+    setReviewLoading(true)
+    setReviewPhotos([])
+    const params = new URLSearchParams()
+    if (item.latitude) params.set('lat', String(item.latitude))
+    if (item.longitude) params.set('lon', String(item.longitude))
+    fetch(`/api/share/reports?${params.toString()}`)
+      .then(r => r.json())
+      .then((data: any[]) => {
+        const filtered = data.filter((p: any) => {
+          if (typeof p.id === 'string') return false
+          const isLinked = p.yard_event_id === item.db_id
+          if (isLinked) return true
+          if (!item.latitude || !item.longitude || !p.latitude || !p.longitude) return false
+          const R = 6371
+          const dLat = (p.latitude - item.latitude) * Math.PI / 180
+          const dLon = (p.longitude - item.longitude) * Math.PI / 180
+          const a = Math.sin(dLat / 2) ** 2 + Math.cos(item.latitude * Math.PI / 180) * Math.cos(p.latitude * Math.PI / 180) * Math.sin(dLon / 2) ** 2
+          return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)) <= 0.5
+        })
+        filtered.sort((a: any, b: any) => (b.created_at || '').localeCompare(a.created_at || ''))
+        setReviewPhotos(filtered)
+      })
+      .catch(() => setReviewPhotos([]))
+      .finally(() => setReviewLoading(false))
+  }
+
+  const openReviewDetail = (photo: any) => {
+    setSelectedPhoto(photo)
+    setReviewView('detail')
+    setDetailLoading(true)
+    setDetailData(null)
+    setReviewCommentText('')
+    setReviewReplyTo(null)
+    fetch(`/api/share/report/${photo.id}`)
+      .then(r => r.json())
+      .then(d => setDetailData(d))
+      .catch(() => {})
+      .finally(() => setDetailLoading(false))
+  }
+
+  const voteShare = (reportId: number, action: 'like' | 'dislike') => {
+    if (!me) { alert('로그인 후 이용하세요.'); return }
+    if (!confirm(action === 'like' ? '좋아요 하시겠습니까?' : '나빠요 하시겠습니까?')) return
+    fetch(`/share-report/${action}/${reportId}`, { method: 'POST' })
+      .then(r => r.json())
+      .then(d => {
+        if (d.status === 'success') {
+          setDetailData((prev: any) => prev ? { ...prev, like_count: d.likes ?? prev.like_count, dislike_count: d.dislikes ?? prev.dislike_count } : prev)
+          setReviewPhotos((prev: any[]) => prev.map(p => p.id === reportId ? { ...p, like_count: d.likes ?? p.like_count, dislike_count: d.dislikes ?? p.dislike_count } : p))
+        } else alert(d.msg || '오류')
+      })
+      .catch(() => alert('오류가 발생했습니다.'))
+  }
+
+  const submitShareComment = async () => {
+    if (!me) { alert('로그인 후 이용하세요.'); return }
+    if (!detailData || !reviewCommentText.trim()) return
+    setReviewSending(true)
+    try {
+      const fd = new FormData()
+      fd.append('content', reviewCommentText.trim())
+      if (reviewReplyTo) fd.append('parent_id', String(reviewReplyTo))
+      const res = await fetch(`/share/comment/${detailData.id}`, { method: 'POST', body: fd })
+      const data = await res.json()
+      if (data.status === 'success') {
+        setReviewCommentText(''); setReviewReplyTo(null)
+        const rRes = await fetch(`/api/share/report/${detailData.id}`)
+        setDetailData(await rRes.json())
+      } else alert(data.msg || '등록 실패')
+    } catch { alert('댓글 등록 오류') }
+    setReviewSending(false)
+  }
+
+  const deleteShareComment = async (commentId: number) => {
+    if (!confirm('댓글을 삭제하시겠습니까?')) return
+    if (!detailData) return
+    try {
+      const res = await fetch(`/share/comment/delete/${commentId}`, { method: 'POST' })
+      const data = await res.json()
+      if (data.status === 'success') {
+        const rRes = await fetch(`/api/share/report/${detailData.id}`)
+        setDetailData(await rRes.json())
+      } else alert(data.msg || '삭제 실패')
+    } catch { alert('삭제 오류') }
+  }
 
   const load = (lat?: number, lng?: number) => {
     setLoading(true)
@@ -76,14 +191,13 @@ export default function YardPage() {
   }, [])
 
   const filtered = items.filter(i => {
-    // 탭 필터 (행사/입찰)
     if (tab === 'bid') return i.category === 'bid'
-    // 행사 탭에서는 입찰 제외
     if (i.category === 'bid') return false
-    // 하위 필터
-    return filter === 'all' ? true :
+    return filter === 'event' ? (i.category === 'event' || i.kind === 'event') && !i.is_past :
+      filter === 'news' ? (i.category === 'notice' || (i.kind === 'post' && i.category !== 'event')) && !i.is_past :
+      filter === 'village' ? i.platform === 'village_event' && !i.is_past :
       filter === 'past' ? !!i.is_past :
-      filter === 'event' ? i.kind === 'event' : i.kind === 'post' && i.platform === filter
+      !i.is_past
   })
 
   const vote = (it: YardItem, v: 'like' | 'dislike') => {
@@ -198,6 +312,21 @@ export default function YardPage() {
     } catch { alert('삭제 오류') }
   }
 
+  const deleteSharePost = async () => {
+    if (!detailData) return
+    if (!confirm('정말 삭제하시겠습니까?')) return
+    try {
+      const res = await fetch(`/share-report/delete/${detailData.id}`, { method: 'POST' })
+      const d = await res.json()
+      if (d.status === 'success') {
+        alert('삭제되었습니다.')
+        const cur = reviewItem
+        setReviewItem(null); setReviewView('list'); setSelectedPhoto(null); setDetailData(null); setReviewEdit(false)
+        if (cur) openReviewModal(cur)
+      } else alert(d.msg || '오류')
+    } catch { alert('오류') }
+  }
+
   // 내일정에 추가 (TongBotSchedule 연동) - 일정 수만큼 버튼 표시
   const addToSchedule = async (key: string, title: string, startIso: string, endIso: string, place: string, allday: boolean) => {
     if (!me) { alert('로그인 후 이용하세요.'); return }
@@ -253,9 +382,10 @@ export default function YardPage() {
       {tab === 'event' && (
         <div className="d-flex gap-2 flex-wrap mb-3">
           {[
-            { key: 'all', label: '전체' },
-            { key: 'event', label: '🌾 마을행사' },
-            { key: 'past', label: '⭐ 지나간 행사' },
+            { key: 'event', label: '행사' },
+            { key: 'news', label: '소식' },
+            { key: 'village', label: '마을' },
+            { key: 'past', label: '지난것' },
           ].map(f => (
             <button key={f.key} className={`btn btn-sm ${filter === f.key ? 'btn-success' : 'btn-outline-success'}`}
               onClick={() => setFilter(f.key)}>{f.label}</button>
@@ -284,15 +414,11 @@ export default function YardPage() {
                     {/* ⭐ 지나간 행사 배지 + 후기 (클릭 시 공유마당에서 후기 목록 표시) */}
                     {isPast && (
                       <>
-                        <div className="d-flex justify-content-between align-items-center mb-2 p-2 rounded" style={{ background: '#fffbe6' }}>
+                        <div className="d-flex align-items-center mb-2 p-2 rounded" style={{ background: '#fffbe6' }}>
                           <span className="small fw-bold" style={{ cursor: 'pointer' }}
                             onClick={() => navigate(`/share?yard_event=${it.db_id}`)}>
                             ⭐ 지나간 행사 · 후기 {(it.review_count ?? 0)}건 보기 →
                           </span>
-                          <button className="btn btn-sm btn-warning py-0" style={{ fontSize: '0.7rem' }}
-                            onClick={() => navigate(`/note/new?yard_event=${it.db_id}&event_title=${encodeURIComponent(it.title)}`)}>
-                            ⭐ 후기 쓰기
-                          </button>
                         </div>
                         {it.event_place && <div className="small mb-1">📍 {it.event_place}</div>}
                       </>
@@ -366,7 +492,11 @@ export default function YardPage() {
 
                     {/* 좋아요/나빠요 (목록 자체) */}
                     <div className="d-flex justify-content-between align-items-center pt-2 border-top">
-                      <small className="text-muted">👤 {it.author_name || '관리자'}</small>
+                      <small className="text-muted">
+                        {it.author_email
+                          ? <AuthorName name={it.author_name} email={it.author_email} userId={it.user_id} prefix="👤 " />
+                          : `👤 ${it.author_name || '관리자'}`}
+                      </small>
                       {it.kind === 'post' && (
                         <div className="d-flex gap-1">
                           <button className="btn btn-sm btn-outline-success py-0" onClick={() => vote(it, 'like')}>👍 {it.like_count ?? 0}</button>
@@ -384,8 +514,8 @@ export default function YardPage() {
                         </a>
                       )}
                       {it.kind === 'post' && (
-                        <button className="btn btn-sm btn-outline-secondary py-0" onClick={() => openComments(it)}>
-                          {isPast ? '⭐ 후기' : '💬 댓글'}
+                        <button className="btn btn-sm btn-outline-secondary py-0" onClick={() => (isPast || it.event_started) ? openReviewModal(it) : openComments(it)}>
+                          {(isPast || it.event_started) ? '⭐ 후기' : '💬 댓글'}
                         </button>
                       )}
                     </div>
@@ -409,7 +539,7 @@ export default function YardPage() {
                   <h6 className="fw-bold mb-0">{commentPost.title}</h6>
                   {commentPost.source_url && (
                     <a href={commentPost.source_url} target="_blank" rel="noopener noreferrer" className="small text-primary">
-                      🔗 {commentPost.author_name || '원문'} 게시물 바로가기
+                      🔗 {commentPost.author_email ? '작성자' : (commentPost.author_name || '원문')} 게시물 바로가기
                     </a>
                   )}
                 </div>
@@ -425,7 +555,11 @@ export default function YardPage() {
                     {comments.map(c => (
                       <div key={c.id} className="border-bottom pb-2 mb-2">
                         <div className="d-flex justify-content-between">
-                          <strong className="small">{c.author_name || '익명'}</strong>
+                          <strong className="small">
+                            {c.author_email
+                              ? <AuthorName name={c.author_name} email={c.author_email} userId={c.user_id} />
+                              : (c.author_name || '익명')}
+                          </strong>
                           <div className="d-flex align-items-center gap-1">
                             <small className="text-muted">{c.created_at ? formatKST(c.created_at, { month: '2-digit', day: '2-digit' }) : ''}</small>
                             {c.user_id === me?.id && (
@@ -468,6 +602,267 @@ export default function YardPage() {
               </div>
               <div className="modal-footer">
                 <button className="btn btn-sm btn-secondary" onClick={() => setCommentPost(null)}>닫기</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* 후기 사진 모달 */}
+      {reviewItem && (
+        <div className="modal d-block" tabIndex={-1} style={{ background: 'rgba(0,0,0,0.7)', zIndex: 4000 }}
+          onClick={() => { setReviewItem(null); setReviewView('list'); setSelectedPhoto(null); setDetailData(null); setReviewWrite(false); setReviewEdit(false); }}>
+          <div className="modal-dialog modal-lg modal-dialog-centered" onClick={e => e.stopPropagation()}>
+            <div className="modal-content" style={{ borderRadius: 16, height: (reviewWrite || reviewEdit) ? '90vh' : undefined }}>
+              {/* 헤더 */}
+              <div className="modal-header py-2">
+                <div className="d-flex align-items-center gap-2">
+                  <button className="btn btn-sm btn-outline-secondary py-0 px-1" style={{ fontSize: '1.1rem', lineHeight: 1 }}
+                    onClick={() => { if (reviewWrite || reviewEdit) { setReviewWrite(false); setReviewEdit(false); } else if (reviewView === 'detail') { setReviewView('list'); setSelectedPhoto(null); setDetailData(null); } else { setReviewItem(null); } }}>
+                    {(reviewWrite || reviewEdit || reviewView === 'detail') ? '←' : '≡'}
+                  </button>
+                  {!reviewWrite && !reviewEdit && reviewView === 'list' && (
+                    <button className="btn btn-sm btn-success py-0"
+                      onClick={() => setReviewWrite(true)}>
+                      후기 쓰기
+                    </button>
+                  )}
+                  <h6 className="fw-bold mb-0">
+                    {reviewEdit ? '공유 수정' :
+                     reviewWrite ? `${reviewItem.title} 후기` :
+                     reviewView === 'detail' && selectedPhoto ? selectedPhoto.title || '상세 보기' : `${reviewItem.title} 후기`}
+                  </h6>
+                </div>
+                <button className="btn-close btn-close-white" style={{ filter: 'brightness(0) invert(1)' }}
+                  onClick={() => { setReviewItem(null); setReviewView('list'); setSelectedPhoto(null); setDetailData(null); setReviewWrite(false); setReviewEdit(false); }} />
+              </div>
+
+              {/* 바디 */}
+              {reviewWrite ? (
+                <div style={{ flex: 1, overflowY: 'auto' }}>
+                  <ShareReport
+                    yardEventId={String(reviewItem.db_id)}
+                    yardEventTitle={reviewItem.title}
+                    yardEventCategory={reviewItem.platform === 'village_event' ? 'village' : 'event'}
+                    onBack={() => setReviewWrite(false)}
+                  />
+                </div>
+              ) : reviewEdit && detailData ? (
+                <div style={{ flex: 1, overflowY: 'auto' }}>
+                  <ShareEdit
+                    reportId={String(detailData.id)}
+                    onDone={async () => {
+                      const pid = detailData.id
+                      setReviewEdit(false)
+                      if (reviewItem) openReviewModal(reviewItem)
+                      setReviewView('detail')
+                      setDetailLoading(true)
+                      try {
+                        const r = await fetch(`/api/share/report/${pid}`)
+                        setDetailData(await r.json())
+                      } catch { /* 무시 */ }
+                      setDetailLoading(false)
+                    }}
+                  />
+                </div>
+              ) : (
+              <div className="modal-body" style={{ maxHeight: '70vh', overflowY: 'auto' }}>
+                {reviewView === 'list' ? (
+                  <>
+                    {reviewItem.event_place && <div className="small text-muted mb-2">📍 {reviewItem.event_place}</div>}
+                    {reviewLoading ? (
+                      <div className="text-center py-4"><div className="spinner-border" /></div>
+                    ) : reviewPhotos.length > 0 ? (
+                      <div className="row g-2">
+                        {reviewPhotos.map((p: any) => (
+                          <div key={p.id} className="col-6 col-md-4" style={{ cursor: 'pointer' }}
+                            onClick={() => openReviewDetail(p)}>
+                            <div className="card border-0 shadow-sm h-100" style={{ borderRadius: 12, overflow: 'hidden' }}>
+                              {p.image_path && <img src={p.image_path} className="w-100" style={{ height: 150, objectFit: 'cover' }} alt={p.title} />}
+                              <div className="card-body p-2">
+                                <div className="small fw-bold">{p.title}</div>
+                                {p.is_pending && (
+                                  <span className="badge bg-warning text-dark" style={{ fontSize: '0.65rem' }}>심사중</span>
+                                )}
+                                <div className="small text-muted" style={{ fontSize: '0.75rem' }}>
+                                  {p.ai_category} · {p.address || `${p.town} ${p.village}`}
+                                </div>
+                                <div className="d-flex gap-2 mt-1" style={{ fontSize: '0.75rem' }}>
+                                  <span>👍 {p.like_count ?? 0}</span><span>👎 {p.dislike_count ?? 0}</span>
+                                </div>
+                                {p.author_name && <div className="small text-muted mt-1 pt-2 border-top border-light" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  <AuthorName name={p.author_name} email={p.author_email} userId={p.user_id} prefix="👤 " />
+                                </div>}
+                                <div className="mt-2">
+                                  <a className="text-decoration-none small text-primary" style={{ cursor: 'pointer' }}
+                                    onClick={e => { e.preventDefault(); e.stopPropagation(); openReviewDetail(p) }}>
+                                    자세히 보기 →
+                                  </a>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-center text-muted py-4">아직 후기 사진이 없습니다.</div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    {detailLoading ? (
+                      <div className="text-center py-4"><div className="spinner-border" /></div>
+                    ) : detailData ? (
+                      <>
+                        {detailData.status && detailData.status !== 'approved' && detailData.user_id === myId && (
+                          <div className="alert alert-warning py-2 small mb-2">
+                            심사중이므로 일반회원에게 공개되지 않습니다. 내용을 수정 가능합니다. 공개된 후에 고치시면 다시 심사가 진행됩니다.
+                          </div>
+                        )}
+                        <div className="d-flex gap-2 flex-wrap mb-3">
+                          {detailData.ai_category && <span className="badge bg-info">{detailData.ai_category}</span>}
+                          {detailData.address && <span className="badge bg-light text-dark">{detailData.address}</span>}
+                        </div>
+                        {detailData.image_path && (
+                          <img src={detailData.image_path} className="img-fluid rounded mb-3" style={{ width: '100%' }} alt={detailData.title} />
+                        )}
+                        {(() => {
+                          const extras: string[] = detailData.extra_images ? detailData.extra_images.split(',').filter(Boolean) : []
+                          return (
+                            <div className="row g-2 mb-3">
+                              {(detailData.image_path ? extras : extras.slice(0, 6)).map((img: string, i: number) => (
+                                <div key={i} className="col-4 col-md-3">
+                                  <img src={img} className="img-fluid rounded" style={{ height: 120, objectFit: 'contain', width: '100%', backgroundColor: '#f8f9fa' }} />
+                                </div>
+                              ))}
+                              {!detailData.image_path && extras.length === 0 && !detailData.drawing_path && (
+                                <div className="col-12 text-center text-muted py-3 bg-light rounded">이미지 없음</div>
+                              )}
+                            </div>
+                          )
+                        })()}
+                        {detailData.drawing_path && <img src={detailData.drawing_path} className="img-fluid rounded mb-3" style={{ maxHeight: 400 }} />}
+                        {detailData.video_path && (
+                          <video controls className="w-100 rounded mb-3" style={{ maxHeight: 400 }}>
+                            <source src={detailData.video_path} />
+                          </video>
+                        )}
+                        {detailData.ai_summary && (
+                          <div className="p-3 bg-light rounded mb-3 border-start border-5 border-info">
+                            <strong>🤖 AI 요약:</strong><br />{detailData.ai_summary}
+                          </div>
+                        )}
+                        {detailData.ai_region_news && detailData.ai_region_news !== '관련 뉴스 없음' && (
+                          <div className="p-3 bg-light rounded mb-3 border-start border-5 border-info">
+                            <strong>📰 AI 지역 분석:</strong><br />{detailData.ai_region_news}
+                          </div>
+                        )}
+                        {detailData.ai_danger_alert && (
+                          <div className="mb-4 p-3 bg-danger bg-opacity-10 rounded border border-danger">
+                            <strong className="text-danger">🚨 위험/긴급 상황 감지</strong><br />
+                            <small className="text-muted">관리자와 책임자에게 자동 통보되었습니다.</small>
+                          </div>
+                        )}
+                        {detailData.description && <p style={{ whiteSpace: 'pre-wrap' }}>{detailData.description}</p>}
+                        <hr />
+                        <div className="d-flex justify-content-between small text-muted">
+                          <span>공유자: <AuthorName name={detailData.author_name} email={detailData.author_email} userId={detailData.user_id} /></span>
+                          <span>{detailData.created_at}</span>
+                        </div>
+                        <div className="d-flex justify-content-between small text-muted">
+                          <span>위치: {detailData.address || `양평군 ${detailData.town} ${detailData.village}`}</span>
+                          {detailData.ai_confidence ? <span>AI 신뢰도: {Math.round(detailData.ai_confidence * 100)}%</span> : null}
+                        </div>
+                        {(() => {
+                          const isAuthor = myId != null && detailData.user_id === myId
+                          const isAdminEditTarget = (detailData.my_role === 'admin' || detailData.my_role === 'leader') && (!detailData.user_id || detailData.user_id === 0 || detailData.user_id === 1)
+                          const canEdit = isAuthor || isAdminEditTarget
+                          return canEdit ? (
+                            <div className="mt-3 d-flex gap-2">
+                              <button className="btn btn-sm btn-outline-primary" onClick={() => setReviewEdit(true)}>✏️ 수정</button>
+                              <button className="btn btn-sm btn-outline-danger" onClick={deleteSharePost}>🗑️ 삭제</button>
+                            </div>
+                          ) : null
+                        })()}
+                        <div className="d-flex gap-2 justify-content-center my-3">
+                          <button className="btn btn-outline-success btn-lg px-4" onClick={() => voteShare(detailData.id, 'like')}>👍 좋아요 {detailData.like_count ?? 0}</button>
+                          <button className="btn btn-outline-danger btn-lg px-4" onClick={() => voteShare(detailData.id, 'dislike')}>👎 나빠요 {detailData.dislike_count ?? 0}</button>
+                        </div>
+                        <div className="card border-0 shadow-sm" style={{ borderRadius: 18 }}>
+                          <div className="card-body p-4">
+                            <h6 className="fw-bold mb-3">💬 댓글 ({(detailData.comments || []).length})</h6>
+                            {me ? (
+                              <form onSubmit={e => { e.preventDefault(); submitShareComment() }} className="mb-4">
+                                {reviewReplyTo && (
+                                  <div className="small text-muted mb-2">
+                                    💬 답글 작성 중...
+                                    <button type="button" className="btn btn-sm btn-link p-0" onClick={() => setReviewReplyTo(null)}>취소</button>
+                                  </div>
+                                )}
+                                <div className="mb-2 d-flex gap-2 align-items-center">
+                                  <textarea className="form-control" rows={2} placeholder="댓글을 입력하세요..." value={reviewCommentText}
+                                    onChange={e => setReviewCommentText(e.target.value)} required />
+                                  <button type="submit" className="btn btn-primary px-3" style={{ whiteSpace: 'nowrap' }} disabled={reviewSending}>
+                                    {reviewSending ? '⏳ 등록 중...' : '등록'}
+                                  </button>
+                                </div>
+                              </form>
+                            ) : (
+                              <div className="alert alert-light text-center small mb-4">댓글은 로그인 후 이용할 수 있습니다.</div>
+                            )}
+                            {(detailData.comments || []).map((c: any) => (
+                              <div key={c.id} className="mb-3 p-3 bg-light rounded">
+                                <div className="d-flex justify-content-between">
+                                  <strong className="small"><AuthorName name={c.author} email={c.author_email} userId={c.user_id} /></strong>
+                                  <div>
+                                    <small className="text-muted">{c.created_at || ''}</small>
+                                    {myId === c.user_id && (
+                                      <button onClick={() => deleteShareComment(c.id)} className="btn btn-sm btn-link text-danger p-0 ms-2">삭제</button>
+                                    )}
+                                  </div>
+                                </div>
+                                <p className="mb-1 mt-1">{c.content}</p>
+                                {me && (
+                                  <button onClick={() => { setReviewReplyTo(c.id); setReviewCommentText('') }} className="btn btn-sm btn-link p-0 text-primary">답글</button>
+                                )}
+                                {(c.replies || []).length > 0 && (
+                                  <div className="mt-2 ps-3 border-start border-3">
+                                    {(c.replies || []).map((r: any) => (
+                                      <div key={r.id} className="mb-2">
+                                        <div className="d-flex justify-content-between">
+                                          <strong className="small">↳ <AuthorName name={r.author} email={r.author_email} userId={r.user_id} /></strong>
+                                          <div>
+                                            <small className="text-muted">{r.created_at || ''}</small>
+                                            {myId === r.user_id && (
+                                              <button onClick={() => deleteShareComment(r.id)} className="btn btn-sm btn-link text-danger p-0 ms-2">삭제</button>
+                                            )}
+                                          </div>
+                                        </div>
+                                        <p className="mb-0 mt-1">{r.content}</p>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="text-center text-muted py-4">상세 정보를 불러올 수 없습니다.</div>
+                    )}
+                  </>
+                )}
+              </div>
+              )}
+
+              {/* 푸터 */}
+              <div className="modal-footer py-2">
+                {reviewView === 'detail' && (
+                  <button className="btn btn-sm btn-outline-secondary" onClick={() => { setReviewView('list'); setSelectedPhoto(null); setDetailData(null); }}>
+                    ← 목록으로
+                  </button>
+                )}
+                <button className="btn btn-sm btn-secondary" onClick={() => { setReviewItem(null); setReviewView('list'); setSelectedPhoto(null); setDetailData(null); }}>닫기</button>
               </div>
             </div>
           </div>

@@ -236,7 +236,11 @@ def _is_legal_author(post):
 def api_legal_posts():
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 20, type=int)
-    posts = LegalPost.query.order_by(LegalPost.created_at.desc()).paginate(page=page, per_page=per_page, error_out=False)
+    # labor_approved=True (노동이슈) 게시글은 법률상담 게시판에서 제외, password가 있는 상담의뢰만 표시
+    posts = LegalPost.query.filter(
+        LegalPost.password != '',
+        LegalPost.labor_approved == False
+    ).order_by(LegalPost.created_at.desc()).paginate(page=page, per_page=per_page, error_out=False)
     items = []
     for p in posts.items:
         d = {
@@ -244,7 +248,7 @@ def api_legal_posts():
             'status': p.status, 'is_public': p.is_public,
             'answer': p.answer, 'created_at': p.created_at.isoformat() if p.created_at else None,
             'answered_at': p.answered_at.isoformat() if p.answered_at else None,
-            'has_attachment': bool(p.file_path),
+        'has_attachment': bool(post.file_path),
             'link': p.link,
         }
         if not (_is_legal_author(p) or is_privileged_viewer(p.user_id, 'legal')):
@@ -258,12 +262,13 @@ def api_legal_posts():
 @legal_bp.route('/api/legal/post/<int:post_id>')
 def api_legal_post(post_id):
     post = LegalPost.query.get_or_404(post_id)
-    if not (_is_legal_author(post) or is_privileged_viewer(post.user_id, 'legal')):
+    # 작성자 본인, admin, leader만 상세보기 가능
+    if not (_is_legal_author(post) or is_legal_manager()):
         return jsonify({
             'id': post.id, 'title': mask_title(post.title, keep=0.4), 'content': '',
             'author_name': post.author_name, 'email': masked_email(post.email),
             'answer': '', 'comments': '', 'status': post.status,
-        'has_attachment': bool(post.file_path),
+        'has_attachment': bool(p.file_path),
             'is_public': post.is_public, 'fee': post.fee,
             'created_at': post.created_at.isoformat() if post.created_at else None,
             'answered_at': post.answered_at.isoformat() if post.answered_at else None,

@@ -73,3 +73,6 @@ DockerDesktopWSL/
 
 # server local archive (30일 보관 대행지)
 server_local/
+
+# data exports (로컬 전용, 커밋 금지)
+yard_posts_export.json

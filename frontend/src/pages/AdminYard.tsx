@@ -56,11 +56,11 @@ export default function AdminYard() {
   }, [])
 
   const openCreate = () => {
-    window.open('/yard/edit', 'yardEdit', 'width=620,height=900')
+    window.open('/yard/edit?popup=1', 'yardEdit', 'width=620,height=900')
   }
 
   const openEdit = (it: YardAdminItem) => {
-    window.open(`/yard/edit?id=${it.db_id}`, 'yardEdit', 'width=620,height=900')
+    window.open(`/yard/edit?popup=1&id=${it.db_id}`, 'yardEdit', 'width=620,height=900')
   }
 
   // 링크로 추가하기: 페이지를 읽어 AI로 초안 생성 후 편집창 오픈
@@ -81,7 +81,7 @@ export default function AdminYard() {
       if (data.status === 'success' && data.id) {
         setImpUrl('')
         load()
-        window.open(`/yard/edit?id=${data.id}`, 'yardEdit', 'width=620,height=900')
+        window.open(`/yard/edit?popup=1&id=${data.id}`, 'yardEdit', 'width=620,height=900')
       }
     } catch { setMsg('가져오기 오류'); setMsgOk(false) }
     setImporting(false)

@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import Loading from '../components/common/Loading'
 import ErrorMessage from '../components/common/ErrorMessage'
 import EmptyState from '../components/common/EmptyState'
+import ScheduleCopyModal, { parseScheduleFromText } from '../components/ScheduleCopyModal'
 import { formatKST } from '../utils/format'
 
 interface MessageItem {
@@ -85,6 +86,7 @@ function ArchiveThread({ root, children_msgs, myId, onDelete, onReply }: {
 }) {
   const [open, setOpen] = useState(false)
   const [detailMsg, setDetailMsg] = useState<MessageItem | null>(null)
+  const [copyOpen, setCopyOpen] = useState(false)
   const allItems = [root, ...children_msgs]
   const sortedAsc = [...allItems].sort((a, b) => new Date(a.created_at || '').getTime() - new Date(b.created_at || '').getTime())
   const sortedDesc = [...sortedAsc].reverse()
@@ -177,12 +179,19 @@ function ArchiveThread({ root, children_msgs, myId, onDelete, onReply }: {
                   dangerouslySetInnerHTML={{ __html: letterHtml(detailMsg.content) }} />
               </div>
               <div className="modal-footer py-2">
+                <button className="btn btn-sm btn-outline-success" onClick={() => setCopyOpen(true)}>📅 내 일정에 복사</button>
                 <button className="btn btn-sm btn-outline-secondary" onClick={() => setDetailMsg(null)}>닫기</button>
                 <button className="btn btn-sm btn-outline-primary" onClick={() => { setDetailMsg(null); onReply(detailMsg.id) }}>{replyBtnLabel}</button>
               </div>
             </div>
           </div>
         </div>
+      )}
+      {copyOpen && detailMsg && (
+        <ScheduleCopyModal
+          initial={parseScheduleFromText(detailMsg.subject, detailMsg.content, detailMsg.sender_name)}
+          onClose={() => setCopyOpen(false)}
+        />
       )}
     </div>
   )
@@ -198,6 +207,7 @@ export default function MessageInbox() {
   const [archiveCount, setArchiveCount] = useState(0)
   const [myId, setMyId] = useState(0)
   const [detailMsg, setDetailMsg] = useState<MessageItem | null>(null)
+  const [copyOpen, setCopyOpen] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true); setError('')
@@ -345,11 +355,18 @@ export default function MessageInbox() {
                   dangerouslySetInnerHTML={{ __html: letterHtml(detailMsg.content) }} />
               </div>
               <div className="modal-footer py-2">
+                <button className="btn btn-sm btn-outline-success" onClick={() => setCopyOpen(true)}>📅 내 일정에 복사</button>
                 <button className="btn btn-sm btn-outline-secondary" onClick={() => setDetailMsg(null)}>닫기</button>
               </div>
             </div>
           </div>
         </div>
+      )}
+      {copyOpen && detailMsg && (
+        <ScheduleCopyModal
+          initial={parseScheduleFromText(detailMsg.subject, detailMsg.content, detailMsg.sender_name)}
+          onClose={() => setCopyOpen(false)}
+        />
       )}
     </div>
   )

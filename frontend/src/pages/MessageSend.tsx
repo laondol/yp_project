@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import Loading from '../components/common/Loading'
 import ErrorMessage from '../components/common/ErrorMessage'
 import ContentEditor, { type ContentEditorHandle } from '../components/contentEditor/ContentEditor'
+import ScheduleCopyModal, { parseScheduleFromText } from '../components/ScheduleCopyModal'
 
 interface UserOption {
   id: number; username: string; real_name?: string; town?: string; village?: string
@@ -50,6 +51,9 @@ export default function MessageSend() {
   const [thread, setThread] = useState<ThreadItem[]>([])
   const [showThread, setShowThread] = useState(false)
   const [detailMsg, setDetailMsg] = useState<ThreadItem | null>(null)
+  const [copyOpen, setCopyOpen] = useState(false)
+  const [useExternalEmail, setUseExternalEmail] = useState(false)
+  const [externalEmail, setExternalEmail] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true); setError('')
@@ -112,11 +116,13 @@ export default function MessageSend() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     const content = editorRef.current?.getContent()?.trim() || ''
-    if (selectedIds.length === 0 || !content) return
+    if (selectedIds.length === 0 && !externalEmail) return
+    if (!content) return
     setSending(true); setResult('')
     try {
       const fd = new FormData()
-      fd.append('receiver_ids', selectedIds.join(','))
+      if (selectedIds.length > 0) fd.append('receiver_ids', selectedIds.join(','))
+      if (useExternalEmail && externalEmail) fd.append('external_email', externalEmail)
       fd.append('subject', subject)
       fd.append('content', content)
       if (replyTo) fd.append('reply_to_id', replyTo)
@@ -209,6 +215,27 @@ export default function MessageSend() {
             </div>
             {selectedIds.length > 0 && <div className="small text-muted mt-1">선택한 벗: {selectedIds.length}명</div>}
           </div>
+
+          {/* 외부 이메일 발송 */}
+          <div className="mb-3 p-3 bg-light rounded">
+            <div className="form-check form-switch mb-2">
+              <input className="form-check-input" type="checkbox" id="useExternalEmail"
+                checked={useExternalEmail} onChange={e => setUseExternalEmail(e.target.checked)} />
+              <label className="form-check-label small fw-bold" htmlFor="useExternalEmail">
+                외부 이메일로도 보내기
+              </label>
+            </div>
+            {useExternalEmail && (
+              <div>
+                <input type="email" className="form-control form-control-sm"
+                  value={externalEmail} onChange={e => setExternalEmail(e.target.value)}
+                  placeholder="받는 사람 이메일 (예: example@naver.com)" />
+                <div className="text-muted small mt-1">
+                  회원가입한 이메일로 발송됩니다. 분당 5건, 일일 30건 제한이 있습니다.
+                </div>
+              </div>
+            )}
+          </div>
           <div className="mb-3">
             <label className="form-label small fw-bold">제목 (선택)</label>
             <input type="text" className="form-control" value={subject} onChange={e => setSubject(e.target.value)} placeholder="편지 제목" />
@@ -217,9 +244,10 @@ export default function MessageSend() {
             <label className="form-label small fw-bold">내용</label>
             <ContentEditor ref={editorRef} uploadUrl="/api/message/upload-image" placeholder="편지 내용을 적어주세요. (사진은 Ctrl+V로 붙여넣기, 📁 버튼으로 파일 첨부 가능)" />
           </div>
-          <div className="text-muted small mb-3">편지 발송 시 벗 1명당 10닢이 차감됩니다. 파일 첨부는 용량·개수 제한이 없습니다.</div>
-          <button type="submit" className="btn btn-success w-100 fw-bold py-2" disabled={sending || selectedIds.length === 0}>
-            {sending ? '전송 중...' : `보내기 (${selectedIds.length > 0 ? selectedIds.length * 10 : 10}P)`}
+          <div className="text-muted small mb-3">벗 1명당 10닢이 차감됩니다. 외부 이메일은 무료입니다.</div>
+          <button type="submit" className="btn btn-success w-100 fw-bold py-2"
+            disabled={sending || (selectedIds.length === 0 && !externalEmail)}>
+            {sending ? '전송 중...' : `보내기 (${selectedIds.length > 0 ? selectedIds.length * 10 : 0}P${externalEmail && useExternalEmail ? ' + 이메일' : ''})`}
           </button>
         </form>
         {result && <div className={`mt-3 small ${result.includes('✅') || result.includes('전송') ? 'text-success' : 'text-danger'}`}>{result}</div>}
@@ -242,11 +270,18 @@ export default function MessageSend() {
                   dangerouslySetInnerHTML={{ __html: renderContent(detailMsg.content) }} />
               </div>
               <div className="modal-footer py-2">
+                <button className="btn btn-sm btn-outline-success" onClick={() => setCopyOpen(true)}>📅 내 일정에 복사</button>
                 <button className="btn btn-sm btn-outline-secondary" onClick={() => setDetailMsg(null)}>닫기</button>
               </div>
             </div>
           </div>
         </div>
+      )}
+      {copyOpen && detailMsg && (
+        <ScheduleCopyModal
+          initial={parseScheduleFromText(detailMsg.subject, detailMsg.content, detailMsg.sender_name)}
+          onClose={() => setCopyOpen(false)}
+        />
       )}
     </div>
   )

@@ -3,8 +3,8 @@ import LeafletMap from '../components/LeafletMap'
 
 interface Photo { path: string }
 
-export default function ShareEdit() {
-  const id = window.location.pathname.split('/').filter(Boolean).pop()
+export default function ShareEdit({ reportId: propId, onDone }: { reportId?: string; onDone?: () => void } = {}) {
+  const id = propId || window.location.pathname.split('/').filter(Boolean).pop()
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [aiCategory, setAiCategory] = useState('')
@@ -276,7 +276,11 @@ export default function ShareEdit() {
     try {
       const res = await fetch(`/share-report/edit/${id}`, { method: 'POST', body: fd })
       const data = await res.json()
-      if (data.status === 'success') { alert(data.msg); window.location.href = `/share/detail/${id}` }
+      if (data.status === 'success') {
+        alert(data.msg)
+        if (onDone) { onDone(); return }
+        window.location.href = `/share/detail/${id}`
+      }
       else { alert(data.msg || '오류'); setSubmitting(false) }
     } catch (err: any) { alert('오류: ' + err.message); setSubmitting(false) }
   }
@@ -285,7 +289,7 @@ export default function ShareEdit() {
 
   return (
     <div className="container-fluid px-3 py-3" style={{ maxWidth: '100%' }}>
-      <h4 className="fw-bold mb-3 text-center">공유 수정</h4>
+      {!propId && <h4 className="fw-bold mb-3 text-center">공유 수정</h4>}
       <div className="card border-0 shadow-sm" style={{ borderRadius: 16 }}>
         <div className="card-body p-3">
           <form onSubmit={handleSubmit}>

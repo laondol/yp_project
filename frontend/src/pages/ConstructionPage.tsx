@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, useNavigate } from 'react-router-dom'
 import { constructionApi } from '../lib/api'
 import type { ConstructionNotice } from '../lib/types'
 import { useAuth } from '../contexts/AuthContext'
@@ -21,7 +21,12 @@ interface SceneryItem {
 }
 interface StoreGroup {
   name: string; lat: number; lng: number; image?: string; store_link?: string
-  link_label?: string; posts: { id: number; title: string; image?: string }[]
+  link_label?: string; phone?: string; address?: string; place_url?: string
+  photo_count?: number; menus?: { name: string; category: string; price?: string }[]
+  posts: { id: number; title: string; image?: string }[]
+  name_status?: 'confirmed' | 'voting' | 'unknown'
+  name_votes?: number; name_total?: number
+  name_options?: { name: string; votes: number }[]
 }
 interface AlertItem {
   id: number; title: string; content?: string; town?: string; village?: string
@@ -50,6 +55,14 @@ export default function ConstructionPage() {
 
   const [scenery, setScenery] = useState<SceneryItem[]>([])
   const [stores, setStores] = useState<StoreGroup[]>([])
+  const navigate = useNavigate()
+  const [nameRec, setNameRec] = useState<{lat: number; lng: number; town: string; village: string} | null>(null)
+  const [nameRecs, setNameRecs] = useState<{name: string; votes: number; pct: number; voted: boolean}[]>([])
+  const [nameRecTotal, setNameRecTotal] = useState(0)
+  const [nameRecMyVotes, setNameRecMyVotes] = useState<string[]>([])
+  const [nameRecInput, setNameRecInput] = useState('')
+  const [nameRecLoading, setNameRecLoading] = useState(false)
+  const [nameRecNaver, setNameRecNaver] = useState<{name: string; category: string; phone?: string; address?: string}[]>([])
   const [trafficHtml, setTrafficHtml] = useState('')
   const [alerts, setAlerts] = useState<AlertItem[]>([])
 
@@ -85,6 +98,13 @@ export default function ConstructionPage() {
   const [scenerySubTab, setScenerySubTab] = useState(() => searchParams.get('sub') || 'scenery')
   const [sceneryLoading, setSceneryLoading] = useState(false)
   const [storesLoading, setStoresLoading] = useState(false)
+  const [naverSearchQuery, setNaverSearchQuery] = useState('')
+  const [naverResults, setNaverResults] = useState<{name: string; category: string; address: string; phone: string; link: string; mapx: string; mapy: string; dist: string}[]>([])
+  const [naverSearching, setNaverSearching] = useState(false)
+  const [naverAddr, setNaverAddr] = useState('')
+  const [regMsg, setRegMsg] = useState('')
+  const [storesTown, setStoresTown] = useState('')
+  const [storesVillage, setStoresVillage] = useState('')
   const [trafficLoading, setTrafficLoading] = useState(false)
   const [alertsLoading, setAlertsLoading] = useState(false)
 
@@ -179,10 +199,95 @@ export default function ConstructionPage() {
     setStoresLoading(true)
     fetch('/construction/local-stores')
       .then(r => r.json())
-      .then(d => setStores(d.stores || []))
+      .then(d => { setStores(d.stores || []); setStoresTown(d.town || ''); setStoresVillage(d.village || '') })
       .catch(() => {})
       .finally(() => setStoresLoading(false))
   }, [activeTab, scenerySubTab])
+
+  const handleNaverSearch = async () => {
+    setNaverSearching(true); setRegMsg(''); setNaverResults([]); setNaverAddr('')
+    try {
+      const firstStore = stores.find(g => g.lat && g.lng)
+      const lat = firstStore?.lat || homeLat
+      const lng = firstStore?.lng || homeLng
+      if (!lat || !lng) { setRegMsg('좌표 정보가 없습니다.'); return }
+      const q = naverSearchQuery || '음식점'
+      const r = await fetch(`/construction/naver-search?lat=${lat}&lng=${lng}&query=${encodeURIComponent(q)}`).then(r => r.json())
+      setNaverResults(r.results || [])
+      setNaverAddr(r.address || '')
+      if (!r.results?.length) setRegMsg('검색 결과가 없습니다.')
+    } catch { setRegMsg('검색 중 오류가 발생했습니다.') }
+    finally { setNaverSearching(false) }
+  }
+
+  const handleAutoRegister = async (item: {name: string; phone: string; address: string; link: string; mapx: string; mapy: string}) => {
+    try {
+      const r = await fetch('/construction/auto-register-store', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(item),
+      }).then(r => r.json())
+      if (r.success) {
+        setRegMsg(`✅ ${r.msg}`)
+        setNaverResults([])
+        setStoresLoading(true)
+        fetch('/construction/local-stores').then(r => r.json()).then(d => { setStores(d.stores || []); setStoresTown(d.town || ''); setStoresVillage(d.village || '') }).finally(() => setStoresLoading(false))
+      } else {
+        setRegMsg(`❌ ${r.error || '등록 실패'}`)
+      }
+    } catch { setRegMsg('등록 중 오류가 발생했습니다.') }
+  }
+
+  const openNameRec = async (lat: number, lng: number, town: string, village: string) => {
+    setNameRec({ lat, lng, town, village })
+    setNameRecLoading(true)
+    try {
+      const [votesRes, naverRes] = await Promise.all([
+        fetch(`/construction/store-name-recommendations?lat=${lat}&lng=${lng}`).then(res => res.json()),
+        fetch(`/construction/naver-search?lat=${lat}&lng=${lng}&query=`).then(res => res.json()).catch(() => ({ results: [] }))
+      ])
+      setNameRecs(votesRes.recommendations || [])
+      setNameRecTotal(votesRes.total_users || 0)
+      setNameRecMyVotes(votesRes.my_votes || [])
+      setNameRecNaver(naverRes.results || [])
+    } catch { setNameRecs([]); setNameRecNaver([]) }
+    setNameRecLoading(false)
+  }
+
+  const handleNameVote = async (name: string) => {
+    if (!nameRec) return
+    const already = nameRecMyVotes.includes(name)
+    const url = already ? '/construction/store-name-cancel-vote' : '/construction/store-name-suggest'
+    await fetch(url, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, lat: nameRec.lat, lng: nameRec.lng })
+    })
+    openNameRec(nameRec.lat, nameRec.lng, nameRec.town, nameRec.village)
+  }
+
+  const handleNameSuggest = async () => {
+    if (!nameRec || !nameRecInput.trim()) return
+    await fetch('/construction/store-name-suggest', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: nameRecInput.trim(), lat: nameRec.lat, lng: nameRec.lng })
+    })
+    setNameRecInput('')
+    openNameRec(nameRec.lat, nameRec.lng, nameRec.town, nameRec.village)
+  }
+
+  const handleNameApply = async () => {
+    if (!nameRec) return
+    const r = await fetch('/construction/store-name-apply', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lat: nameRec.lat, lng: nameRec.lng, town: nameRec.town, village: nameRec.village })
+    }).then(res => res.json())
+    if (r.success) {
+      setNameRec(null)
+      // 목록 새로고침
+      fetch('/construction/local-stores').then(res => res.json()).then(d => {
+        setStores(d.stores || []); setStoresTown(d.town || ''); setStoresVillage(d.village || '')
+      })
+    }
+  }
 
   useEffect(() => {
     if (activeTab !== 'scenery' || scenerySubTab !== 'traffic') return
@@ -407,27 +512,110 @@ export default function ConstructionPage() {
           )}
 
           {scenerySubTab === 'localstore' && (
-            storesLoading ? <Loading /> : stores.length === 0 ? (
+            <>
+              {/* 네이버 자동 검색/등록 */}
+              <div className="card border-0 shadow-sm mb-3 p-3" style={{ borderRadius: 14 }}>
+                <div className="fw-bold small mb-2">🔍 네이버에서 가게 검색 & 자동 등록</div>
+                <div className="d-flex gap-2 mb-2">
+                  <input type="text" className="form-control form-control-sm" placeholder="가게 이름 또는 업종 (예: 음식점, 카페)"
+                    value={naverSearchQuery} onChange={e => setNaverSearchQuery(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && handleNaverSearch()} />
+                  <button className="btn btn-sm btn-success flex-shrink-0" onClick={handleNaverSearch} disabled={naverSearching}>
+                    {naverSearching ? '검색 중...' : '검색'}
+                  </button>
+                </div>
+                {naverAddr && <div className="small text-muted mb-2">📍 현재 위치: {naverAddr}</div>}
+                {regMsg && <div className={`small mb-2 ${regMsg.startsWith('✅') ? 'text-success' : 'text-danger'}`}>{regMsg}</div>}
+                {naverResults.length > 0 && (
+                  <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+                    {naverResults.map((item, i) => (
+                      <div key={i} className="d-flex justify-content-between align-items-start p-2 mb-1 bg-light rounded">
+                        <div className="small">
+                          <div className="fw-bold">{item.name}</div>
+                          <div className="text-muted" style={{ fontSize: '0.75rem' }}>
+                            {item.category} {item.phone && `| 📞 ${item.phone}`}
+                            {item.dist && ` | ${item.dist}m`}
+                          </div>
+                        </div>
+                        <button className="btn btn-sm btn-outline-success flex-shrink-0" style={{ fontSize: '0.7rem', padding: '2px 8px' }}
+                          onClick={() => handleAutoRegister(item)}>등록</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {storesLoading ? <Loading /> : stores.length === 0 ? (
               <EmptyState icon="🏪" title="등록된 가게가 없습니다." />
             ) : (
               <div className="row g-2">
                 {stores.map((g, i) => (
                   <div key={i} className="col-6">
-                    <div className="card border-0 shadow-sm" style={{ borderRadius: 16 }}>
+                    <div className="card border-0 shadow-sm h-100" style={{ borderRadius: 16 }}>
                       {g.image ? (
                         <img src={g.image} className="card-img-top" style={{ height: 120, objectFit: 'cover', borderRadius: '16px 16px 0 0' }} alt={g.name} />
                       ) : (
                         <div className="d-flex align-items-center justify-content-center" style={{ height: 120, background: '#f0f0f0', borderRadius: '16px 16px 0 0' }}>🏪</div>
                       )}
                       <div className="card-body p-2">
-                        <small className="fw-bold d-block">{g.name}</small>
-                        {g.store_link && <a href={g.store_link} target="_blank" className="small" rel="noopener noreferrer">{g.link_label || '🔗'}</a>}
+                        <div className="fw-bold small mb-1" style={{ cursor: 'pointer' }}
+                          onClick={() => {
+                            if (g.name_status !== 'confirmed' && g.lat && g.lng) {
+                              openNameRec(Number(g.lat), Number(g.lng), storesTown, storesVillage)
+                            } else if (g.lat && g.lng) {
+                              navigate(`/construction/store/${encodeURIComponent(g.name)}?town=${encodeURIComponent(storesTown)}&village=${encodeURIComponent(storesVillage)}&lat=${g.lat}&lng=${g.lng}`)
+                            }
+                          }}>
+                          {g.name_status === 'unknown' && (
+                            <span style={{ color: '#dc3545' }}>🔍 위치 확인 불가 <span className="text-muted" style={{ fontSize: '0.7rem' }}>📷 {g.posts?.length || 0}장</span></span>
+                          )}
+                          {g.name_status === 'voting' && (
+                            <span style={{ color: '#e67e22' }}>
+                              🗳️ {g.name}
+                              <span className="ms-1" style={{ fontSize: '0.7rem', color: '#666' }}>
+                                ({g.name_votes}/{g.name_total})
+                              </span>
+                              <span className="text-muted" style={{ fontSize: '0.7rem' }}> 📷 {g.posts?.length || 0}장</span>
+                            </span>
+                          )}
+                          {(!g.name_status || g.name_status === 'confirmed') && (
+                            <span style={{ color: '#198754' }}>{g.name} <span className="text-muted" style={{ fontSize: '0.7rem' }}>📷 {g.posts?.length || 0}장</span></span>
+                          )}
+                        </div>
+                        {g.phone && (
+                          <div className="small text-muted mb-1">
+                            📞 <a href={`tel:${g.phone}`} className="text-decoration-none">{g.phone}</a>
+                          </div>
+                        )}
+                        {g.address && (
+                          <div className="small text-muted mb-1" title={g.address}
+                            style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            📍 {g.address}
+                          </div>
+                        )}
+                        {g.menus && g.menus.length > 0 && (
+                          <div className="mb-1">
+                            {g.menus.slice(0, 3).map((m: {name: string; category: string; price?: string}, mi: number) => (
+                              <span key={mi} className="badge bg-light text-dark me-1 mb-1" style={{ fontSize: '0.65rem' }}>
+                                {m.name}{m.price ? ` ${m.price}` : ''}
+                              </span>
+                            ))}
+                            {g.menus.length > 3 && <span className="small text-muted">+{g.menus.length - 3}</span>}
+                          </div>
+                        )}
+                        {g.store_link && (
+                          <a href={g.store_link} target="_blank" className="small text-decoration-none" rel="noopener noreferrer"
+                            style={{ color: '#198754' }}>
+                            {g.link_label || '🔗'}
+                          </a>
+                        )}
                       </div>
                     </div>
                   </div>
                 ))}
               </div>
-            )
+            )}
+            </>
           )}
 
           {scenerySubTab === 'traffic' && (
@@ -620,6 +808,86 @@ export default function ConstructionPage() {
               style={{ position: 'absolute', top: 8, right: 8, zIndex: 5000, width: 30, height: 30, borderRadius: '50%', border: 'none', background: '#e9ecef', color: '#333', fontSize: 14, cursor: 'pointer' }}
             >✕</button>
             <div ref={mapModalRef} style={{ width: '100%', height: '100%' }} />
+          </div>
+        </div>
+      )}
+
+      {/* 가게 이름 추천 모달 */}
+      {nameRec && (
+        <div className="modal d-block" tabIndex={-1} style={{ background: 'rgba(0,0,0,0.5)' }}
+          onClick={() => setNameRec(null)}>
+          <div className="modal-dialog modal-dialog-centered" onClick={e => e.stopPropagation()}>
+            <div className="modal-content" style={{ borderRadius: 14 }}>
+              <div className="modal-header py-2">
+                <h6 className="modal-title fw-bold" style={{ fontSize: '0.95rem' }}>🔍 가게 이름 추천</h6>
+                <button type="button" className="btn-close" onClick={() => setNameRec(null)}></button>
+              </div>
+              <div className="modal-body">
+                {nameRecLoading ? (
+                  <div className="text-center py-3 text-muted small">불러오는 중...</div>
+                ) : (
+                  <>
+                    <div className="small text-muted mb-2">
+                      이 가게의 이름을 알고 계신가요? 추천해주세요. <br />
+                      가장 많은 추천을 받은 이름이 가게 이름으로 지정됩니다.
+                    </div>
+
+                    {/* 추천 목록 */}
+                    {nameRecs.length > 0 ? (
+                      <div className="mb-3">
+                        {nameRecs.map((r, i) => (
+                          <div key={i} className="d-flex align-items-center justify-content-between p-2 mb-1 rounded"
+                            style={{ background: r.voted ? '#d4edda' : '#f8f9fa', cursor: 'pointer', border: r.voted ? '1px solid #28a745' : '1px solid #dee2e6' }}
+                            onClick={() => handleNameVote(r.name)}>
+                            <div>
+                              <span className="fw-bold small">{r.name}</span>
+                              <span className="ms-2 text-muted" style={{ fontSize: '0.75rem' }}>
+                                {r.votes}/{nameRecTotal} <span style={{ color: '#198754' }}>({r.pct}%)</span>
+                              </span>
+                            </div>
+                            <span style={{ fontSize: '0.8rem' }}>{r.voted ? '✅' : '☐'}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-center text-muted small py-2 mb-2">아직 추천된 이름이 없습니다. 첫 번째로 추천해주세요!</div>
+                    )}
+
+                    {/* 근처 가게 (네이버 검색) */}
+                    {nameRecNaver.length > 0 && (
+                      <div className="mb-3">
+                        <div className="fw-bold small mb-1" style={{ color: '#03c75a' }}>📍 근처 가게 (네이버)</div>
+                        <div style={{ maxHeight: 150, overflowY: 'auto' }}>
+                          {nameRecNaver.slice(0, 8).map((n, i) => (
+                            <div key={i} className="d-flex justify-content-between align-items-center p-1 mb-1 rounded bg-light"
+                              style={{ cursor: 'pointer' }}
+                              onClick={() => setNameRecInput(n.name)}>
+                              <span className="small">{n.name} <span className="text-muted" style={{ fontSize: '0.7rem' }}>{n.category}</span></span>
+                              <span className="small text-muted" style={{ fontSize: '0.7rem' }}>◀ 선택</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 이름 입력 */}
+                    <div className="d-flex gap-2 mb-3">
+                      <input type="text" className="form-control form-control-sm" placeholder="가게 이름을 추천하세요"
+                        value={nameRecInput} onChange={e => setNameRecInput(e.target.value)}
+                        onKeyDown={e => e.key === 'Enter' && handleNameSuggest()} maxLength={50} />
+                      <button className="btn btn-sm btn-success flex-shrink-0" onClick={handleNameSuggest}>추천</button>
+                    </div>
+
+                    {/* 적용 버튼 */}
+                    {nameRecs.length > 0 && (
+                      <button className="btn btn-sm btn-primary w-100" onClick={handleNameApply}>
+                        🏷️ 가장 많이 추천된 이름 적용하기
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       )}

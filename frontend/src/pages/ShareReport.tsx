@@ -1,8 +1,9 @@
 import { useRef, useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import LeafletMap from '../components/LeafletMap'
+import { offlineQueue, MAX_OFFLINE_FILES, MAX_QUEUE_FILES, type OfflineFile, type OfflineItem } from '../utils/offlineQueue'
 
-export default function ShareReport() {
+export default function ShareReport({ yardEventId: propEventId, yardEventTitle: propEventTitle, yardEventCategory: propEventCategory, onBack }: { yardEventId?: string | null; yardEventTitle?: string; yardEventCategory?: string; onBack?: () => void } = {}) {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [lat, setLat] = useState('')
@@ -23,6 +24,10 @@ export default function ShareReport() {
   const [videoFileUpload, setVideoFileUpload] = useState<File | null>(null)
   const [videoUploadPreview, setVideoUploadPreview] = useState<string | null>(null)
   const [hasContent, setHasContent] = useState(false)
+  // 오프라인 큐
+  const [online, setOnline] = useState<boolean>(navigator.onLine)
+  const [queueCount, setQueueCount] = useState(0)
+  const syncingRef = useRef(false)
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -34,20 +39,109 @@ export default function ShareReport() {
   const saveQueueRef = useRef<Promise<unknown>>(Promise.resolve())
 
   const [searchParams] = useSearchParams()
-  const yardEventId = searchParams.get('yard_event')
-  const yardEventTitle = searchParams.get('title') || ''
+  const yardEventId = propEventId != null ? propEventId : searchParams.get('yard_event')
+  const yardEventTitle = propEventTitle != null ? propEventTitle : (searchParams.get('title') || '')
 
   useEffect(() => {
     if (yardEventId && yardEventTitle) {
-      // 마당 행사 후기: [행사후기] 접두사 제목 + 안내 메모 자동 채움
-      setTitle(`[행사후기] ${decodeURIComponent(yardEventTitle)}`)
+      const cat = propEventCategory === 'village' ? '마을후기' : '행사후기'
+      setTitle(`[${cat}] ${decodeURIComponent(yardEventTitle)} 후기`)
       setDescription(`${decodeURIComponent(yardEventTitle)}에 다녀오신 후기를 남겨주세요.`)
     }
-  }, [yardEventId, yardEventTitle])
+  }, [yardEventId, yardEventTitle, propEventCategory])
 
   useEffect(() => {
     getLocation()
     checkCamera()
+  }, [])
+
+  // ── 오프라인 큐: 대기 건수 갱신 + 재연결 시 자동 전송 ──
+  async function refreshQueueCount() {
+    try { setQueueCount(await offlineQueue.count()) } catch { /* 무시 */ }
+  }
+
+  // Background Sync 등록 (Android: 앱이 닫혀 있어도 SW가 전송 / 미지원 브라우저는 페이지 폴백)
+  async function registerSync() {
+    try {
+      const reg: any = await navigator.serviceWorker.ready
+      if (reg.sync && typeof reg.sync.register === 'function') await reg.sync.register('yp-share-sync')
+    } catch { /* 미지원 무시 */ }
+  }
+
+  async function syncQueue() {
+    if (!navigator.onLine || syncingRef.current) return
+    syncingRef.current = true
+    try {
+      const items = await offlineQueue.all()
+      for (const it of items) {
+        try {
+          let rid = it.reportId
+          if (it.files.length > 0) {
+            const fd = new FormData()
+            if (rid) fd.append('report_id', String(rid))
+            for (const f of it.files) {
+              const bf = new File([f.blob], f.name || `offline_${Date.now()}`, { type: f.blob.type || 'application/octet-stream' })
+              if (f.kind === 'video') fd.append('video', bf)
+              else fd.append('image', bf)
+            }
+            const res = await fetch('/share-report/auto-save', { method: 'POST', body: fd })
+            const data = await res.json()
+            if (data.status !== 'success') throw new Error(data.msg || '자동보관 실패')
+            rid = data.report_id
+            it.reportId = rid
+            it.files = []
+            await offlineQueue.put(it)
+          }
+          if (rid) {
+            const fd = new FormData()
+            fd.append('title', it.title)
+            fd.append('description', it.description)
+            if (it.yardEventId) fd.append('yard_event_id', it.yardEventId)
+            if (it.yardEventCategory) fd.append('yard_event_category', it.yardEventCategory)
+            if (it.lat && it.lon) { fd.append('latitude', it.lat); fd.append('longitude', it.lon) }
+            if (it.drawing && it.drawing.length > 2000) fd.append('drawing_data', it.drawing)
+            const res2 = await fetch(`/share-report/confirm-auto/${rid}`, { method: 'POST', body: fd })
+            const d2 = await res2.json()
+            if (d2.status !== 'success') throw new Error(d2.msg || '접수 실패')
+            await offlineQueue.remove(it.key)
+          } else {
+            // 파일도 draft도 없는 텍스트 전용 건
+            const fd = new FormData()
+            fd.append('title', it.title)
+            fd.append('description', it.description)
+            if (it.yardEventId) fd.append('yard_event_id', it.yardEventId)
+            if (it.yardEventCategory) fd.append('yard_event_category', it.yardEventCategory)
+            if (it.lat && it.lon) { fd.append('latitude', it.lat); fd.append('longitude', it.lon) }
+            const res3 = await fetch('/share-report', { method: 'POST', body: fd })
+            const d3 = await res3.json()
+            if (d3.status !== 'success') throw new Error(d3.msg || '접수 실패')
+            await offlineQueue.remove(it.key)
+          }
+        } catch (e: any) {
+          const msg = String(e?.message || e || '')
+          it.attempts = (it.attempts || 0) + 1
+          it.lastError = msg
+          try { await offlineQueue.put(it) } catch { /* 무시 */ }
+          if (msg.includes('로그인')) break
+        }
+      }
+    } catch { /* 무시 */ }
+    syncingRef.current = false
+    refreshQueueCount()
+  }
+
+  useEffect(() => {
+    refreshQueueCount()
+    if (navigator.onLine) { syncQueue(); registerSync() }
+    const onOn = () => { setOnline(true); syncQueue(); registerSync() }
+    const onOff = () => setOnline(false)
+    window.addEventListener('online', onOn)
+    window.addEventListener('offline', onOff)
+    // SW 백그라운드 전송 완료 알림 수신
+    navigator.serviceWorker?.addEventListener('message', (e: MessageEvent) => {
+      if ((e.data as any)?.type === 'yp-sync-done') refreshQueueCount()
+    })
+    return () => { window.removeEventListener('online', onOn); window.removeEventListener('offline', onOff) }
   }, [])
 
   useEffect(() => {
@@ -122,6 +216,7 @@ export default function ShareReport() {
     setCameraPreviews(prev => [...prev, ...arr.map(f => URL.createObjectURL(f))])
     setHasContent(true)
     e.target.value = ''
+    if (!navigator.onLine) return // 오프라인: 기기에만 보관, 연결 시 자동 전송
     // 즉시 자동보관. 실패 시 해당 사진은 제거 안내
     autoSave(arr).then(paths => {
       if (!paths || paths.length === 0) {
@@ -157,6 +252,7 @@ export default function ShareReport() {
   function onVideoCapture(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
+    if (!navigator.onLine) { alert('오프라인 상태에서는 동영상 저장이 제한됩니다. 인터넷 연결 후 이용해 주세요.'); e.target.value = ''; return }
     setVideoFile(file)
     setVideoPreview(URL.createObjectURL(file))
     setHasContent(true)
@@ -175,6 +271,7 @@ export default function ShareReport() {
   function onVideoFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
+    if (!navigator.onLine) { alert('오프라인 상태에서는 동영상 저장이 제한됩니다. 인터넷 연결 후 이용해 주세요.'); e.target.value = ''; return }
     setVideoFileUpload(file)
     setVideoUploadPreview(URL.createObjectURL(file))
     setHasContent(true)
@@ -190,17 +287,30 @@ export default function ShareReport() {
   function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const files = e.target.files
     if (!files?.length) return
+    const arr = Array.from(files)
     setHasContent(true)
     const urls: (string | null)[] = []
-    for (const f of files) {
+    for (const f of arr) {
       const ext = f.name.split('.').pop()?.toLowerCase() || ''
       if (f.type.startsWith('image/') && !['heic', 'heif'].includes(ext)) {
         urls.push(URL.createObjectURL(f))
       } else if (['heic', 'heif'].includes(ext)) {
-        urls.push(null)  // HEIC placeholder
+        urls.push(null)
       }
     }
     setPreviews(urls)
+    setCameraFiles(prev => [...prev, ...arr])
+    if (!navigator.onLine) { e.target.value = ''; return } // 오프라인: 기기에만 보관
+    autoSave(arr).then(paths => {
+      if (!paths || paths.length === 0) {
+        alert('자동보관에 실패했습니다. 네트워크 확인 후 다시 시도해 주세요.')
+        setCameraFiles(prev => prev.slice(0, prev.length - arr.length))
+        setPreviews([])
+      } else {
+        setCameraPaths(prev => [...prev, ...paths])
+      }
+    })
+    e.target.value = ''
   }
 
   function initCanvas() {
@@ -257,13 +367,60 @@ const res = await fetch('/share-report/auto-save', { method: 'POST', body: fd, c
     c.getContext('2d')?.clearRect(0, 0, c.width, c.height)
   }
 
+  function resetForm() {
+    setTitle(''); setDescription('')
+    setCameraFiles([]); setCameraPreviews([]); setCameraPaths([])
+    setPreviews([])
+    setVideoFile(null); setVideoPreview(null); setVideoFileUpload(null); setVideoUploadPreview(null)
+    setHasContent(false); setSubmitting(false)
+    reportIdRef.current = null
+    clearCanvas()
+  }
+
   async function postSubmit() {
-    if (!hasContent) {
-      alert('촬영 또는 파일을 먼저 선택해 주세요.')
+    if (!hasContent && !title.trim() && !description.trim()) {
+      alert('내용을 입력하거나 사진/파일을 선택해 주세요.')
       return
     }
-    if (!reportIdRef.current) {
-      alert('자동보관이 되지 않아 접수할 수 없습니다. 다시 시도해 주세요.')
+    // ── 오프라인: 기기(IndexedDB)에 저장 후 연결 시 자동 전송 ──
+    if (!navigator.onLine) {
+      const files: OfflineFile[] = cameraFiles.map(f => ({ kind: 'image' as const, blob: f, name: f.name || `offline_${Date.now()}.jpg` }))
+      if (videoFile) { alert('오프라인 상태에서는 동영상 저장이 제한됩니다. 동영상을 삭제해 주세요.'); return }
+      if (videoFileUpload) { alert('오프라인 상태에서는 동영상 저장이 제한됩니다. 동영상을 삭제해 주세요.'); return }
+      if (files.length > MAX_OFFLINE_FILES) {
+        alert(`오프라인 저장은 한 번에 최대 ${MAX_OFFLINE_FILES}장까지 가능합니다. (현재 ${files.length}장)`)
+        return
+      }
+      const queuedFiles = await offlineQueue.totalFiles()
+      if (queuedFiles + files.length > MAX_QUEUE_FILES) {
+        alert(`오프라인 대기 사진은 총 ${MAX_QUEUE_FILES}장까지 저장됩니다. 인터넷 연결 후 전송을 완료해 주세요.`)
+        return
+      }
+      const c0 = canvasRef.current
+      const drawing = c0 ? c0.toDataURL('image/png') : null
+      const item: OfflineItem = {
+        key: offlineQueue.newKey(),
+        reportId: reportIdRef.current,
+        files,
+        drawing: drawing && drawing.length > 2000 ? drawing : null,
+        title, description, lat, lon,
+        yardEventId: yardEventId || null,
+        yardEventCategory: propEventCategory || null,
+        createdAt: new Date().toISOString(),
+        attempts: 0,
+      }
+      try { await offlineQueue.put(item) } catch { alert('기기 저장에 실패했습니다. 저장 공간을 확인해 주세요.'); return }
+      await refreshQueueCount()
+      registerSync() // 연결 복구 시 SW가 자동 전송 (앱 종료 상태 포함, Android)
+      const waiting = await offlineQueue.count()
+      alert(`오프라인 상태여서 이 기기에 저장했습니다 (대기 ${waiting}건).\n인터넷에 연결되면 자동으로 전송되어 심사가 시작됩니다.`)
+      if (onBack) { onBack(); return }
+      resetForm()
+      return
+    }
+    // 사진 촬영 중(서버 저장 미완료)이면 대기 안내
+    if (cameraFiles.length > 0 && !reportIdRef.current) {
+      alert('사진이 서버에 저장 중입니다. 잠시 후 다시 시도해 주세요.')
       return
     }
     setSubmitting(true)
@@ -272,6 +429,7 @@ const res = await fetch('/share-report/auto-save', { method: 'POST', body: fd, c
     fd.append('title', title)
     fd.append('description', description)
     if (yardEventId) fd.append('yard_event_id', yardEventId)
+    if (propEventCategory) fd.append('yard_event_category', propEventCategory)
     if (lat && lon) {
       fd.append('latitude', lat)
       fd.append('longitude', lon)
@@ -283,10 +441,20 @@ const res = await fetch('/share-report/auto-save', { method: 'POST', body: fd, c
     }
 
     try {
-      const res = await fetch(`/share-report/confirm-auto/${reportIdRef.current}`, { method: 'POST', body: fd })
+      let res
+      if (reportIdRef.current) {
+        res = await fetch(`/share-report/confirm-auto/${reportIdRef.current}`, { method: 'POST', body: fd })
+      } else {
+        if (!lat || !lon) {
+          alert('위치 정보가 없습니다. 위치 허용 후 새로고침해 주세요.')
+          setSubmitting(false); return
+        }
+        res = await fetch('/share-report', { method: 'POST', body: fd })
+      }
       const data = await res.json()
       if (data.status === 'success') {
         alert(data.msg)
+        if (onBack) { onBack(); return }
         window.location.href = '/share'
       } else {
         alert(data.msg || '오류 발생')
@@ -306,10 +474,21 @@ const res = await fetch('/share-report/auto-save', { method: 'POST', body: fd, c
 
   return (
     <div className="container-fluid px-3 py-3" style={{ maxWidth: '100%' }}>
-      <h4 className="fw-bold mb-3 text-center">공유하기</h4>
+      {!onBack && <h4 className="fw-bold mb-3 text-center">공유하기</h4>}
       <div className="alert alert-info py-2 small" style={{ borderRadius: 10 }}>
         사진을 촬영하면 즉시 서버에 자동보관됩니다. 내용 확인 후 <b>공유 접수하기</b> 버튼을 누르면 심사가 시작됩니다.
       </div>
+      {!online && (
+        <div className="alert alert-warning py-2 small mb-2" style={{ borderRadius: 10 }}>
+          📴 <b>오프라인</b> — 작성 내용은 이 기기에 저장되며, 인터넷에 연결되면 자동 전송됩니다.<br />
+          (동영상 저장 제한 · 사진 1회 최대 {MAX_OFFLINE_FILES}장 / 대기 총 {MAX_QUEUE_FILES}장)
+        </div>
+      )}
+      {queueCount > 0 && (
+        <div className="alert alert-secondary py-2 small mb-2" style={{ borderRadius: 10 }}>
+          ⏳ 자동전송 대기 <b>{queueCount}</b>건 {online ? '· 전송 준비 중' : '· 오프라인 대기 중'}
+        </div>
+      )}
       <div className="card border-0 shadow-sm" style={{ borderRadius: 16 }}>
         <div className="card-body p-3">
           <form onSubmit={handleSubmit}>
@@ -325,8 +504,8 @@ const res = await fetch('/share-report/auto-save', { method: 'POST', body: fd, c
                 <div className="col-6">
                   <input type="file" ref={videoInputRef} accept="video/*" capture="environment" onChange={onVideoCapture} style={{ display: 'none' }} />
                   <button type="button" className="btn btn-danger w-100 py-3 fw-bold" style={{ borderRadius: 12, fontSize: '1.1rem' }}
-                    onClick={() => videoInputRef.current?.click()} disabled={!cameraReady}>
-                    동영상
+                    onClick={() => { if (!online) { alert('오프라인 상태에서는 동영상 저장이 제한됩니다.'); return } videoInputRef.current?.click() }} disabled={!cameraReady}>
+                    동영상{!online ? ' (제한)' : ''}
                   </button>
                 </div>
               </div>
@@ -350,8 +529,8 @@ const res = await fetch('/share-report/auto-save', { method: 'POST', body: fd, c
               )}
             </div>
             <div className="mb-3">
-              <span className="fw-bold small d-block mb-1">동영상 파일 업로드</span>
-              <input type="file" ref={videoFileInputRef} className="form-control" accept="video/mp4,video/avi,video/mov,video/mkv,video/webm" onChange={onVideoFileUpload} />
+              <span className="fw-bold small d-block mb-1">동영상 파일 업로드{!online && <span className="text-danger"> (오프라인 제한)</span>}</span>
+              <input type="file" ref={videoFileInputRef} className="form-control" accept="video/mp4,video/avi,video/mov,video/mkv,video/webm" onChange={onVideoFileUpload} disabled={!online} />
               {videoUploadPreview && (
                 <div className="mt-2 text-center">
                   <video src={videoUploadPreview} controls className="w-100 rounded" style={{ maxHeight: 300 }} />
@@ -415,7 +594,7 @@ const res = await fetch('/share-report/auto-save', { method: 'POST', body: fd, c
             </div>
             <button type="submit" className="btn btn-success w-100 py-3 fw-bold" style={{ borderRadius: 12, fontSize: '1.1rem' }}
               disabled={submitting}>
-              {submitting ? '접수 중...' : '공유 접수하기'}
+              {submitting ? '접수 중...' : online ? '공유 접수하기' : '📴 오프라인 저장'}
             </button>
           </form>
         </div>
