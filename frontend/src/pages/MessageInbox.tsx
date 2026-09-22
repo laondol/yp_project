@@ -80,6 +80,13 @@ function getLabelColor(idx: number, isOriginalSender: boolean): string {
   return isOriginalSender ? '#0d6efd' : '#27ae60'
 }
 
+/** 일정 편지로 공유한 원본 편지인지 (회신/답신 제외) */
+function isScheduleLetter(m?: { subject?: string } | null): boolean {
+  if (!m) return false
+  const s = m.subject || ''
+  return s.startsWith('📅 일정 공유:') && !/(회신|답신)\d*$/.test(s)
+}
+
 function ArchiveThread({ root, children_msgs, myId, onDelete, onReply }: {
   root: MessageItem; children_msgs: MessageItem[]; myId: number
   onDelete: (id: number) => void; onReply: (id: number) => void
@@ -179,7 +186,9 @@ function ArchiveThread({ root, children_msgs, myId, onDelete, onReply }: {
                   dangerouslySetInnerHTML={{ __html: letterHtml(detailMsg.content) }} />
               </div>
               <div className="modal-footer py-2">
-                <button className="btn btn-sm btn-outline-success" onClick={() => setCopyOpen(true)}>📅 내 일정에 복사</button>
+                {isScheduleLetter(detailMsg) && (
+                  <button className="btn btn-sm btn-outline-success" onClick={() => setCopyOpen(true)}>📅 내 일정에 복사</button>
+                )}
                 <button className="btn btn-sm btn-outline-secondary" onClick={() => setDetailMsg(null)}>닫기</button>
                 <button className="btn btn-sm btn-outline-primary" onClick={() => { setDetailMsg(null); onReply(detailMsg.id) }}>{replyBtnLabel}</button>
               </div>
@@ -355,7 +364,9 @@ export default function MessageInbox() {
                   dangerouslySetInnerHTML={{ __html: letterHtml(detailMsg.content) }} />
               </div>
               <div className="modal-footer py-2">
-                <button className="btn btn-sm btn-outline-success" onClick={() => setCopyOpen(true)}>📅 내 일정에 복사</button>
+                {isScheduleLetter(detailMsg) && (
+                  <button className="btn btn-sm btn-outline-success" onClick={() => setCopyOpen(true)}>📅 내 일정에 복사</button>
+                )}
                 <button className="btn btn-sm btn-outline-secondary" onClick={() => setDetailMsg(null)}>닫기</button>
               </div>
             </div>

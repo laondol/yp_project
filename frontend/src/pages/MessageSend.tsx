@@ -36,6 +36,13 @@ function formatDate(iso?: string): string {
   return new Date(iso).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
+/** 일정 편지로 공유한 원본 편지인지 (회신/답신 제외) */
+function isScheduleLetter(m?: { subject?: string } | null): boolean {
+  if (!m) return false
+  const s = m.subject || ''
+  return s.startsWith('📅 일정 공유:') && !/(회신|답신)\d*$/.test(s)
+}
+
 export default function MessageSend() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
@@ -270,7 +277,9 @@ export default function MessageSend() {
                   dangerouslySetInnerHTML={{ __html: renderContent(detailMsg.content) }} />
               </div>
               <div className="modal-footer py-2">
-                <button className="btn btn-sm btn-outline-success" onClick={() => setCopyOpen(true)}>📅 내 일정에 복사</button>
+                {isScheduleLetter(detailMsg) && (
+                  <button className="btn btn-sm btn-outline-success" onClick={() => setCopyOpen(true)}>📅 내 일정에 복사</button>
+                )}
                 <button className="btn btn-sm btn-outline-secondary" onClick={() => setDetailMsg(null)}>닫기</button>
               </div>
             </div>
