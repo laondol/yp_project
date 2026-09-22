@@ -91,7 +91,17 @@ def create_app():
     
     # gunicorn에서도 실행되도록 초기화 보장
     with app.app_context():
-        db.create_all()
+        # 워커 동시 부팅 시 create_all 경합 방지: 실패 시 재시도 (다른 워커가 테이블 생성 완료 후 통과)
+        import time as _time
+        for _attempt in range(4):
+            try:
+                db.create_all()
+                break
+            except Exception as _ce:
+                if _attempt >= 3:
+                    raise
+                print(f'[create_all] race retry {_attempt + 1}/3: {type(_ce).__name__}')
+                _time.sleep(1.5)
         # 신규 컬럼 자동 추가 (기존 DB 마이그레이션)
         from sqlalchemy import inspect as _sa_inspect, text as _sa_text
         try:
