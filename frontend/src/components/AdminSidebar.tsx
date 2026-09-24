@@ -1,4 +1,5 @@
 import { useNavigate, useLocation } from 'react-router-dom'
+import { useAuth } from '../contexts/AuthContext'
 
 const MENUS = [
   { path: '/admin', label: '대시보드', icon: '🏠' },
@@ -13,18 +14,20 @@ const MENUS = [
   { path: '/admin/ai-train', label: 'AI 가르치기', icon: '📚' },
   { path: '/admin/ai-broadcasts', label: 'AI 전체공지', icon: '📢' },
   { path: '/admin/pending-letters', label: '보류편지', icon: '📨' },
-  { path: '/admin/page-managers', label: '페이지관리자', icon: '🔑' },
+  { path: '/admin/page-managers', label: '페이지관리자', icon: '🔑', leaderOnly: true },
 ]
 
 export default function AdminSidebar() {
   const navigate = useNavigate()
   const location = useLocation()
+  const { user } = useAuth()
+  const isLeader = user?.role === 'leader'
 
   return (
     <div className="card border-0 shadow-sm" style={{ borderRadius: 16 }}>
       <div className="card-body p-3">
         <h6 className="fw-bold text-success mb-3 px-2">🛡️ 관리 메뉴</h6>
-        {MENUS.map(m => (
+        {MENUS.filter(m => !(m as any).leaderOnly || isLeader).map(m => (
           <div key={m.path}
             onClick={() => navigate(m.path)}
             style={{

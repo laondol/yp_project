@@ -1,4 +1,5 @@
 import { useNavigate, useLocation } from 'react-router-dom'
+import { useAuth } from '../contexts/AuthContext'
 
 const MENUS = [
   { path: '/admin', label: '대시보드', icon: '🏠' },
@@ -13,19 +14,21 @@ const MENUS = [
   { path: '/admin/ai-train', label: 'AI 가르치기', icon: '📚' },
   { path: '/admin/ai-broadcasts', label: 'AI 전체공지', icon: '📢' },
   { path: '/admin/pending-letters', label: '보류편지', icon: '📨' },
-  { path: '/admin/page-managers', label: '페이지관리자', icon: '🔑' },
+  { path: '/admin/page-managers', label: '페이지관리자', icon: '🔑', leaderOnly: true },
   { path: '/admin/postgresql', label: 'DB관리', icon: '🗄️' },
   { path: '/admin/ramp-applications', label: '경사로', icon: '♿' },
-  { path: '/admin/message', label: '쪽지발송', icon: '✉️' },
+  { path: '/admin/message', label: '쪽지발송', icon: '✉️', leaderOnly: true },
 ]
 
 export default function AdminNav() {
   const navigate = useNavigate()
   const location = useLocation()
+  const { user } = useAuth()
+  const isLeader = user?.role === 'leader'
 
   return (
     <div className="d-flex flex-wrap gap-1 mb-3 pb-2 border-bottom" style={{ overflowX: 'auto', whiteSpace: 'nowrap' }}>
-      {MENUS.map(m => (
+      {MENUS.filter(m => !(m as any).leaderOnly || isLeader).map(m => (
         <button
           key={m.path}
           onClick={() => navigate(m.path)}

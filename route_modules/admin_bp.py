@@ -482,8 +482,8 @@ def admin_user_points(user_id):
 
 @admin_bp.route('/admin/page-managers', methods=['GET','POST'])
 def admin_page_managers():
-    if not _is_admin_or_leader():
-        return "최고책임자/관리자만 접근 가능", 403
+    if session.get('role') != 'leader':
+        return "책임자만 접근 가능", 403
     if request.method == 'POST':
         uid = request.form.get('user_id', type=int)
         page = request.form.get('page','')
@@ -523,7 +523,7 @@ def admin_page_managers():
 
 @admin_bp.route('/api/admin/page-managers')
 def api_admin_page_managers():
-    if not _is_admin_or_leader():
+    if session.get('role') != 'leader':
         return jsonify({'error': '권한 없음'}), 403
     admins = User.query.filter(User.managed_pages.isnot(None), User.managed_pages != '').all()
     admin_ids = {u.id for u in admins}

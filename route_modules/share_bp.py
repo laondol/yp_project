@@ -653,7 +653,7 @@ def admin_ramp_applications():
 
 @share_bp.route('/admin/message/send', methods=['GET', 'POST'])
 def admin_message_send():
-    if session.get('role') not in ['admin', 'leader']:
+    if session.get('role') != 'leader':
         return "권한 없음", 403
     if request.method == 'POST':
         send_type = request.form.get('send_type', 'all')

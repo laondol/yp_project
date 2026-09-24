@@ -341,7 +341,6 @@ export default function NavBar() {
             </li>
             {(user?.role === 'leader' || user?.role === 'admin') && (() => {
               const mp = user?.managed_pages || []
-              const isAdminOrLeader = user?.role === 'leader' || user?.role === 'admin'
               // 관리 메뉴 키 ↔ managed_pages 키 매핑
               const pageToMenu: Record<string, string[]> = {
                 admin_proposals: ['admin_proposals', 'all_proposals', 'proposals'],
@@ -376,18 +375,14 @@ export default function NavBar() {
                   <li><a className="dropdown-item" href="/admin/ai-chat">🤖 관리자 AI</a></li>
                   <li><a className="dropdown-item" href="/admin/ai-feedback">📋 AI 피드백</a></li>
                    {hasPage('admin_ai_train') && <li><a className="dropdown-item" href="/admin/ai-train">📚 양평AI 가르치기</a></li>}
-                  {isAdminOrLeader && (
-                    <>
-                      <li><div className="dropdown-divider"></div></li>
-                      {host !== 'unocum.kr' && (
-                        <li><a className="dropdown-item" href="/admin/page-managers">🔑 페이지관리자</a></li>
-                      )}
-                      <li><a className="dropdown-item" href="/admin/message">쪽지 발송</a></li>
-                    </>
-                  )}
-                </ul>
-              </li>
-              )
+                   {/* 페이지관리자: 책임자 전용 (호스트 제한 유지) */}
+                   {user?.role === 'leader' && host !== 'unocum.kr' && (
+                     <li><a className="dropdown-item" href="/admin/page-managers">🔑 페이지관리자</a></li>
+                   )}
+                   {/* 쪽지 발송은 관리 메뉴에서 제외 — 마을지기는 마을관리 페이지의 쪽지 탭 사용 */}
+                 </ul>
+               </li>
+               )
             })()}
           </ul>
         </div>
