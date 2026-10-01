@@ -727,6 +727,7 @@ def api_confirm_summary(room_id):
                 subject=f'[토론 요약] {room.topic}',
                 content=f'<h4>{room.topic} - 토론 요약</h4><hr>{room.summary_text}',
                 letter_type='normal',
+                is_notice=True,
             )
             db.session.add(msg)
             sent += 1

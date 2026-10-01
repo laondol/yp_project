@@ -121,7 +121,7 @@ def village_message_all():
         try:
             msg = Message(sender_id=uid, sender_name=user.real_name or user.username,
                 receiver_id=r.id, subject=subject, content=content,
-                attachment=attachment_path)
+                attachment=attachment_path, is_notice=True)
             db.session.add(msg)
             count += 1
         except:
@@ -659,7 +659,7 @@ def village_event_message(event_id):
     for r in receivers:
         if r.id == uid: continue
         msg = Message(sender_id=uid, sender_name=user.real_name or user.username,
-            receiver_id=r.id, subject=subject, content=msg_content)
+            receiver_id=r.id, subject=subject, content=msg_content, is_notice=True)
         db.session.add(msg)
         count += 1
     add_points(uid, -cost, 'event_message', f'활동 쪽지: {ev.title[:30]} ({count}명)')

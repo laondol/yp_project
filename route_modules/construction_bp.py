@@ -822,7 +822,7 @@ def admin_alerts_new():
                 db.session.add(Message(sender_id=session.get('user_id'), sender_name='함께사는양평',
                     receiver_id=r.id, subject=f'🚨 마을소식: {title}',
                     content=f'[{town} {village}] {title}\n\n{content}\n\n자세한 내용은 위치기반안내 > 알림에서 확인하세요.',
-                    sender_role=session.get('role','admin')))
+                    sender_role=session.get('role','admin'), is_notice=True))
         db.session.commit()
         return redirect('/admin/alerts')
     user_town = session.get('town', '')

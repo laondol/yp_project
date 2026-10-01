@@ -295,6 +295,35 @@ def create_app():
                 with db.engine.connect() as _conn:
                     _conn.execute(_sa_text(_ddl))
                     _conn.commit()
+            # 편지 공지성 플래그 (시스템·관리메뉴 발신 표시)
+            if 'message' in _tbls:
+                _mcols = [c['name'] for c in _inspector.get_columns('message')]
+                if 'is_notice' not in _mcols:
+                    with db.engine.connect() as _conn:
+                        _conn.execute(_sa_text(
+                            'ALTER TABLE message ADD COLUMN is_notice BOOLEAN NOT NULL DEFAULT FALSE'))
+                        # 최초 추가 시에만 기존 데이터 백필: 편지보내기 외 발송(시스템 자동알림 등) → 공지
+                        # - 시스템명/무발신자, 법률상담(private), 벗 신청 알림, 토론 요약
+                        # - 공직자 발신 중 수신자와 비벗 (벗끼리 개인 편지는 제외)
+                        _conn.execute(_sa_text(
+                            "UPDATE message SET is_notice = TRUE "
+                            "WHERE sender_id IS NULL "
+                            "OR sender_name = '함께사는양평' "
+                            "OR letter_type = 'private' "
+                            "OR subject IN ('👋 벗 신청', '✅ 벗 신청 수락', '❌ 벗 신청 거절') "
+                            "OR subject LIKE '[토론 요약]%' "
+                            "OR (sender_role IN ('admin','leader') "
+                            "  AND NOT EXISTS (SELECT 1 FROM friend f WHERE f.status = 'accepted' "
+                            "    AND ((f.requester_id = message.sender_id AND f.receiver_id = message.receiver_id) "
+                            "      OR (f.requester_id = message.receiver_id AND f.receiver_id = message.sender_id)))"))
+                        _conn.commit()
+                    print("[OK] message.is_notice 컬럼 추가 + 기존 공지 데이터 백필")
+                if 'sender_archived' not in _mcols:
+                    with db.engine.connect() as _conn:
+                        _conn.execute(_sa_text(
+                            'ALTER TABLE message ADD COLUMN sender_archived BOOLEAN NOT NULL DEFAULT FALSE'))
+                        _conn.commit()
+                    print("[OK] message.sender_archived 컬럼 추가")
             # bot_knowledge.id 시퀀스 복구 (시퀀스 누락 시 id null → NotNullViolation → 세션 오염 유발)
             if 'bot_knowledge' in _tbls:
                 _seq_sql = [

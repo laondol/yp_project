@@ -62,7 +62,7 @@ def friend_request(other_id):
         sender_role=requester.role,
         receiver_id=other_id,
         subject='👋 벗 신청',
-        content=f'{requester.real_name or requester.username}님이 벗 신청을 보냈습니다. "내 벗 관리" 페이지에서 수락/거절할 수 있습니다.'
+        content=f'{requester.real_name or requester.username}님이 벗 신청을 보냈습니다. "내 벗 관리" 페이지에서 수락/거절할 수 있습니다.', is_notice=True
     )
     db.session.add(msg)
     db.session.commit()
@@ -82,7 +82,7 @@ def friend_accept(other_id):
         sender_role=accepter.role,
         receiver_id=other_id,
         subject='✅ 벗 신청 수락',
-        content=f'{accepter.real_name or accepter.username}님이 벗 신청을 수락했습니다. 이제 벗입니다!'
+        content=f'{accepter.real_name or accepter.username}님이 벗 신청을 수락했습니다. 이제 벗입니다!', is_notice=True
     )
     db.session.add(msg)
     from tongbot_routes import _rebuild_friend_cache
@@ -104,7 +104,7 @@ def friend_reject(other_id):
         sender_role=rejecter.role,
         receiver_id=other_id,
         subject='❌ 벗 신청 거절',
-        content=f'{rejecter.real_name or rejecter.username}님이 벗 신청을 거절했습니다.'
+        content=f'{rejecter.real_name or rejecter.username}님이 벗 신청을 거절했습니다.', is_notice=True
     )
     db.session.add(msg)
     db.session.delete(f)

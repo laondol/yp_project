@@ -3,6 +3,7 @@ from datetime import datetime, timezone, timedelta, timezone
 from flask import Blueprint, render_template, request, redirect, url_for, jsonify, session, current_app, send_file
 from werkzeug.security import generate_password_hash, check_password_hash
 from models import db, User, PointHistory, Message
+from sqlalchemy import or_
 
 KST = timezone(timedelta(hours=9))
 
@@ -600,7 +601,12 @@ def api_login():
         )
     except Exception as e:
         current_app.logger.warning(f'login alert email failed: {e}')
-    return jsonify({'status': 'success', 'user': {'id': u.id, 'username': u.username, 'role': u.role, 'email': u.email, 'real_name': u.real_name, 'managed_pages': u.managed_pages, 'points': u.points, 'town': u.town, 'village': u.village, 'intro_page_enabled': bool(u.intro_page_enabled), 'password_v2': bool(u.password_v2)}, 'unread_count': Message.query.filter_by(receiver_id=u.id, is_read=False).count()})
+    # 읽지 않은 편지 수: 탭(벗으로부터/공지/보관함)에서 보이는 편지만 (본인이 자신에게 보낸 제외, 무발신 시스템 공지 포함)
+    _unread = Message.query.filter(
+        Message.receiver_id == u.id, Message.is_read == False,
+        or_(Message.sender_id.is_(None), Message.sender_id != u.id),
+    ).count()
+    return jsonify({'status': 'success', 'user': {'id': u.id, 'username': u.username, 'role': u.role, 'email': u.email, 'real_name': u.real_name, 'managed_pages': u.managed_pages, 'points': u.points, 'town': u.town, 'village': u.village, 'intro_page_enabled': bool(u.intro_page_enabled), 'password_v2': bool(u.password_v2)}, 'unread_count': _unread})
 
 @auth_bp.route('/api/auth/upgrade-password', methods=['POST'])
 def api_upgrade_password():

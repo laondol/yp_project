@@ -37,8 +37,12 @@ def api_user_dashboard():
         'location': s.location or '', 'memo': (s.memo or '')[:60],
     } for s in schedules]
 
-    # 2. 안 읽은 편지
-    unread_msgs = Message.query.filter_by(receiver_id=uid, is_read=False).order_by(Message.created_at.desc()).limit(5).all()
+    # 2. 안 읽은 편지 (탭에서 보이는 편지만 — 본인 자신에게 보낸 편지 제외, 무발신 시스템 공지 포함)
+    from sqlalchemy import or_ as _or2
+    unread_msgs = Message.query.filter(
+        Message.receiver_id == uid, Message.is_read == False,
+        _or2(Message.sender_id.is_(None), Message.sender_id != uid),
+    ).order_by(Message.created_at.desc()).limit(5).all()
     unread_messages = [{
         'id': m.id, 'subject': m.subject or '(제목 없음)', 'sender': m.sender_name or '',
         'created_at': m.created_at.isoformat() if m.created_at else '',
@@ -112,18 +116,25 @@ def api_user_notification_summary():
 
     unread_friend_letters = 0
     unread_notices = 0
+    from sqlalchemy import or_ as _or
     if friend_ids:
         unread_friend_letters = Message.query.filter(
             Message.receiver_id == uid, Message.is_read == False,
             Message.sender_id.in_(friend_ids),
             Message.reply_to_id.is_(None),
+            Message.is_notice == False,
         ).count()
-    # 공지: 비친구가 보낸 읽지 않은 편지
+    # 공지: 시스템·관리메뉴 발신(is_notice) 또는 비벗이 보낸 읽지 않은 원문
+    notice_conds = [Message.is_notice == True]
+    if friend_ids:
+        notice_conds.append(_or(Message.sender_id.is_(None), ~Message.sender_id.in_(friend_ids)))
+    else:
+        notice_conds.append(Message.id != 0)
     unread_notices = Message.query.filter(
         Message.receiver_id == uid, Message.is_read == False,
-        Message.sender_id != uid,
-        ~Message.sender_id.in_(friend_ids) if friend_ids else True,
-    ).count() + notices
+        _or(Message.sender_id.is_(None), Message.sender_id != uid),
+        Message.reply_to_id.is_(None),
+    ).filter(_or(*notice_conds)).count() + notices
 
     return jsonify({
         'memos': memos, 'notices': notices, 'friend_requests': friend_requests,

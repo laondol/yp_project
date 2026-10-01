@@ -48,6 +48,126 @@ def _deduct_points(uid, amount, desc):
     return True
 
 
+# ── 스레드/탭 헬퍼 ──
+NOTICE_ROLES = ('admin', 'leader')  # 관리자/마을지기 발신 → 공지 탭
+
+
+def _get_friend_ids(uid):
+    """내 벗 ID 집합"""
+    ids = set()
+    for f in Friend.query.filter(
+        Friend.status == 'accepted',
+        ((Friend.requester_id == uid) | (Friend.receiver_id == uid))
+    ).all():
+        ids.add(f.requester_id if f.receiver_id == uid else f.receiver_id)
+    return ids
+
+
+def _get_root(msg):
+    """reply_to_id 체인을 따라 원문(루트) 편지 반환"""
+    cur = msg
+    seen = set()
+    while cur.reply_to_id and cur.id not in seen:
+        seen.add(cur.id)
+        parent = Message.query.get(cur.reply_to_id)
+        if not parent:
+            break
+        cur = parent
+    return cur
+
+
+def _descendants(root):
+    """루트에서 도달 가능한 모든 편지(루트 포함) — reply_to_id 하위 호환"""
+    result = []
+    stack = [root]
+    seen = set()
+    while stack:
+        cur = stack.pop()
+        if cur.id in seen:
+            continue
+        seen.add(cur.id)
+        result.append(cur)
+        for c in Message.query.filter_by(reply_to_id=cur.id).all():
+            stack.append(c)
+    return result
+
+
+def _thread_rows(msg):
+    """스레드 전체 행 (thread_key 우선, 없으면 reply_to 하위 호환)"""
+    root = _get_root(msg)
+    if root.thread_key:
+        return Message.query.filter_by(thread_key=root.thread_key).all(), root
+    return _descendants(root), root
+
+
+def _ensure_thread_key(msg):
+    """회신 생성 시 스레드 전체에 thread_key 부여(레거시 백필). 스레드 키 반환"""
+    root = _get_root(msg)
+    if root.thread_key:
+        return root.thread_key
+    key = uuid.uuid4().hex
+    for r in _descendants(root):
+        r.thread_key = key
+    return key
+
+
+def _batch_id(row):
+    """행의 배치 그룹 키 (batch_key 없으면 행별 고유)"""
+    return row.batch_key or f'id:{row.id}'
+
+
+def _batch_rows(rows, key):
+    """배치 키로 행 그룹핑 (batch_key가 None인 레거시는 각각 별그룹)"""
+    return [r for r in rows if _batch_id(r) == key]
+
+
+def _display_name(user, role=None, is_notice=False):
+    """탭/스레드 표시 아이디: 공지(시스템·관리메뉴 발신)는 admin@unocum.kr, 그 외 로그인 이메일"""
+    if is_notice:
+        return 'admin@unocum.kr'
+    if not user:
+        return '알수없음'
+    return user.email or user.username or '알수없음'
+
+
+def _is_notice_root(root, uid, friend_ids):
+    """공지 원문 여부 (공지에는 회신 불가): 공지성 발신 또는 나에게 비벗인 원문"""
+    if root.sender_id == uid:
+        return False
+    if root.is_notice or root.sender_id is None:
+        return True
+    return root.sender_id not in friend_ids
+
+
+def _is_sent_personal(rows, friend_ids):
+    """벗에게 탭 배치 판정: 공지 아님 + 수신자 전원이 내 벗목록 (회신 포함)"""
+    if any(r.is_notice for r in rows):
+        return False
+    return all(r.receiver_id in friend_ids for r in rows)
+
+
+def _msg_row_dict(m, uid, friend_ids):
+    """리스트 행 공통 직렬화"""
+    sender = User.query.get(m.sender_id)
+    receiver = User.query.get(m.receiver_id)
+    direction = 'sent' if m.sender_id == uid else 'received'
+    return {
+        'id': m.id, 'subject': m.subject, 'content': m.content,
+        'sender_id': m.sender_id, 'receiver_id': m.receiver_id,
+        'sender_name': _display_name(sender, m.sender_role, m.is_notice),
+        'sender_username': sender.email if sender else None,
+        'sender_role': m.sender_role, 'letter_type': m.letter_type,
+        'receiver_name': _display_name(receiver, receiver.role if receiver else None),
+        'is_read': m.is_read, 'is_public': m.is_public,
+        'is_notice': m.is_notice,
+        'direction': direction, 'reply_to_id': m.reply_to_id,
+        'sender_is_friend': m.sender_id in friend_ids,
+        'batch_key': m.batch_key, 'thread_key': m.thread_key,
+        'created_at': m.created_at.isoformat() if m.created_at else None,
+        'read_at': m.read_at.isoformat() if m.read_at else None,
+    }
+
+
 @message_bp.route('/message/count')
 def message_count():
     uid = session.get('user_id')
@@ -90,8 +210,37 @@ def api_message_users():
     ).all()
     friend_ids += [f.requester_id for f in friends2]
     users = User.query.filter(User.id.in_(friend_ids)).all() if friend_ids else []
-    result = [{'id': u.id, 'username': u.username, 'real_name': u.real_name, 'town': u.town, 'village': u.village} for u in users]
+    result = [{'id': u.id, 'username': u.email, 'real_name': u.real_name, 'town': u.town, 'village': u.village} for u in users]
     return jsonify(result)
+
+
+def _sent_entry_dict(uid, rows):
+    """발신 배치 → 리스트 행 직렬화 (rows는 최신순 정렬 완료, 1배치=1행)"""
+    latest = rows[0]
+    any_read = any(r.is_read for r in rows)
+    return {
+        'id': rows[0].id if any_read else min(r.id for r in rows),
+        'batch_key': rows[0].batch_key,
+        'subject': latest.subject, 'content': latest.content,
+        'sender_id': uid, 'receiver_id': rows[0].receiver_id,
+        'direction': 'sent', 'reply_to_id': latest.reply_to_id,
+        'is_root': latest.reply_to_id is None,
+        'letter_type': latest.letter_type, 'is_public': latest.is_public,
+        'is_read': any_read,
+        'is_notice': any(r.is_notice for r in rows),
+        'sender_name': _display_name(User.query.get(uid)),
+        'sender_username': (User.query.get(uid).email if User.query.get(uid) else None),
+        'sender_is_friend': True,
+        'created_at': (max(r.created_at for r in rows) if any_read else latest.created_at).isoformat() if (latest.created_at) else None,
+        'read_at': max((r.read_at for r in rows if r.read_at), default=None).isoformat() if any(r.read_at for r in rows) else None,
+        'receivers': [
+            {'id': r.receiver_id,
+             'username': (User.query.get(r.receiver_id).email if User.query.get(r.receiver_id) else None),
+             'is_read': r.is_read} for r in rows
+        ],
+        'unread_count': sum(1 for r in rows if not r.is_read),
+        'total_count': len(rows),
+    }
 
 
 @message_bp.route('/api/messages')
@@ -99,75 +248,158 @@ def api_messages():
     uid = session.get('user_id')
     if not uid: return jsonify({'error': 'login'}), 401
     tab = request.args.get('tab', 'received')
-    role = session.get('role', 'user')
-
-    # 친구 ID 목록
-    friend_ids = set()
-    for f in Friend.query.filter(
-        Friend.status == 'accepted',
-        ((Friend.requester_id == uid) | (Friend.receiver_id == uid))
-    ).all():
-        friend_ids.add(f.requester_id if f.receiver_id == uid else f.receiver_id)
+    friend_ids = _get_friend_ids(uid)
+    from sqlalchemy import or_
 
     if tab == 'received':
-        # 벗으로부터: 친구가 보낸 읽지 않은 **새 편지만** (회신/답신 제외)
-        if not friend_ids:
-            msgs = []
-        else:
+        # 벗으로부터: 벗이 보낸 읽지 않은 원문 편지만 (공지 제외)
+        if friend_ids:
             msgs = Message.query.filter(
                 Message.receiver_id == uid,
                 Message.is_read == False,
+                Message.reply_to_id.is_(None),
                 Message.sender_id.in_(friend_ids),
-                Message.reply_to_id.is_(None),
+                Message.is_notice == False,
             ).order_by(Message.created_at.desc()).limit(50).all()
-
-    elif tab == 'sent':
-        # 벗에게: 내가 친구에게 보낸 읽지 않은 **새 편지만** (회신/답신 제외)
-        if not friend_ids:
-            msgs = []
         else:
-            msgs = Message.query.filter(
-                Message.sender_id == uid,
-                Message.receiver_id.in_(friend_ids),
-                Message.is_read == False,
-                Message.reply_to_id.is_(None),
-            ).order_by(Message.created_at.desc()).limit(50).all()
+            msgs = []
+        result = [_msg_row_dict(m, uid, friend_ids) for m in msgs]
+        return jsonify({'my_id': uid, 'messages': result})
 
-    elif tab == 'notice':
-        # 공지: 비친구가 보낸 편지 + 내가 비친구에게 보낸 편지 + 관리자 공개편지
-        msgs = Message.query.filter(
-            Message.id != 0,
+    # 발신 배치 그룹 (한 번의 발송 = 한 행). sent/archive/notice 공통, 300건 내 그룹핑.
+    notice_sent, sent_entries, archive_sent = [], [], []
+    if tab in ('notice', 'sent', 'archive'):
+        sent_rows = Message.query.filter(
+            Message.sender_id == uid,
+            Message.receiver_id != uid,
+        ).order_by(Message.created_at.desc()).limit(300).all()
+        groups = {}
+        for r in sent_rows:
+            groups.setdefault(_batch_id(r), []).append(r)
+        for key, rows in groups.items():
+            rows.sort(key=lambda x: (x.created_at or datetime.min, x.id), reverse=True)
+            entry = _sent_entry_dict(uid, rows)
+            if any(r.is_notice for r in rows):
+                # 발신 공지: 미확인 → 공지 탭 / 읽혔거나 발신자가 보관(읽음) 처리 → 보관함
+                if any(r.is_read for r in rows) or any(r.sender_archived for r in rows):
+                    archive_sent.append(entry)
+                else:
+                    notice_sent.append(entry)
+            elif any(r.is_read for r in rows) or not _is_sent_personal(rows, friend_ids):
+                # 전원 미확인 + 벗 전원 발신(비공지)만 벗에게 → 그 외(읽음·비벗 대상)는 보관함
+                archive_sent.append(entry)
+            else:
+                sent_entries.append(entry)
+
+    if tab == 'notice':
+        # 공지: 시스템·관리메뉴 발신(is_notice) 또는 비벗이 보낸 읽지 않은 원문 (수신)
+        #     + 내가 보낸 공지 배치 (발신 기록)
+        q = Message.query.filter(
+            Message.receiver_id == uid,
+            or_(Message.sender_id.is_(None), Message.sender_id != uid),
+            Message.is_read == False,
+            Message.reply_to_id.is_(None),
+        )
+        conds = [Message.is_notice == True]
+        if friend_ids:
+            conds.append(or_(Message.sender_id.is_(None), ~Message.sender_id.in_(friend_ids)))
+        else:
+            conds.append(Message.id != 0)
+        msgs = q.filter(or_(*conds)).order_by(Message.created_at.desc()).limit(50).all()
+        result = [_msg_row_dict(m, uid, friend_ids) for m in msgs]
+        for e in notice_sent:
+            e['is_unread_reply'] = False
+            result.append(e)
+        result.sort(key=lambda e: e['created_at'] or '', reverse=True)
+        return jsonify({'my_id': uid, 'messages': result[:100]})
+
+    if tab == 'sent':
+        sent_entries.sort(key=lambda e: e['created_at'] or '', reverse=True)
+        return jsonify({'my_id': uid, 'messages': sent_entries[:50]})
+
+    if tab == 'archive':
+        # 보관함: 읽은 원문(받은/보낸) + 읽지 않은 회신(받은, 발신자 아이디 빨간 표시)
+        recv_read = Message.query.filter(
+            Message.receiver_id == uid,
             Message.sender_id != uid,
-        ).filter(
-            ~Message.sender_id.in_(friend_ids) if friend_ids else Message.id != 0,
-        ).order_by(Message.created_at.desc()).limit(50).all()
-
-    elif tab == 'archive':
-        # 보관함: 읽은 모든 편지 + 읽지 않은 회신/답신 (reply_to_id가 있는 것)
-        msgs = Message.query.filter(
-            (Message.receiver_id == uid) | (Message.sender_id == uid),
-            (Message.is_read == True) | (Message.reply_to_id.isnot(None)),
+            Message.is_read == True,
+            Message.reply_to_id.is_(None),
+        ).order_by(Message.created_at.desc()).limit(100).all()
+        unread_replies = Message.query.filter(
+            Message.receiver_id == uid,
+            Message.sender_id != uid,
+            Message.reply_to_id.isnot(None),
+            Message.is_read == False,
         ).order_by(Message.created_at.desc()).limit(100).all()
 
-    else:
-        msgs = []
+        result = [_msg_row_dict(m, uid, friend_ids) for m in recv_read]
+        for m in unread_replies:
+            d = _msg_row_dict(m, uid, friend_ids)
+            d['is_unread_reply'] = True
+            result.append(d)
+        for e in archive_sent:
+            e['is_unread_reply'] = False
+            result.append(e)
+        result.sort(key=lambda e: e['created_at'] or '', reverse=True)
+        return jsonify({'my_id': uid, 'messages': result[:150]})
 
-    result = []
-    for m in msgs:
-        sender = User.query.get(m.sender_id)
-        receiver = User.query.get(m.receiver_id)
-        direction = 'sent' if m.sender_id == uid else 'received'
-        result.append({
-            'id': m.id, 'subject': m.subject, 'content': m.content,
-            'sender_id': m.sender_id, 'receiver_id': m.receiver_id,
-            'sender_name': sender.real_name or sender.username if sender else '알수없음',
-            'sender_role': m.sender_role, 'letter_type': m.letter_type,
-            'receiver_name': receiver.real_name or receiver.username if receiver else '알수없음',
-            'is_read': m.is_read, 'is_public': m.is_public,
-            'direction': direction, 'reply_to_id': m.reply_to_id,
-            'created_at': m.created_at.isoformat() if m.created_at else None,
-        })
-    return jsonify({'my_id': uid, 'messages': result})
+    return jsonify({'my_id': uid, 'messages': []})
+
+
+@message_bp.route('/api/messages/counts')
+def api_messages_counts():
+    """4탭 미확인 개수 (탭 빨간 배지)"""
+    uid = session.get('user_id')
+    if not uid: return jsonify({'error': 'login'}), 401
+    friend_ids = _get_friend_ids(uid)
+
+    from sqlalchemy import or_
+    received = 0
+    if friend_ids:
+        received = Message.query.filter(
+            Message.receiver_id == uid,
+            Message.is_read == False,
+            Message.reply_to_id.is_(None),
+            Message.sender_id.in_(friend_ids),
+            Message.is_notice == False,
+        ).count()
+
+    conds = [Message.is_notice == True]
+    if friend_ids:
+        conds.append(or_(Message.sender_id.is_(None), ~Message.sender_id.in_(friend_ids)))
+    else:
+        conds.append(Message.id != 0)
+    notice = Message.query.filter(
+        Message.receiver_id == uid,
+        or_(Message.sender_id.is_(None), Message.sender_id != uid),
+        Message.is_read == False,
+        Message.reply_to_id.is_(None),
+    ).filter(or_(*conds)).count()
+
+    # 벗에게: 벗 전원 발신·비공지·전원 미확인 발송 배치 수
+    sent = 0
+    sent_rows = Message.query.filter(
+        Message.sender_id == uid,
+        Message.receiver_id != uid,
+    ).order_by(Message.created_at.desc()).limit(300).all()
+    groups = {}
+    for r in sent_rows:
+        groups.setdefault(_batch_id(r), []).append(r)
+    for rows in groups.values():
+        if not _is_sent_personal(rows, friend_ids):
+            continue  # 공지·비벗 대상 발신은 벗에게 배지에서 제외
+        if not any(r.is_read for r in rows):
+            sent += 1
+
+    # 보관함: 읽지 않은 회신
+    archive = Message.query.filter(
+        Message.receiver_id == uid,
+        Message.sender_id != uid,
+        Message.reply_to_id.isnot(None),
+        Message.is_read == False,
+    ).count()
+
+    return jsonify({'received': received, 'sent': sent, 'notice': notice, 'archive': archive})
 
 @message_bp.route('/api/messages/archive-count')
 def api_messages_archive_count():
@@ -177,6 +409,7 @@ def api_messages_archive_count():
     # 상대가 보낸 읽지 않은 회신/답신 (reply_to_id가 있고, 받은 사람만 카운트)
     count = Message.query.filter(
         Message.receiver_id == uid,
+        Message.sender_id != uid,
         Message.reply_to_id.isnot(None),
         Message.is_read == False,
     ).count()
@@ -199,10 +432,10 @@ def api_message_detail(msg_id):
     sender = User.query.get(m.sender_id)
     receiver = User.query.get(m.receiver_id)
 
-    # 관리자/마을지기가 보낸 편지 → 회신은 받은 사람의 마을지기에게
+    # 공지(시스템·관리메뉴 발신) → 회신은 받은 사람의 마을지기에게 (공지 회신은 서버에서 차단됨)
     reply_to_id = m.sender_id
-    reply_to_name = sender.real_name or sender.username if sender else '알수없음'
-    sender_is_admin = bool(sender and sender.role in ('admin', 'leader'))
+    reply_to_name = _display_name(sender, m.sender_role, m.is_notice)
+    sender_is_admin = bool(m.is_notice)
 
     if sender_is_admin and receiver:
         # 받은 사람의 마을지기 찾기
@@ -213,14 +446,15 @@ def api_message_detail(msg_id):
             ).first()
             if leader:
                 reply_to_id = leader.id
-                reply_to_name = '함께사는양평'
+                reply_to_name = _display_name(leader, 'leader', False)
 
     return jsonify({
         'id': m.id, 'subject': m.subject, 'content': m.content,
         'sender_id': m.sender_id,
-        'sender_name': '함께사는양평' if sender_is_admin else (sender.real_name or sender.username if sender else '알수없음'),
+        'sender_name': _display_name(sender, m.sender_role, m.is_notice),
         'receiver_id': m.receiver_id,
-        'receiver_name': receiver.real_name or receiver.username if receiver else '알수없음',
+        'receiver_name': _display_name(receiver, receiver.role if receiver else None),
+        'is_notice': m.is_notice,
         'reply_to_id': reply_to_id,
         'reply_to_name': reply_to_name,
         'sender_is_admin': sender_is_admin,
@@ -229,7 +463,7 @@ def api_message_detail(msg_id):
 
 @message_bp.route('/api/message/<int:msg_id>/thread')
 def api_message_thread(msg_id):
-    """특정 편지의 전체 스레드(원문~가장 최근 회신) 조회 — 최신이 위"""
+    """특정 편지의 전체 스레드 조회 — 박스(블록) 구조 포함"""
     uid = session.get('user_id')
     if not uid:
         return jsonify({'error': 'login'}), 401
@@ -241,40 +475,102 @@ def api_message_thread(msg_id):
         if not (m.is_public and role in ('admin', 'leader')):
             return jsonify({'error': 'forbidden'}), 403
 
-    def _msg_dict(msg):
-        s = User.query.get(msg.sender_id)
-        return {
-            'id': msg.id, 'subject': msg.subject, 'content': msg.content,
-            'sender_id': msg.sender_id,
-            'sender_name': s.real_name or s.username if s else '알수없음',
-            'sender_role': msg.sender_role,
-            'sender_is_admin': bool(s and s.role in ('admin', 'leader')),
-            'created_at': msg.created_at.isoformat() if msg.created_at else None,
-        }
+    rows, root = _thread_rows(m)
+    friend_ids = _get_friend_ids(uid)
 
-    def _get_root(msg):
-        cur = msg
-        seen = set()
-        while cur.reply_to_id and cur.id not in seen:
-            seen.add(cur.id)
-            parent = Message.query.get(cur.reply_to_id)
-            if not parent:
-                break
-            cur = parent
-        return cur
+    # 박스 계산 (배치 단위, 시간순)
+    batches = {}
+    for r in sorted(rows, key=lambda x: (x.created_at or datetime.min, x.id)):
+        bid = _batch_id(r)
+        b = batches.get(bid)
+        if b is None:
+            b = batches[bid] = {'rows': [], 'sender': r.sender_id,
+                                'reply_to': r.reply_to_id, 'created': r.created_at}
+        b['rows'].append(r)
+    order = sorted(batches.keys(), key=lambda k: (batches[k]['created'] or datetime.min))
+    root_bid = _batch_id(root)
+    root_sender = root.sender_id
+    box = {}
+    counter = 0
+    for bid in order:
+        b = batches[bid]
+        if b['reply_to'] is None:          # 원문 → 1번 박스
+            counter = max(counter, 1)
+            box[bid] = 1
+            continue
+        parent_row = Message.query.get(b['reply_to'])
+        pbid = _batch_id(parent_row) if parent_row else root_bid
+        pbox = box.get(pbid, 1)
+        if b['sender'] == root_sender:     # 발신자(원문 작성자)의 답변 → 새 박스
+            counter += 1
+            box[bid] = counter
+        elif pbid == root_bid:             # 원문 바로 아래 회신 → 원문 박스 유지
+            box[bid] = pbox
+        elif pbox == 1:                    # 1번 박스 멤버에 대한 답신 → 새 박스
+            counter += 1
+            box[bid] = counter
+        else:                              # 2번 이상 박스 내부 → 같은 박스
+            box[bid] = pbox
 
-    root = _get_root(m)
+    # 내게 보이는 행만 (공개 fan-out은 참여자마다 행 1개, 개별답신은 발신자/수신자만)
+    my_rows = [r for r in rows if r.sender_id == uid or r.receiver_id == uid]
+    seen = set()
+    entries = []
+    for r in sorted(my_rows, key=lambda x: (x.created_at or datetime.min, x.id)):
+        bid = _batch_id(r)
+        if bid in seen:
+            continue
+        seen.add(bid)
+        b = batches[bid]
+        sender_user = User.query.get(r.sender_id)
+        unread = sum(1 for x in b['rows'] if not x.is_read)
+        entries.append({
+            'id': r.id, 'subject': r.subject, 'content': r.content,
+            'sender_id': r.sender_id,
+            'sender_name': _display_name(sender_user, r.sender_role, r.is_notice),
+            'sender_username': sender_user.email if sender_user else None,
+            'sender_role': r.sender_role,
+            'sender_is_admin': bool(r.is_notice),
+            'sender_is_friend': r.sender_id in friend_ids,
+            'is_read': r.is_read,
+            'read_at': r.read_at.isoformat() if r.read_at else None,
+            'created_at': r.created_at.isoformat() if r.created_at else None,
+            'reply_to_id': r.reply_to_id,
+            'batch_key': r.batch_key,
+            'box_index': box.get(bid, 1),
+            'unread_count': unread,
+            'total_count': len(b['rows']),
+            'letter_type': r.letter_type, 'is_public': r.is_public,
+        })
 
-    def _get_children(msg):
-        children = Message.query.filter_by(reply_to_id=msg.id).order_by(Message.created_at.asc()).all()
-        result = [_msg_dict(msg)]
-        for c in children:
-            result.extend(_get_children(c))
-        return result
+    # 참여자 목록
+    participants = {}
+    for r in rows:
+        for pid in (r.sender_id, r.receiver_id):
+            if pid in participants:
+                continue
+            u = User.query.get(pid)
+            participants[pid] = {
+                'id': pid,
+                'username': _display_name(u),
+                'real_name': u.real_name if u else None,
+                'role': u.role if u else None,
+                'display_name': _display_name(u),
+                'is_friend': pid in friend_ids,
+            }
 
-    thread = _get_children(root)
-    thread.reverse()
-    return jsonify({'my_id': uid, 'thread': thread})
+    root_user = User.query.get(root.sender_id)
+    return jsonify({
+        'my_id': uid,
+        'root_id': root.id,
+        'root_subject': root.subject,
+        'root_sender_id': root.sender_id,
+        'root_sender_name': _display_name(root_user, root.sender_role, root.is_notice),
+        'is_notice': _is_notice_root(root, uid, friend_ids),
+        'thread': entries,  # 오래된 순 (클라이언트가 박스 단위 역순 렌더)
+        'participants': list(participants.values()),
+        'friend_ids': sorted(friend_ids),
+    })
 
 @message_bp.route('/api/message/send', methods=['POST'])
 def api_message_send():
@@ -287,7 +583,7 @@ def api_message_send():
     reply_to_id_raw = request.form.get('reply_to_id')
     reply_to_id = int(reply_to_id_raw) if reply_to_id_raw and reply_to_id_raw.isdigit() else None
 
-    has_internal = bool(ids_raw and ids_raw.strip())
+    has_internal = bool((ids_raw and ids_raw.strip()) or reply_to_id)
     has_external = bool(external_email)
 
     if not has_internal and not has_external:
@@ -321,13 +617,56 @@ def api_message_send():
     # ── 내부 편지 처리 ──
     ids = []
     sent = 0
+    thread_key = None
+    scope = request.form.get('scope', '').strip()  # 회신 시 'public'(전체답신/공개회신) | 'private'
     if has_internal:
         try:
-            ids = [int(x.strip()) for x in ids_raw.split(',') if x.strip()]
+            ids = [int(x.strip()) for x in (ids_raw or '').split(',') if x.strip()]
         except ValueError:
             return jsonify({'status': 'error', 'msg': '받는 사람 형식이 올바르지 않습니다.'}), 400
         ids = list(dict.fromkeys(ids))
         ids = [i for i in ids if i != uid]
+
+        batch_key = uuid.uuid4().hex
+        if reply_to_id:
+            parent = Message.query.get(reply_to_id)
+            if not parent:
+                return jsonify({'status': 'error', 'msg': '원문 편지를 찾을 수 없습니다.'}), 404
+            if parent.receiver_id != uid and parent.sender_id != uid:
+                return jsonify({'status': 'error', 'msg': '열람 권한이 없습니다.'}), 403
+            root = _get_root(parent)
+            thread_key = _ensure_thread_key(parent)
+            i_am_root = (root.sender_id == uid)
+            fids = _get_friend_ids(uid)
+
+            if not i_am_root and _is_notice_root(root, uid, fids):
+                if root.is_notice or root.sender_id is None:
+                    return jsonify({'status': 'error', 'msg': '공지 편지는 회신할 수 없습니다.'}), 400
+                return jsonify({'status': 'error', 'msg': '벗이 아니라서 공지사항에는 회신할 수 없습니다.'}), 400
+
+            if i_am_root and scope != 'public':
+                # 발신자 개별답신: 지정한 수신자 1명 (없으면 회신 대상)
+                if not ids:
+                    ids = [parent.sender_id] if parent.sender_id != uid else []
+                bad = [i for i in ids if i not in fids]
+                if bad:
+                    return jsonify({'status': 'error',
+                                    'msg': '벗이 아닌 사람에게는 회신할 수 없습니다. 벗 신청 후 이용하세요.'}), 400
+            else:
+                # 공개 회신/전체답신: 스레드 참여자 전원에게 fan-out
+                allowed = (i_am_root or parent.sender_id == uid
+                           or parent.sender_id in fids or parent.sender_id == root.sender_id)
+                if not allowed:
+                    return jsonify({'status': 'error',
+                                    'msg': '벗이 아닌 사람에게는 회신할 수 없습니다. 벗 신청 후 이용하세요.'}), 400
+                trows, _ = _thread_rows(parent)
+                participants = set()
+                for r in trows:
+                    participants.add(r.sender_id)
+                    participants.add(r.receiver_id)
+                participants.discard(uid)
+                ids = sorted(participants)
+
         if ids:
             total = LETTER_COST * len(ids)
             balance = _get_balance(uid)
@@ -344,10 +683,12 @@ def api_message_send():
                     sender_name=session.get('real_name', session['username']),
                     sender_role=session.get('role', 'user'),
                     receiver_id=receiver.id,
-                    subject=subject,
+                    subject='' if reply_to_id else subject,  # 회신/답신은 제목 없음
                     content=content,
                     letter_type='normal',
                     reply_to_id=reply_to_id,
+                    thread_key=thread_key if reply_to_id else batch_key,
+                    batch_key=batch_key,
                 )
                 db.session.add(msg)
                 sent += 1
@@ -381,6 +722,8 @@ def api_message_send():
             reply_to_id=reply_to_id,
             external_email=external_email,
             email_status='sent' if EmailService.send(external_email, email_subject, email_body) else 'failed',
+            thread_key=thread_key if reply_to_id else None,
+            batch_key=uuid.uuid4().hex if reply_to_id else None,
         )
         db.session.add(msg_ext)
         db.session.commit()
@@ -390,11 +733,12 @@ def api_message_send():
         db.session.add(rate)
         db.session.commit()
 
-    # 회신/답신 시 원문 자동 읽음 처리
+    # 회신/답신 시 내가 받은 원문(내 사본) 자동 읽음 처리 (내가 보낸 사본은 미확인 유지)
     if reply_to_id:
         orig = Message.query.get(reply_to_id)
-        if orig and not orig.is_read and (orig.receiver_id == uid or orig.sender_id == uid):
+        if orig and not orig.is_read and orig.receiver_id == uid:
             orig.is_read = True
+            orig.read_at = datetime.now()
             db.session.commit()
 
     msgs = []
@@ -746,6 +1090,8 @@ def read_message(msg_id):
         return jsonify({'error': '권한 없음'}), 403
 
     msg.is_read = True
+    if not msg.read_at:
+        msg.read_at = datetime.now()
     db.session.commit()
 
     if request.method == 'POST':
@@ -763,7 +1109,79 @@ def api_message_delete(msg_id):
     if msg.sender_id != uid and msg.receiver_id != uid:
         return jsonify({'status': 'error', 'msg': '권한 없음'}), 403
     try:
-        db.session.delete(msg)
+        if msg.sender_id == uid:
+            # 발신자 삭제: 한 수신자라도 읽었으면 삭제 불가 (사본 삭제는 수신자 본인이 읽은 후에도 가능)
+            # 단, 공지(is_notice)는 발신자가 읽은 후에도 삭제 가능 (공지 정리)
+            if msg.batch_key:
+                rows = Message.query.filter_by(batch_key=msg.batch_key).all()
+                if any(r.is_read for r in rows) and not msg.is_notice:
+                    return jsonify({'status': 'error', 'msg': '이미 읽은 편지는 삭제할 수 없습니다.'}), 400
+                for r in rows:
+                    db.session.delete(r)
+            else:
+                if msg.is_read and not msg.is_notice:
+                    return jsonify({'status': 'error', 'msg': '이미 읽은 편지는 삭제할 수 없습니다.'}), 400
+                db.session.delete(msg)
+        else:
+            # 수신자: 본인 사본만 삭제
+            db.session.delete(msg)
+        db.session.commit()
+        return jsonify({'status': 'success'})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'status': 'error', 'msg': str(e)}), 500
+
+
+@message_bp.route('/api/message/sender-archive/<int:msg_id>', methods=['POST'])
+def api_message_sender_archive(msg_id):
+    """발신 공지 보관 처리: 발신자의 공지 탭에서 보관함으로 이동 (수신자 상태는 불변)"""
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({'status': 'error', 'msg': '로그인이 필요합니다.'}), 401
+    msg = Message.query.get_or_404(msg_id)
+    if msg.sender_id != uid:
+        return jsonify({'status': 'error', 'msg': '권한 없음'}), 403
+    if not msg.is_notice:
+        return jsonify({'status': 'error', 'msg': '공지만 보관 처리할 수 있습니다.'}), 400
+    try:
+        if msg.batch_key:
+            rows = Message.query.filter_by(batch_key=msg.batch_key).all()
+        else:
+            rows = [msg]
+        for r in rows:
+            r.sender_archived = True
+        db.session.commit()
+        return jsonify({'status': 'success'})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'status': 'error', 'msg': str(e)}), 500
+
+
+@message_bp.route('/api/message/<int:msg_id>/edit', methods=['POST'])
+def api_message_edit(msg_id):
+    """보낸 편지 수정 (전원 미확인일 때만, 배치 전체 동시 수정)"""
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({'status': 'error', 'msg': '로그인이 필요합니다.'}), 401
+    msg = Message.query.get(msg_id)
+    if not msg:
+        return jsonify({'status': 'error', 'msg': 'not found'}), 404
+    if msg.sender_id != uid:
+        return jsonify({'status': 'error', 'msg': '권한 없음'}), 403
+    data = request.get_json(silent=True) or {}
+    content = (data.get('content') or '').strip()
+    subject = data.get('subject')
+    if not content:
+        return jsonify({'status': 'error', 'msg': '내용을 입력하세요.'}), 400
+    rows = (Message.query.filter_by(batch_key=msg.batch_key).all()
+            if msg.batch_key else [msg])
+    if any(r.is_read for r in rows):
+        return jsonify({'status': 'error', 'msg': '이미 읽은 편지는 수정할 수 없습니다.'}), 400
+    try:
+        for r in rows:
+            r.content = content
+            if subject is not None and not r.reply_to_id:
+                r.subject = subject
         db.session.commit()
         return jsonify({'status': 'success'})
     except Exception as e:
@@ -865,7 +1283,8 @@ def admin_reject_pending(msg_id):
                  '반려 사유: ' + reason + '\n\n'
                  '※ 이 메시지는 자동 검토 시스템에 의해 발송되었습니다.'),
         is_public=False,
-        letter_type='ai_reject'
+        letter_type='ai_reject',
+        is_notice=True
     )
     db.session.add(reject_msg)
     

@@ -207,7 +207,8 @@ def run_proposal_review_scheduler(app):
                                 sender_role='admin',
                                 receiver_id=author.id,
                                 subject='📢 제안이 자동으로 게시되었습니다',
-                                content=f'「{p.title}」 제안이 7일간 관리자/책임자 리뷰 없이 자동으로 게시되었습니다.'
+                                content=f'「{p.title}」 제안이 7일간 관리자/책임자 리뷰 없이 자동으로 게시되었습니다.',
+                                is_notice=True
                             )
                             db.session.add(msg)
                         # 관리자/책임자에게도 통보
@@ -221,7 +222,8 @@ def run_proposal_review_scheduler(app):
                                 sender_role='admin',
                                 receiver_id=a.id,
                                 subject='📢 제안 자동 게시 알림',
-                                content=f'「{p.title}」 제안이 7일 경과로 자동 게시되었습니다. AI: {p.ai_score}점. (id={p.id})'
+                                content=f'「{p.title}」 제안이 7일 경과로 자동 게시되었습니다. AI: {p.ai_score}점. (id={p.id})',
+                                is_notice=True
                             )
                             db.session.add(msg)
                         print(f'[PROPOSAL] auto-published: {p.title} (id={p.id})')
@@ -259,7 +261,8 @@ def run_proposal_review_scheduler(app):
                                 sender_role='admin',
                                 receiver_id=leader.id,
                                 subject='📋 제안 리뷰 요청',
-                                content=f'「{p.title}」 제안이 {days}일째 리뷰 대기 중입니다. AI 점수: {p.ai_score}점. 7일 내 미리뷰 시 자동 게시됩니다. 관리 페이지에서 점수를 부여해 주세요. (id={p.id})'
+                                content=f'「{p.title}」 제안이 {days}일째 리뷰 대기 중입니다. AI 점수: {p.ai_score}점. 7일 내 미리뷰 시 자동 게시됩니다. 관리 페이지에서 점수를 부여해 주세요. (id={p.id})',
+                                is_notice=True
                             )
                             db.session.add(msg)
                             print(f'[PROPOSAL] reminder sent to {leader.username}: {p.title}')

@@ -136,7 +136,8 @@ class Post(db.Model):
                     sender_role='admin',
                     receiver_id=a.id,
                     subject='📢 누구의 꿈 게시 알림',
-                    content=f'「{self.title}」 제안이 게시되었습니다. AI: {self.ai_score}점, 관리자: {self.admin_score or 0}점, 책임자: {self.leader_score or 0}점.'
+                    content=f'「{self.title}」 제안이 게시되었습니다. AI: {self.ai_score}점, 관리자: {self.admin_score or 0}점, 책임자: {self.leader_score or 0}점.',
+                    is_notice=True
                 )
                 db.session.add(msg)
         # AI+관리자 점수 합 ≥ 20점 → 책임자에게 편지
@@ -157,7 +158,8 @@ class Post(db.Model):
                         sender_role='admin',
                         receiver_id=leader.id,
                         subject='📋 리뷰 요청 (20점 달성)',
-                        content=f'「{self.title}」 제안이 AI+관리자 {self.ai_score + (self.admin_score or 0)}점으로 20점을 달성했습니다. 책임자 리뷰를 부탁드립니다. (id={self.id})'
+                        content=f'「{self.title}」 제안이 AI+관리자 {self.ai_score + (self.admin_score or 0)}점으로 20점을 달성했습니다. 책임자 리뷰를 부탁드립니다. (id={self.id})',
+                        is_notice=True
                     )
                     db.session.add(msg)
         # 현실화 전환
@@ -173,7 +175,8 @@ class Post(db.Model):
                     sender_role='admin',
                     receiver_id=author.id,
                     subject='🎉 현실화 축하드립니다',
-                    content='누구의 꿈에 올라 현실화 단계로 전환되었습니다. 행사 준비를 시작하며, 보상으로 80 닢이 지급되었습니다. 회의에 참석하실 수 있는 날짜와 시간을 알려 주세요. 직접 방문이나 구글미트 회의가 가능합니다. 문의: 010-2438-7953 (평일 10~18시)'
+                    content='누구의 꿈에 올라 현실화 단계로 전환되었습니다. 행사 준비를 시작하며, 보상으로 80 닢이 지급되었습니다. 회의에 참석하실 수 있는 날짜와 시간을 알려 주세요. 직접 방문이나 구글미트 회의가 가능합니다. 문의: 010-2438-7953 (평일 10~18시)',
+                    is_notice=True
                 )
                 db.session.add(msg)
             if author and admin_user and admin_user.id != self.user_id:
@@ -331,6 +334,14 @@ class Message(db.Model):
     # 외부 이메일 발송 관련
     external_email = db.Column(db.String(100), nullable=True)  # 외부 수신자 이메일
     email_status = db.Column(db.String(20), default='none')  # 'none', 'sent', 'failed'
+    # 스레드/회신 시스템
+    thread_key = db.Column(db.String(64), nullable=True, index=True)  # 대화 스레드 묶음 키
+    batch_key = db.Column(db.String(64), nullable=True, index=True)  # 1회 발송 fan-out 묶음 키
+    read_at = db.Column(db.DateTime, nullable=True)  # 읽은 시각 (보관함 표시용)
+    # 공지성 편지 (시스템·관리메뉴 발신) — 편지보내기 개인 발신은 False
+    is_notice = db.Column(db.Boolean, nullable=False, default=False, index=True)
+    # 발신자 보관 처리: 발신 공지를 발신자 쪽 보관함으로 이동 (수신자 읽음 상태와 무관)
+    sender_archived = db.Column(db.Boolean, nullable=False, default=False)
 
 class ShareReport(db.Model):
     id = db.Column(db.Integer, primary_key=True)

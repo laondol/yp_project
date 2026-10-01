@@ -186,7 +186,7 @@ export default function MessageSend() {
                           <small className="text-muted" style={{ fontSize: '0.7rem' }}>{formatDate(item.created_at)}</small>
                         </div>
                         <div className="small text-muted mb-1">
-                          {item.sender_is_admin ? '함께사는양평' : item.sender_name || '알수없음'}
+                          {item.sender_name || '알수없음'}
                         </div>
                         <div className="d-flex align-items-center gap-2">
                           <span className="small text-muted text-truncate flex-grow-1" style={{ fontSize: '0.85em' }}>
@@ -270,7 +270,7 @@ export default function MessageSend() {
               </div>
               <div className="modal-body">
                 <div className="d-flex justify-content-between mb-2">
-                  <small className="text-muted">{detailMsg.sender_is_admin ? '함께사는양평' : detailMsg.sender_name || '알수없음'}</small>
+                  <small className="text-muted">{detailMsg.sender_name || '알수없음'}</small>
                   <small className="text-muted">{formatDate(detailMsg.created_at)}</small>
                 </div>
                 <div className="p-3 bg-light rounded letter-body" style={{ overflowWrap: 'anywhere', lineHeight: 1.8, fontSize: '0.92em' }}

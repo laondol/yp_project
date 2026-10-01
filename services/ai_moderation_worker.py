@@ -210,7 +210,8 @@ def _notify_person(report):
                 sender_id=admin_user.id, sender_name=admin_user.username, sender_role='admin',
                 receiver_id=uploader.id,
                 subject='공유 이미지에 인물이 포함되어 있습니다',
-                content=f'{uploader.real_name or uploader.username}님, 올리신 공유글(#{report.id})에 인물 사진이 포함되어 있습니다.\n\n게시를 원하시면 아래 링크에서 책임 동의를 완료해 주세요.\n{accept_url}\n\n동의하지 않으시면 게시가 보류됩니다.'
+                content=f'{uploader.real_name or uploader.username}님, 올리신 공유글(#{report.id})에 인물 사진이 포함되어 있습니다.\n\n게시를 원하시면 아래 링크에서 책임 동의를 완료해 주세요.\n{accept_url}\n\n동의하지 않으시면 게시가 보류됩니다.',
+                is_notice=True
             )
             db.session.add(msg)
     except Exception:
@@ -227,7 +228,8 @@ def _notify_hold(report, reason):
                 sender_id=admin_user.id, sender_name=admin_user.username, sender_role='admin',
                 receiver_id=uploader.id,
                 subject=f'공유글 #{report.id}이(가) 검토 보류되었습니다',
-                content=f'{uploader.real_name or uploader.username}님, 올리신 공유글(#{report.id})이 검토 결과 보류되었습니다.\n사유: {reason}\n\n작성자 본인에게만 표시되며, 관리자/책임자가 확인하면 게시가 진행됩니다. 마이페이지에서 수정할 수도 있습니다.'
+                content=f'{uploader.real_name or uploader.username}님, 올리신 공유글(#{report.id})이 검토 결과 보류되었습니다.\n사유: {reason}\n\n작성자 본인에게만 표시되며, 관리자/책임자가 확인하면 게시가 진행됩니다. 마이페이지에서 수정할 수도 있습니다.',
+                is_notice=True
             )
             db.session.add(msg)
     except Exception:
@@ -260,7 +262,8 @@ def moderate_pending_letters():
                         subject=f'편지 발송 반려: {msg.subject}',
                         content="[AI 관리자 알림] ㅡ {subject} 이(가) 검토 결과 반려되었습니다.\n반려 사유: ".format(subject=msg.subject) + reason + "\n※ 자동 검토에 의해 발송",
                         is_public=False,
-                        letter_type='ai_reject'
+                        letter_type='ai_reject',
+                        is_notice=True
                     )
                     db.session.add(reject_msg)
                     print(f'[WORKER] Letter #{msg.id} rejected: {reason}')

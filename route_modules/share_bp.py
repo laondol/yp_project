@@ -129,7 +129,8 @@ def _send_auto_saved_notice(report, created_new=False):
             subject=f'공유 자동보관 완료 #{report.id}',
             content='회원님이 촬영/작성하신 공유 자료가 안전하게 자동보관 되었습니다.\n'
                     '공유 자료는 아직 공개되지 않으며, "공유 접수하기" 버튼을 누르면 관리자 심사를 받을 수 있습니다.\n'
-                    '링크: ' + site + '/share/detail/' + str(report.id)
+                    '링크: ' + site + '/share/detail/' + str(report.id),
+            is_notice=True
         ))
         db.session.commit()
         return True
@@ -715,7 +716,8 @@ def admin_message_send():
                 sender_role=sender.role or 'admin',
                 receiver_id=user.id,
                 subject=subject or '(제목 없음)',
-                content=content
+                content=content,
+                is_notice=True
             )
             db.session.add(msg)
         db.session.commit()
@@ -1249,7 +1251,8 @@ def share_report_toggle(report_id, action):
                     sender_role='admin',
                     receiver_id=report.user_id,
                     subject='공유가 보류(반려)되었습니다',
-                    content=f'회원님이 올리신 공유글(#{report.id})은 관리자/리더에 의해 보류되어 게시되지 않습니다.\n사유: {(report.moderation_reason or "검토 결과 부적합")}'
+                    content=f'회원님이 올리신 공유글(#{report.id})은 관리자/리더에 의해 보류되어 게시되지 않습니다.\n사유: {(report.moderation_reason or "검토 결과 부적합")}',
+                    is_notice=True
                 ))
         except Exception:
             pass
