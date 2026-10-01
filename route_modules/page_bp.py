@@ -1,11 +1,13 @@
 import os
+import re
+import html
 from flask import Blueprint, render_template, request, redirect, url_for, jsonify, session, current_app, send_file
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import or_
 from models import db, User, Post, Message, NewsArticle, ShareReport, AiKnowledge, VillageAlert, PostVote
 page_bp = Blueprint('page', __name__)
 from route_modules.user_bp import _cleanup_expired_posts
-from route_modules.common import is_privileged_viewer, mask_name, mask_title, mask_post_item, is_ramp_post
+from route_modules.common import author_email_for as _author_email, is_privileged_viewer, mask_name, mask_title, mask_post_item, is_ramp_post
 
 def _serve_spa():
     path = os.path.join(current_app.root_path, 'frontend', 'dist', 'index.html')
@@ -283,8 +285,10 @@ def api_all_proposals():
         if not visible:
             continue
         item = {
-            'id': p.id, 'title': p.title, 'content': p.content[:150] if p.content else '',
+            'id': p.id, 'title': p.title,
+            'content': re.sub(r'<[^>]+>', '', html.unescape(p.content or ''))[:150],
             'file_path': p.file_path, 'author_name': p.author_name, 'user_id': p.user_id,
+            'author_email': _author_email(p.user_id),
             'like_count': p.like_count, 'dislike_count': p.dislike_count,
             'ai_score': p.ai_score, 'admin_score': p.admin_score,
             'leader_score': p.leader_score, 'member_score': p.member_score,

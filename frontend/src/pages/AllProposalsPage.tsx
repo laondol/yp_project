@@ -45,14 +45,6 @@ function CountdownTimer({ createdAt }: { createdAt?: string }) {
   return <span className="countdown-timer small text-muted">{display}</span>
 }
 
-function isImageFile(fp: string) {
-  const ext = fp.toLowerCase().split('.').pop() || ''
-  return ['png', 'jpg', 'jpeg', 'gif'].includes(ext) || fp.includes('draw_')
-}
-function isPdfFile(fp: string) {
-  return fp.toLowerCase().endsWith('.pdf')
-}
-
 export default function AllProposalsPage() {
   const { user } = useAuth()
   const [posts, setPosts] = useState<Post[]>([])
@@ -128,27 +120,7 @@ export default function AllProposalsPage() {
                     작성자: <AuthorName name={p.author_name || ''} email={p.author_email} userId={p.user_id} />
                   </small>
                 </div>
-                <p className="text-secondary mb-3">{(p.content || '').substring(0, 150)}...</p>
-
-                {p.file_path && (
-                  <div className="mb-3 p-2 bg-light rounded">
-                    <div className="d-flex gap-2 flex-wrap align-items-center">
-                      {isImageFile(p.file_path) ? (
-                        <img src={p.file_path} className="rounded" style={{ maxHeight: 120, maxWidth: '100%' }} alt="첨부 이미지" />
-                      ) : isPdfFile(p.file_path) ? (
-                        <div className="d-flex align-items-center gap-2">
-                          <span className="fs-1">📄</span>
-                          <a href={p.file_path} target="_blank" rel="noopener noreferrer" className="text-decoration-none">PDF 파일</a>
-                        </div>
-                      ) : (
-                        <div className="d-flex align-items-center gap-2">
-                          <span className="fs-1">📎</span>
-                          <a href={p.file_path} target="_blank" rel="noopener noreferrer" className="text-decoration-none">첨부파일</a>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
+                <p className="text-secondary mb-3">{(p.content || '').replace(/<[^>]+>/g, '').substring(0, 150)}...</p>
 
                 <div className="mb-3 p-2 bg-light rounded small">
                   <span className="fw-bold me-2">📊 점수:</span>
