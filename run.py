@@ -324,6 +324,15 @@ def create_app():
                             'ALTER TABLE message ADD COLUMN sender_archived BOOLEAN NOT NULL DEFAULT FALSE'))
                         _conn.commit()
                     print("[OK] message.sender_archived 컬럼 추가")
+            # 노트: 공개 뷰 댓글 허용 옵션
+            if 'note' in _tbls:
+                _ncols = [c['name'] for c in _inspector.get_columns('note')]
+                if 'allow_comments' not in _ncols:
+                    with db.engine.connect() as _conn:
+                        _conn.execute(_sa_text(
+                            'ALTER TABLE note ADD COLUMN allow_comments BOOLEAN DEFAULT TRUE'))
+                        _conn.commit()
+                    print("[OK] note.allow_comments 컬럼 추가")
             # bot_knowledge.id 시퀀스 복구 (시퀀스 누락 시 id null → NotNullViolation → 세션 오염 유발)
             if 'bot_knowledge' in _tbls:
                 _seq_sql = [

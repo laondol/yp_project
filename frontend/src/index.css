@@ -39,3 +39,30 @@ div[style*="max-width"][style*="margin:0 auto"] {
 div.container[style*="max-width"] {
   max-width: 100% !important;
 }
+
+/* 인쇄: 네비·푸터·버튼 숨기고 본문만 출력 */
+@media print {
+  nav.navbar, footer, .position-fixed { display: none !important; }
+  button { display: none !important; }
+  .card { box-shadow: none !important; border: 1px solid #dee2e6 !important; }
+  .card-body { padding: 12px !important; }
+  input, textarea { border: none !important; box-shadow: none !important; }
+}
+
+/* 출력 미리보기에서 인쇄: 페이지 나머지는 숨기고 종이(print-paper)만 출력 */
+@media print {
+  body.print-from-modal * { visibility: hidden !important; }
+  body.print-from-modal .print-paper,
+  body.print-from-modal .print-paper * { visibility: visible !important; }
+  body.print-from-modal .print-paper {
+    position: fixed !important;
+    left: 0 !important;
+    top: 0 !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+    transform: none !important;
+    padding: 8mm 10mm !important;
+  }
+  body.print-from-modal .print-paper img { max-width: 100% !important; height: auto !important; }
+}

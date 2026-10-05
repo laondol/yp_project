@@ -62,6 +62,7 @@ import IntroPage from './pages/IntroPage'
 import WidgetDemoPage from './pages/WidgetDemoPage'
 import NoteListPage from './pages/NoteListPage'
 import NoteWritePage from './pages/NoteWritePage'
+import NotePublicPage from './pages/NotePublicPage'
 import NoteDetailPage from './pages/NoteDetailPage'
 import PresentationPage from './pages/PresentationPage'
 import ProposalPage from './pages/ProposalPage'
@@ -199,6 +200,7 @@ export default function App() {
             {/* 통벗 노트 */}
             <Route path="/note" element={<ProtectedRoute><NoteListPage /></ProtectedRoute>} />
             <Route path="/note/new" element={<ProtectedRoute><NoteWritePage /></ProtectedRoute>} />
+            <Route path="/note/public/:id" element={<NotePublicPage />} />
             <Route path="/note/:id" element={<ProtectedRoute><NoteDetailPage /></ProtectedRoute>} />
             <Route path="/note/:id/edit" element={<ProtectedRoute><NoteWritePage /></ProtectedRoute>} />
 

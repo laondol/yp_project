@@ -1,10 +1,10 @@
 import os
 import re
 import html
-from flask import Blueprint, render_template, request, redirect, url_for, jsonify, session, current_app, send_file
+from flask import Blueprint, render_template, request, redirect, url_for, jsonify, session, current_app, send_file, Response
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import or_
-from models import db, User, Post, Message, NewsArticle, ShareReport, AiKnowledge, VillageAlert, PostVote
+from models import db, User, Post, Message, NewsArticle, ShareReport, AiKnowledge, VillageAlert, PostVote, Note
 page_bp = Blueprint('page', __name__)
 from route_modules.user_bp import _cleanup_expired_posts
 from route_modules.common import author_email_for as _author_email, is_privileged_viewer, mask_name, mask_title, mask_post_item, is_ramp_post
@@ -14,6 +14,65 @@ def _serve_spa():
     if os.path.exists(path):
         return send_file(path)
     return render_template('intro.html')
+
+def _note_og_spa(note_id):
+    """공개 노트 HTML 진입 시 SNS 미리보기(Open Graph) 태그를 주입한 index.html 반환."""
+    try:
+        note = Note.query.get(note_id)
+    except Exception:
+        return None
+    if not note or not note.is_public:
+        return None
+    path = os.path.join(current_app.root_path, 'frontend', 'dist', 'index.html')
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, encoding='utf-8') as f:
+            doc = f.read()
+    except Exception:
+        return None
+
+    title = (note.title or '제목없음').strip()
+    text = html.unescape(re.sub(r'\s+', ' ', re.sub(r'<[^>]+>', ' ', note.content or ''))).strip()
+    desc = (text[:150] + '…') if len(text) > 150 else text
+    if not desc:
+        desc = title
+    origin = request.url_root.rstrip('/')
+    canonical = f'{origin}/note/public/{note_id}'
+    m_img = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', note.content or '')
+    image = ''
+    if m_img:
+        src = m_img.group(1)
+        if src.startswith('http'):
+            image = src
+        elif not src.startswith('data:'):
+            image = origin + (src if src.startswith('/') else '/' + src)
+    if not image:
+        image = f'{origin}/static/images/favicon.png'
+
+    tags = [
+        f'<title>{html.escape(title)} | 함께사는양평</title>',
+        '<meta property="og:type" content="article">',
+        f'<meta property="og:title" content="{html.escape(title)}">',
+        f'<meta property="og:description" content="{html.escape(desc)}">',
+        f'<meta property="og:url" content="{html.escape(canonical)}">',
+        f'<meta property="og:image" content="{html.escape(image)}">',
+        '<meta property="og:site_name" content="함께사는양평">',
+        '<meta name="twitter:card" content="summary">',
+        f'<meta name="twitter:title" content="{html.escape(title)}">',
+        f'<meta name="twitter:description" content="{html.escape(desc)}">',
+        f'<meta name="twitter:image" content="{html.escape(image)}">',
+    ]
+    # 파서가 첫 태그를 우선하므로 기존 고정 메타를 먼저 제거
+    for pat in (
+        r'<title>.*?</title>',
+        r'<meta name="description"[^>]*>',
+        r'<meta property="og:(?:type|title|description|url|image|site_name)"[^>]*>',
+        r'<meta name="twitter:(?:card|title|description|image)"[^>]*>',
+    ):
+        doc = re.sub(pat, '', doc, flags=re.S | re.I)
+    doc = doc.replace('</head>', '\n    ' + '\n    '.join(tags) + '\n  </head>')
+    return Response(doc, mimetype='text/html')
 
 @page_bp.route('/spa')
 @page_bp.route('/spa/<path:path>')
@@ -138,6 +197,11 @@ def widget_editor(path=''):
 @page_bp.route('/note')
 @page_bp.route('/note/<path:path>')
 def note_page(path=''):
+    m = re.match(r'^public/(\d+)$', path or '')
+    if m:
+        resp = _note_og_spa(int(m.group(1)))
+        if resp is not None:
+            return resp
     return _serve_spa()
 
 @page_bp.route('/all-proposals')

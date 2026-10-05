@@ -1,6 +1,8 @@
 import { useRef, useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import ContentEditor, { type ContentEditorHandle } from '../components/contentEditor/ContentEditor'
+import PrintPreviewModal from '../components/PrintPreviewModal'
+import SharePreviewModal from '../components/SharePreviewModal'
 
 export default function NoteWritePage() {
   const { id } = useParams()
@@ -24,6 +26,13 @@ export default function NoteWritePage() {
   const [canLeft, setCanLeft] = useState(false)
   const [canRight, setCanRight] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [isPublic, setIsPublic] = useState(false)
+  const [allowComments, setAllowComments] = useState(true)
+  const [savedId, setSavedId] = useState<string>(id || '')
+  const [shareData, setShareData] = useState<{ url: string; contentText: string } | null>(null)
+  const [hoverChip, setHoverChip] = useState<string | null>(null)
+  const [printOpen, setPrintOpen] = useState(false)
+  const [printData, setPrintData] = useState<{ title: string; category: string; date: string; address: string; content: string } | null>(null)
   const isEdit = !!id
 
   const loadCategories = useCallback(async () => {
@@ -67,6 +76,9 @@ export default function NoteWritePage() {
         if (d.error) { alert(d.error); navigate('/note'); return }
         setTitle(d.title || '')
         setCategory(d.category || '')
+        setIsPublic(!!d.is_public)
+        setAllowComments(d.allow_comments !== false)
+        setSavedId(String(id))
         if (d.content && editorRef.current) {
           editorRef.current.setContent(d.content)
         }
@@ -85,37 +97,124 @@ export default function NoteWritePage() {
     })
   }, [category, categories])
 
-  const handleSave = async () => {
+  // 저장 (네비게이션 없음) → noteId 반환. 공유 시 isPublic=true.
+  const save = useCallback(async (opts?: { isPublic?: boolean }): Promise<string | null> => {
     const content = editorRef.current?.getContent()?.trim() || ''
-    if (!content || content === '<br>') { alert('내용을 입력해 주세요.'); return }
+    if (!content || content === '<br>') { alert('내용을 입력해 주세요.'); return null }
     setSaving(true)
-    const loc = editorRef.current?.getLocation() || { lat: '', lng: '', addr: '' }
-    const finalTitle = title.trim() || category.trim() || '제목없음'
-    const body = {
-      title: finalTitle,
-      category: category.trim() || '기타',
-      content,
-      latitude: loc.lat ? parseFloat(loc.lat) : null,
-      longitude: loc.lng ? parseFloat(loc.lng) : null,
-      address: loc.addr.trim(),
-      is_public: false,
-      yard_event_id: yardEventId ? parseInt(yardEventId) : null,
-    }
     try {
-      const url = isEdit ? '/api/note/' + id : '/api/note'
+      const loc = editorRef.current?.getLocation() || { lat: '', lng: '', addr: '' }
+      const finalTitle = title.trim() || category.trim() || '제목없음'
+      const body = {
+        title: finalTitle,
+        category: category.trim() || '기타',
+        content,
+        latitude: loc.lat ? parseFloat(loc.lat) : null,
+        longitude: loc.lng ? parseFloat(loc.lng) : null,
+        address: loc.addr.trim(),
+        is_public: opts?.isPublic ?? isPublic,
+        allow_comments: allowComments,
+        yard_event_id: yardEventId ? parseInt(yardEventId) : null,
+      }
+      const targetId = id || savedId
+      const url = targetId ? '/api/note/' + targetId : '/api/note'
       const res = await fetch(url, {
-        method: isEdit ? 'PUT' : 'POST',
+        method: targetId ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
         credentials: 'include',
       })
       const d = await res.json()
-      if (d.error) { alert(d.error); return }
-      navigate('/note')
+      if (d.error) { alert(d.error); return null }
+      const nid = String(d.id || targetId || '')
+      if (nid) {
+        setSavedId(nid)
+        if (opts?.isPublic) setIsPublic(true)
+      }
+      return nid || null
     } catch {
       alert('저장에 실패했습니다.')
+      return null
     } finally {
       setSaving(false)
+    }
+  }, [title, category, yardEventId, allowComments, isPublic, id, savedId])
+
+  const handleSave = async () => {
+    const nid = await save()
+    if (nid) navigate('/note')
+  }
+
+  const handleShare = async () => {
+    const nid = await save({ isPublic: true })
+    if (!nid) return
+    const tmp = document.createElement('div')
+    tmp.innerHTML = editorRef.current?.getContent() || ''
+    setShareData({
+      url: `${window.location.origin}/note/public/${nid}`,
+      contentText: (tmp.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 200),
+    })
+  }
+
+  const handlePrint = async () => {
+    const nid = await save()
+    if (!nid) return
+    const loc = editorRef.current?.getLocation() || { lat: '', lng: '', addr: '' }
+    setPrintData({
+      title: title.trim() || category.trim() || '제목없음',
+      category: category.trim(),
+      date: new Date().toISOString().slice(0, 10),
+      address: loc.addr?.trim() || '',
+      content: editorRef.current?.getContent() || '',
+    })
+    setPrintOpen(true)
+  }
+
+  // 분류 칩 ✎ 이름 바꾸기
+  const renameChip = async (e: React.MouseEvent, oldName: string) => {
+    e.stopPropagation()
+    const v = prompt('새 분류 이름을 입력하세요', oldName)
+    if (v == null) return
+    const newName = v.trim().slice(0, 50)
+    if (!newName || newName === oldName) return
+    const r = await fetch('/api/note/categories/rename', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ old: oldName, new: newName }),
+      credentials: 'include',
+    })
+    const d = await r.json().catch(() => ({}))
+    if (!r.ok || d.error) { alert(d.error || '분류 이름 변경에 실패했습니다.'); return }
+    loadCategories()
+    if (category === oldName) setCategory(newName)
+  }
+
+  // 분류 칩 🗑 삭제 (분류명만 제거, 노트는 유지)
+  const removeChip = async (e: React.MouseEvent, name: string) => {
+    e.stopPropagation()
+    if (!confirm(`분류 '${name}'를 삭제할까요?\n(노트는 삭제되지 않습니다)`)) return
+    const r = await fetch('/api/note/categories/' + encodeURIComponent(name), {
+      method: 'DELETE', credentials: 'include',
+    })
+    const d = await r.json().catch(() => ({}))
+    if (!r.ok || d.error) { alert(d.error || '분류 삭제에 실패했습니다.'); return }
+    loadCategories()
+    if (category === name) setCategory('')
+  }
+
+  const toggleComments = async () => {
+    const v = !allowComments
+    setAllowComments(v)
+    const targetId = id || savedId
+    if (targetId) {
+      try {
+        await fetch('/api/note/' + targetId, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ allow_comments: v }),
+          credentials: 'include',
+        })
+      } catch {}
     }
   }
 
@@ -169,8 +268,20 @@ export default function NoteWritePage() {
                   style={{ overflowX: 'auto', scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
                   {categories.map(c => (
                     <button key={c} type="button" data-act={c === category ? '1' : '0'}
-                      className={`btn btn-sm flex-shrink-0 ${c === category ? 'btn-success' : 'btn-outline-secondary'}`}
-                      onClick={() => setCategory(c)}>{c}</button>
+                      className={`btn btn-sm flex-shrink-0 d-inline-flex align-items-center gap-1 ${c === category ? 'btn-success' : 'btn-outline-secondary'}`}
+                      onMouseEnter={() => setHoverChip(c)}
+                      onMouseLeave={() => setHoverChip(prev => (prev === c ? null : prev))}
+                      onClick={() => setCategory(c)}>
+                      {c}
+                      <span className="d-inline-flex gap-1" style={{ opacity: hoverChip === c ? 1 : 0, transition: 'opacity .15s' }}>
+                        <span role="button" title="분류 이름 바꾸기"
+                          style={{ cursor: 'pointer' }}
+                          onClick={e => renameChip(e, c)}>✎</span>
+                        <span role="button" title="분류 삭제"
+                          style={{ cursor: 'pointer' }}
+                          onClick={e => removeChip(e, c)}>🗑</span>
+                      </span>
+                    </button>
                   ))}
                 </div>
                 {canRight && (
@@ -204,16 +315,43 @@ export default function NoteWritePage() {
             <ContentEditor ref={editorRef} lockLocation={!!yardEventId} placeholder="노트 내용을 적어주세요. (사진은 Ctrl+V로 붙여넣기 가능)" />
           </div>
 
-          <div className="d-flex gap-2">
-            <button className="btn btn-success w-100 py-3 fw-bold" style={{ borderRadius: 12 }}
+          <div className="d-flex gap-2 flex-wrap">
+            <button className="btn btn-success flex-grow-1 py-3 fw-bold" style={{ borderRadius: 12, minWidth: 140 }}
               onClick={handleSave} disabled={saving}>
               {saving ? '저장 중...' : '💾 저장하기'}
+            </button>
+
+            <button className="btn btn-outline-primary py-3 fw-bold px-4" style={{ borderRadius: 12 }}
+              onClick={handleShare} disabled={saving}>
+              {saving ? '저장 중...' : '📤 공유하기'}
+            </button>
+
+            <button className="btn btn-outline-secondary py-3 fw-bold px-4" style={{ borderRadius: 12 }}
+              onClick={handlePrint} disabled={saving}>
+              🖨 출력하기
             </button>
             <button className="btn btn-outline-secondary px-4" onClick={() => navigate('/note')}
               disabled={saving}>취소</button>
           </div>
         </div>
       </div>
+
+      {shareData && (
+        <SharePreviewModal
+          onClose={() => setShareData(null)}
+          title={title.trim() || category.trim() || '제목없음'}
+          category={category.trim()}
+          date={new Date().toISOString().slice(0, 10)}
+          contentText={shareData.contentText}
+          url={shareData.url}
+          allowComments={allowComments}
+          onToggleComments={toggleComments}
+        />
+      )}
+
+      {printOpen && printData && (
+        <PrintPreviewModal onClose={() => setPrintOpen(false)} data={printData} />
+      )}
     </div>
   )
 }

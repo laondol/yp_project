@@ -42,6 +42,14 @@ export default function NoteListPage() {
   const [categories, setCategories] = useState<string[]>([])
   const [category, setCategory] = useState<string>('')
   const [loading, setLoading] = useState(true)
+  const [hoverCat, setHoverCat] = useState<string | null>(null)
+
+  const loadCategories = useCallback(async () => {
+    try {
+      const d = await fetch('/api/note/categories', { credentials: 'include' }).then(r => r.json())
+      if (!d.error) setCategories(d.categories || [])
+    } catch {}
+  }, [])
 
   const load = useCallback(async (cat?: string) => {
     setLoading(true)
@@ -54,16 +62,57 @@ export default function NoteListPage() {
   }, [])
 
   useEffect(() => {
-    fetch('/api/note/categories', { credentials: 'include' })
-      .then(r => r.json()).then(d => setCategories(d.categories || [])).catch(() => {})
+    loadCategories()
     load()
-  }, [load])
+  }, [load, loadCategories])
 
   const handleDelete = async (e: React.MouseEvent, id: number) => {
     e.stopPropagation()
     if (!confirm('노트를 삭제하시겠습니까?')) return
     await fetch('/api/note/' + id, { method: 'DELETE', credentials: 'include' })
     load(category)
+  }
+
+  // 분류 이름 바꾸기 (탭 ✎)
+  const renameCategory = async (e: React.MouseEvent, oldName: string) => {
+    e.stopPropagation()
+    const v = prompt('새 분류 이름을 입력하세요', oldName)
+    if (v == null) return
+    const newName = v.trim().slice(0, 50)
+    if (!newName || newName === oldName) return
+    const r = await fetch('/api/note/categories/rename', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ old: oldName, new: newName }),
+      credentials: 'include',
+    })
+    const d = await r.json().catch(() => ({}))
+    if (!r.ok || d.error) { alert(d.error || '분류 이름 변경에 실패했습니다.'); return }
+    await loadCategories()
+    if (category === oldName) {
+      setCategory(newName)
+      load(newName)
+    } else {
+      load(category)
+    }
+  }
+
+  // 분류 삭제 (탭 🗑) — 분류명만 제거, 노트는 '전체'에 남음
+  const removeCategory = async (e: React.MouseEvent, name: string) => {
+    e.stopPropagation()
+    if (!confirm(`분류 '${name}'를 삭제할까요?\n(노트는 삭제되지 않고 '전체'에 남습니다)`)) return
+    const r = await fetch('/api/note/categories/' + encodeURIComponent(name), {
+      method: 'DELETE', credentials: 'include',
+    })
+    const d = await r.json().catch(() => ({}))
+    if (!r.ok || d.error) { alert(d.error || '분류 삭제에 실패했습니다.'); return }
+    await loadCategories()
+    if (category === name) {
+      setCategory('')
+      load()
+    } else {
+      load(category)
+    }
   }
 
   const sortedNotes = useMemo(() => {
@@ -110,8 +159,21 @@ export default function NoteListPage() {
         <button className={`nav-link ${category === '' ? 'active' : ''}`}
           onClick={() => { setCategory(''); load() }}>전체</button>
         {categories.map(c => (
-          <button key={c} className={`nav-link ${category === c ? 'active' : ''}`}
-            onClick={() => { setCategory(c); load(c) }}>{c}</button>
+          <button key={c}
+            className={`nav-link ${category === c ? 'active' : ''} d-inline-flex align-items-center gap-1`}
+            onMouseEnter={() => setHoverCat(c)}
+            onMouseLeave={() => setHoverCat(prev => (prev === c ? null : prev))}
+            onClick={() => { setCategory(c); load(c) }}>
+            {c}
+            <span className="d-inline-flex gap-1" style={{ opacity: hoverCat === c ? 1 : 0, transition: 'opacity .15s' }}>
+              <span role="button" title="분류 이름 바꾸기"
+                style={{ cursor: 'pointer' }}
+                onClick={e => renameCategory(e, c)}>✎</span>
+              <span role="button" title="분류 삭제"
+                style={{ cursor: 'pointer' }}
+                onClick={e => removeCategory(e, c)}>🗑</span>
+            </span>
+          </button>
         ))}
       </div>
 

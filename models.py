@@ -698,8 +698,23 @@ class Note(db.Model):
     address = db.Column(db.String(300))
     yard_event_id = db.Column(db.Integer)   # 마당 행사 연결 (행사후기 글)
     is_public = db.Column(db.Boolean, default=False)
+    allow_comments = db.Column(db.Boolean, default=True)  # 공개 뷰 댓글 허용 여부
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+
+class NoteComment(db.Model):
+    """노트 공개 뷰 댓글 (ShareComment 패턴)"""
+    __tablename__ = 'note_comment'
+    id = db.Column(db.Integer, primary_key=True)
+    note_id = db.Column(db.Integer, db.ForeignKey('note.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    author = db.Column(db.String(50))
+    content = db.Column(db.Text, nullable=False)
+    parent_id = db.Column(db.Integer, db.ForeignKey('note_comment.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+    replies = db.relationship('NoteComment', backref=db.backref('parent', remote_side=[id]), lazy=True)
 
 class TongBotMemo(db.Model):
     id = db.Column(db.Integer, primary_key=True)
