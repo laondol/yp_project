@@ -2,15 +2,22 @@ import json, re
 from datetime import datetime
 from openai import OpenAI
 
-MOTIF_MODEL = "motif/motif-3"
+MOTIF_MODEL = "gemini-flash-lite-latest"
 
-def _motif_text(system, user, format_json=False, timeout=120, max_tokens=2000):
+def _motif_text(system, user, format_json=False, timeout=120, max_tokens=2000, provider='gemini'):
     try:
         from flask import current_app
-        key = current_app.config.get("MOTIF_API_KEY", "")
-        client = OpenAI(api_key=key, base_url="https://api-cbt.morphfactory.io/v1")
+        if provider == 'groq':
+            key = current_app.config.get("GROQ_API_KEY", "")
+            base_url = current_app.config.get("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
+            model = current_app.config.get("GROQ_MODEL", "openai/gpt-oss-120b")
+        else:
+            key = current_app.config.get("MOTIF_API_KEY", "")
+            base_url = current_app.config.get("MOTIF_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/")
+            model = MOTIF_MODEL
+        client = OpenAI(api_key=key, base_url=base_url)
         kwargs = {
-            "model": MOTIF_MODEL,
+            "model": model,
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user}
@@ -109,7 +116,7 @@ CRITICAL: NEVER make up fake news or fake URLs. title must be a real English sea
         return []
 
 def ai_translate_and_format(title, content, source_lang="en"):
-    system = f"당신은 전문 번역가입니다. {source_lang}를 한국어(경기 양평 방언 포함)로 자연스럽게 번역하고, 기사 형식으로 정리해 주세요."
+    system = f"당신은 전문 번역가입니다. {source_lang}를 한국어 격식체(모든 문장을 '~습니다/~합니다'로 끝나게 하고, 반말·구어체·방언은 절대 사용하지 않음)로 자연스럽게 번역하고, 기사 형식으로 정리해 주세요."
     prompt = f"""다음 기사를 한국어로 번역하고, 아래 JSON 형식으로 출력하세요:
 {{
   "title": "번역된 제목",
@@ -118,7 +125,7 @@ def ai_translate_and_format(title, content, source_lang="en"):
 }}
 원본 제목: {title}
 원본 내용: {content[:3000]}"""
-    result = _motif_text(system, prompt, format_json=True)
+    result = _motif_text(system, prompt, format_json=True, provider='groq')
     if not result:
         print(f"[NewsService] 번역 실패: {title[:50]}")
     return result
@@ -133,7 +140,7 @@ def ai_summarize_url(text):
   "is_useful": true/false
 }}
 내용: {text[:3000]}"""
-    return _motif_text(system, prompt, format_json=True)
+    return _motif_text(system, prompt, format_json=True, provider='groq')
 
 def clean_cjk_text(title, summary='', content=''):
     """한자/일본어를 한국어로 변환. 불가피하면 괄호에 한국어 발음 추가."""
@@ -151,7 +158,7 @@ def clean_cjk_text(title, summary='', content=''):
 
 JSON 형식:
 {{"title": "수정된 제목", "summary": "수정된 요약", "content": "수정된 본문"}}"""
-    result = _motif_text(system, prompt, format_json=True)
+    result = _motif_text(system, prompt, format_json=True, provider='groq')
     if not result:
         return title, summary, content
     return (

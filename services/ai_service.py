@@ -48,13 +48,13 @@ def mosaic_image_faces(image_path):
     cv2.imwrite(mosaic_path, img, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
     return mosaic_path
 
-MOTIF_MODEL = "motif/motif-3"
-MOTIF_VISION_MODEL = "motif/motif-3"
+MOTIF_MODEL = "gemini-flash-lite-latest"
+MOTIF_VISION_MODEL = "gemini-flash-lite-latest"
 
 def _motif_client():
     from flask import current_app
     key = current_app.config.get("MOTIF_API_KEY", "")
-    return OpenAI(api_key=key, base_url="https://api-cbt.morphfactory.io/v1")
+    return OpenAI(api_key=key, base_url="https://generativelanguage.googleapis.com/v1beta/openai/")
 
 def _strip_wrappers(text):
     if not text:

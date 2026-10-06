@@ -26,9 +26,9 @@ def _motif_json(prompt, key, system=''):
     """Motif 호출 후 첫 JSON 배열/객체 반환. 실패 시 None"""
     import re as _re
     try:
-        resp = requests.post('https://api-cbt.morphfactory.io/v1/chat/completions',
+        resp = requests.post('https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
             headers={'Authorization': f'Bearer {key}', 'Content-Type': 'application/json'},
-            json={'model': 'motif/motif-3',
+            json={'model': 'gemini-flash-lite-latest',
                   'messages': [{'role': 'system', 'content': system} for system in ([system] if system else [])] +
                               [{'role': 'user', 'content': prompt}],
                   'temperature': 0.1, 'max_tokens': 2000}, timeout=20)
@@ -404,9 +404,9 @@ def bot_chat():
 }}
 오늘: {now.strftime('%Y-%m-%d %H:%M')} ({['월','화','수','목','금','토','일'][now.weekday()]}요일)
 사용자: {msg}"""
-                r = requests.post('https://api-cbt.morphfactory.io/v1/chat/completions',
+                r = requests.post('https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
                     headers={'Authorization': f'Bearer {motif_key}', 'Content-Type': 'application/json'},
-                    json={'model': 'motif/motif-3', 'messages': [{'role': 'user', 'content': reminder_prompt}], 'temperature': 0.1, 'max_tokens': 300}, timeout=10)
+                    json={'model': 'gemini-flash-lite-latest', 'messages': [{'role': 'user', 'content': reminder_prompt}], 'temperature': 0.1, 'max_tokens': 300}, timeout=10)
                 if r.status_code == 200:
                     import json as _json
                     rd = _json.loads(r.json()['choices'][0]['message']['content'])
@@ -1100,7 +1100,7 @@ def _ai_reply(bot, user, user_msg):
         
         # provider별 base_url 매핑
         provider_urls = {
-            'motif': 'https://api-cbt.morphfactory.io/v1',
+            'motif': 'https://generativelanguage.googleapis.com/v1beta/openai/',
             'groq': 'https://api.groq.com/openai/v1',
             'openai': 'https://api.openai.com/v1',
         }
@@ -1114,11 +1114,11 @@ def _ai_reply(bot, user, user_msg):
         
         # provider별 기본 모델名 매핑
         provider_models = {
-            'motif': 'motif/motif-3',
-            'groq': 'llama-3.3-70b-versatile',
+            'motif': 'gemini-flash-lite-latest',
+            'groq': 'openai/gpt-oss-120b',
             'openai': 'gpt-4o-mini',
         }
-        model_name = provider_models.get(user_provider, 'motif/motif-3')
+        model_name = provider_models.get(user_provider, 'gemini-flash-lite-latest')
         
         if not key:
             return f"{_m['emoji']} 안녕하세요! 저는 {bot.bot_name}입니다. {lvl_name} 단계예요."
@@ -1202,7 +1202,7 @@ def _ai_reply(bot, user, user_msg):
         {context_section}
 
 회원: {user_msg}"""
-        r = requests.post(f"{base_url}/chat/completions",
+        r = requests.post(f"{base_url.rstrip('/')}/chat/completions",
             headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
             json={"model": model_name, "messages": [{"role": "user", "content": prompt}], "max_tokens": 800},
             timeout=60)
@@ -1290,9 +1290,9 @@ def _discover_talent(bot, user):
 10단어 이내로 간결하게 답변하세요.
 
 대화기록: {bot.memory or '없음'}"""
-        r = requests.post("https://api-cbt.morphfactory.io/v1/chat/completions",
+        r = requests.post("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
             headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-            json={"model": "motif/motif-3", "messages": [{"role": "user", "content": prompt}], "max_tokens": 50},
+            json={"model": "gemini-flash-lite-latest", "messages": [{"role": "user", "content": prompt}], "max_tokens": 50},
             timeout=15)
         if r.status_code == 200:
             return r.json()["choices"][0]["message"]["content"].strip()
@@ -1394,9 +1394,9 @@ def bot_review(draft_id):
 [게시추천]: (공유마당/꿈꾸기/소식/법률상담/심리상담 중 하나)
 [교정본]:
 (교정된 글 전체)"""
-        r = requests.post("https://api-cbt.morphfactory.io/v1/chat/completions",
+        r = requests.post("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
             headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-            json={"model": "motif/motif-3", "messages": [{"role": "user", "content": prompt}], "max_tokens": 800},
+            json={"model": "gemini-flash-lite-latest", "messages": [{"role": "user", "content": prompt}], "max_tokens": 800},
             timeout=30)
         review = ""
         suggestion = ""
@@ -1620,10 +1620,10 @@ def bot_schedule_ai_internal(uid, msg, user, bot=None):
         if not motif_key:
             return {"reply": "AI 서비스가 현재 이용 불가능합니다.", "action": "chat"}
 
-        resp = requests.post('https://api-cbt.morphfactory.io/v1/chat/completions',
+        resp = requests.post('https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
             headers={'Authorization': f'Bearer {motif_key}', 'Content-Type': 'application/json'},
             json={
-                'model': 'motif/motif-3',
+                'model': 'gemini-flash-lite-latest',
                 'messages': [
                     {'role': 'system', 'content': system_prompt},
                     {'role': 'user', 'content': msg}
@@ -2875,9 +2875,9 @@ def bot_trip_plan():
 Output ONLY the date in YYYY-MM-DD format, nothing else.
 Text: {msg}"""
     try:
-        dr = requests.post('https://api-cbt.morphfactory.io/v1/chat/completions',
+        dr = requests.post('https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
             headers={'Authorization':f'Bearer {motif_key}','Content-Type':'application/json'},
-            json={'model':'motif/motif-3','messages':[{'role':'user','content':date_prompt}],'temperature':0,'max_tokens':20}, timeout=10)
+            json={'model':'gemini-flash-lite-latest','messages':[{'role':'user','content':date_prompt}],'temperature':0,'max_tokens':20}, timeout=10)
         event_date_str = dr.json()['choices'][0]['message']['content'].strip()
         import re as _re
         dm = _re.search(r'\d{4}-\d{2}-\d{2}', event_date_str)
@@ -2899,9 +2899,9 @@ Rules:
 - Output ONLY JSON array, no explanation
 - Include ALL stops mentioned"""
     try:
-        resp = requests.post('https://api-cbt.morphfactory.io/v1/chat/completions',
+        resp = requests.post('https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
             headers={'Authorization':f'Bearer {motif_key}','Content-Type':'application/json'},
-            json={'model':'motif/motif-3','messages':[
+            json={'model':'gemini-flash-lite-latest','messages':[
                 {'role':'system','content':system_prompt},
                 {'role':'user','content':msg}
             ],'temperature':0.1,'max_tokens':1000}, timeout=15)
@@ -3065,8 +3065,8 @@ def _moderate_chat(room_id):
         prompt = f"""당신은 채팅 중재자입니다. 다음 대화를 보고 분위기를 판단하세요.
 긍정적이면 칭찬, 부정적이면 부드럽게 조율하는 한 문장을 쓰세요.
 대화: {recent}"""
-        r = requests.post("https://api-cbt.morphfactory.io/v1/chat/completions",
-            headers={"Authorization": f"Bearer {key}"}, json={"model":"motif/motif-3","messages":[{"role":"user","content":prompt}],"max_tokens":100}, timeout=15)
+        r = requests.post("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+            headers={"Authorization": f"Bearer {key}"}, json={"model":"gemini-flash-lite-latest","messages":[{"role":"user","content":prompt}],"max_tokens":100}, timeout=15)
         if r.status_code == 200:
             reply = r.json()["choices"][0]["message"]["content"]
             db.session.add(ChatMessage(room_id=room_id, user_id=None, username=bot.bot_name, message=f"💬 {reply}", is_bot=True))

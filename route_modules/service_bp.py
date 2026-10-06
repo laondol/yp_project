@@ -39,9 +39,9 @@ def news_translate():
         key = current_app.config.get('MOTIF_API_KEY','')
         if key:
             prompt = f"다음 웹페이지 내용을 한국어로 5문장 이내로 요약 번역하세요.\n\n제목: {title}\n내용: {text}"
-            rr = req.post("https://api-cbt.morphfactory.io/v1/chat/completions",
+            rr = req.post("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
                 headers={"Authorization":f"Bearer {key}","Content-Type":"application/json"},
-                json={"model":"motif/motif-3","messages":[{"role":"user","content":prompt}],"max_tokens":500},
+                json={"model":"gemini-flash-lite-latest","messages":[{"role":"user","content":prompt}],"max_tokens":500},
                 timeout=20)
             if rr.status_code == 200:
                 result = rr.json()["choices"][0]["message"]["content"]

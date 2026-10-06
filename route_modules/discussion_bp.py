@@ -671,10 +671,10 @@ def api_generate_summary(room_id):
         import requests as _req
         api_key = current_app.config.get('MOTIF_API_KEY', '')
         resp = _req.post(
-            'https://api-cbt.morphfactory.io/v1/chat/completions',
+            'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
             headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
             json={
-                'model': 'motif/motif-3',
+                'model': 'gemini-flash-lite-latest',
                 'messages': [
                     {'role': 'system', 'content': '당신은 토론 내용을 객관적으로 요약하는 전문가입니다. 한국어로 작성하세요.'},
                     {'role': 'user', 'content': prompt},

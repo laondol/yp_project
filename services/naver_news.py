@@ -141,11 +141,11 @@ def get_local_share_context(title, description, town, village, exclude_id=0):
     ai_text = "; ".join(context_lines)
     try:
         from openai import OpenAI
-        key = current_app.config.get("MOTIF_API_KEY", "")
-        client = OpenAI(api_key=key, base_url="https://api-cbt.morphfactory.io/v1")
+        key = current_app.config.get("GROQ_API_KEY", "")
+        client = OpenAI(api_key=key, base_url=current_app.config.get("GROQ_BASE_URL", "https://api.groq.com/openai/v1"))
         sys_p = "당신은 양평군 지역 공유 콘텐츠 큐레이터입니다. 아래 이웃주민들이 공유한 내용을 분석하여 2~3줄로 요약하세요. 같은 지역의 다양한 소식을 자연스럽게 연결하세요. 내용이 충분하지 않으면 '특별한 내용이 없습니다.'라고만 출력하세요."
         resp = client.chat.completions.create(
-            model="motif/motif-3",
+            model=current_app.config.get("GROQ_MODEL", "openai/gpt-oss-120b"),
             messages=[{"role":"system","content":sys_p},{"role":"user","content":f"양평군 {town} {village or ''} 지역 최근 공유 내용:\n{ai_text[:2000]}"}],
             timeout=30
         )

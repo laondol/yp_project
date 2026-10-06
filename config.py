@@ -27,8 +27,13 @@ class Config:
     SAFEMAP_API_KEY = os.getenv('SAFEMAP_API_KEY', '')
     GG_PUBLTOLT_API_KEY = os.getenv('GG_PUBLTOLT_API_KEY', '')
     EX_CONSTRUCTION_API_KEY = os.getenv('EX_CONSTRUCTION_API_KEY', '')
-    MOTIF_API_KEY = os.getenv('MOTIF_API_KEY', '')             # ← 추가
-    MOTIF_BASE_URL = os.getenv('MOTIF_BASE_URL', 'https://api-cbt.morphfactory.io/v1')
+    # LLM 기본(Google Gemini 무료 티어): .env의 GEMINI_API_KEY 사용 — 검증·판단·통벗용
+    MOTIF_API_KEY = os.getenv('GEMINI_API_KEY', '')
+    MOTIF_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/'
+    # 소식 번역·요약 전용(Groq): .env의 GROQ_API_KEY 사용
+    GROQ_API_KEY = os.getenv('GROQ_API_KEY', '')
+    GROQ_BASE_URL = 'https://api.groq.com/openai/v1'
+    GROQ_MODEL = 'openai/gpt-oss-120b'
     OPENWEATHER_API_KEY = os.getenv('OPENWEATHER_API_KEY', '')
 
     # 외부 FTP 저장소 (이중저장: 서버 primary + ipDisk backup)

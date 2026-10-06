@@ -425,7 +425,15 @@ export default function TongBotChatPage() {
                   <div className="d-flex flex-wrap gap-2 mt-2">
                     {c.pages.map((p, pi) => (
                       <button key={pi} className="btn btn-sm btn-success"
-                        onClick={() => navigate(p.path)}>
+                        onClick={() => {
+                          // 팝업에서 열었으면 메인 창으로 이동 후 팝업 닫기
+                          if (isPopup && window.opener && !window.opener.closed) {
+                            try { window.opener.location.href = p.path } catch {}
+                            window.close()
+                          } else {
+                            navigate(p.path)
+                          }
+                        }}>
                         ▶ {p.label} 열기
                       </button>
                     ))}

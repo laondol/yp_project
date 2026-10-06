@@ -320,12 +320,12 @@ def admin_news_edit(news_id):
             import requests as req
             r = req.get(article.source_url, headers={'User-Agent':'Mozilla/5.0'}, timeout=10)
             text = r.text[:3000]
-            key = current_app.config.get('MOTIF_API_KEY','')
+            key = current_app.config.get('GROQ_API_KEY','')
             if key:
-                prompt = f"다음 내용을 한국어로 번역하세요. 원문 그대로 상세히 번역하세요.\n\n{text}"
-                rr = req.post("https://api-cbt.morphfactory.io/v1/chat/completions",
+                prompt = f"다음 내용을 한국어 격식체(~습니다/~합니다)로 번역하세요. 반말·구어체·방언은 사용하지 마세요. 원문 그대로 상세히 번역하세요.\n\n{text}"
+                rr = req.post(current_app.config.get('GROQ_BASE_URL', 'https://api.groq.com/openai/v1') + "/chat/completions",
                     headers={"Authorization":f"Bearer {key}","Content-Type":"application/json"},
-                    json={"model":"motif/motif-3","messages":[{"role":"user","content":prompt}],"max_tokens":1500},
+                    json={"model":current_app.config.get('GROQ_MODEL', 'openai/gpt-oss-120b'),"messages":[{"role":"user","content":prompt}],"max_tokens":1500},
                     timeout=30)
                 if rr.status_code == 200:
                     translated = rr.json()["choices"][0]["message"]["content"]
