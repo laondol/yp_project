@@ -284,9 +284,11 @@ def bot_chat():
         close_cmd = True
     raw_reply = re.sub(r'<voice_(?:on|off)>|<listen_(?:on|off)>|<close_window>', '', raw_reply).strip()
     # AI가 <memo>태그로 기록한 내용 → 자동 메모 저장
+    # 회원이 명시적으로 요청한 경우에만 저장 (일정 등록/수정·일반 대화 시 자동 기록 금지)
     memo_match = re.search(r'<memo>(.*?)</memo>', raw_reply, re.DOTALL)
     memo_saved = None
-    if memo_match:
+    _memo_asked = any(kw in msg for kw in ('메모', '기록', '적어', '남겨', '기억', '알림', '알람', '알려줘', 'remind'))
+    if memo_match and _memo_asked:
         memo_content = memo_match.group(1).strip()
         if memo_content:
             from models import TongBotMemo
@@ -1176,6 +1178,7 @@ def _ai_reply(bot, user, user_msg):
 [메모 기록]
 회원이 메모 저장을 요청하면(메모에/기록해줘/적어줘/남겨줘/알림 오게/알림 설정해줘 등), 반드시 <final_answer> 태그 뒤에 아래 형식으로 기록하세요:
 <memo>저장할 내용만 한국어로 간결하게(영어·설명·사고 과정 없이)</memo>
+★ 회원이 명시적으로 요청하지 않은 경우에는 절대 <memo> 태그를 붙이지 마세요. 일정 등록/변경/삭제/조회, 일반 대화, 정보 질문은 메모 저장 요청이 아닙니다.
 예: "매월 25일 전기요금 내는 걸 알려줘" →
 <final_answer>매월 25일 전기요금을 납부하는 날을 기억해 둘게요.</final_answer>
 <memo>매월 25일 전기요금 납부</memo>
@@ -1597,20 +1600,22 @@ def bot_schedule_ai_internal(uid, msg, user, bot=None):
 {chr(10).join(sched_list) if sched_list else '(없음)'}
 
 [응답 형식 - 하나만 선택]
-1. 일정 생성: {{"action":"create","title":"짧은제목","event_date":"2026-06-27T15:00","location":"장소명","description":"설명"}}
+1. 일정 생성: {{"action":"create","title":"짧은제목","event_date":"{(now + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')}","location":"장소명","description":"설명"}}
 2. 일정 조회: {{"action":"query","period":"today|tomorrow|week|all"}}
 3. 일정 삭제: {{"action":"delete","id":일정번호}}
 4. 일정 변경: {{"action":"update","id":일정번호,"changes":{{"title":"새제목","description":"메모내용"}}}}
      ※ id 대신 keyword로 제목 검색 가능: {{"action":"update","keyword":"양지애","changes":{{"description":"메모내용"}}}}
-5. 빈시간 찾기: {{"action":"find_free","date":"2026-06-27","duration_min":60}}
-6. 공통 빈시간: {{"action":"find_common","date":"2026-06-27","friend_names":["벗이름1","벗이름2"],"duration_min":60}}
+5. 빈시간 찾기: {{"action":"find_free","date":"{(now + timedelta(days=1)).strftime('%Y-%m-%d')}","duration_min":60}}
+6. 공통 빈시간: {{"action":"find_common","date":"{(now + timedelta(days=1)).strftime('%Y-%m-%d')}","friend_names":["벗이름1","벗이름2"],"duration_min":60}}
 7. 일반 대화: {{"action":"chat","reply":"친절한답변"}}
 
 [규칙]
 - event_date는 반드시 ISO형식(YYYY-MM-DDTHH:MM)으로
 - title은 30자 이내로 간결하게
 - 날짜가 언급되지 않으면 오늘 기준으로
-- "내일"은 {now.date() + timedelta(days=1)} 기준
+- 상대 날짜 계산 (오늘 기준): 오늘={now.date()}, 내일={(now + timedelta(days=1)).date()}, 모레={(now + timedelta(days=2)).date()}, 글피={(now + timedelta(days=3)).date()}
+- 회원이 '내일/모레/글피/요일/다음주'를 언급했다면 반드시 위 계산된 날짜로 event_date를 작성하고, 절대 오늘 날짜로 만들지 말 것
+- 위 예시의 날짜는 예시일 뿐이며 그대로 복사하지 말고 항상 회원 메시지 기준으로 다시 계산할 것
 - 시간이 언급되지 않으면 오전 9시로
 - id는 기존 일정의 #번호를 참고
 - find_free 시 duration_min 기본값 60"""
@@ -1663,7 +1668,8 @@ def bot_schedule_ai_internal(uid, msg, user, bot=None):
             db.session.add(s)
             db.session.commit()
             dt_str = evt.strftime('%m/%d %H:%M')
-            fb = [f"📅 오늘 일정에 등록되었습니다!"]
+            # 상대 날짜 표현(오늘/내일 등) 사용 금지 — 오분류 방지, 날짜는 '시간:' 줄에 표기
+            fb = ["✅ 일정이 등록되었습니다!"]
             fb.append(f"제목: {s.title}")
             fb.append(f"시간: {dt_str}")
             if s.location:
@@ -1674,12 +1680,18 @@ def bot_schedule_ai_internal(uid, msg, user, bot=None):
                 home_lat = user_home.curr_latitude or user_home.reg_latitude
                 home_lng = user_home.curr_longitude or user_home.reg_longitude
                 if loc_lat and home_lat:
-                    from services.transit import haversine_km
+                    from services.transit import haversine_km, estimate_transit_time_rough
                     d = haversine_km(home_lat, home_lng, loc_lat, loc_lng)
-                    travel_min = round(d * 15)
+                    # 3km 이상이면 대중교통 기준, 그 외는 도보 기준으로 안내
+                    if d >= 3:
+                        travel_min = estimate_transit_time_rough(home_lat, home_lng, loc_lat, loc_lng)
+                        travel_txt = f'대중교통 약{travel_min}분'
+                    else:
+                        travel_min = round(d * 15)
+                        travel_txt = f'도보 약{travel_min}분'
                     dep_time = evt - timedelta(minutes=travel_min + 15)
                     ret_time = evt + timedelta(hours=1, minutes=travel_min)
-                    fb.append(f"출발시간: {dep_time.strftime('%H:%M')} (이동 약{travel_min}분)")
+                    fb.append(f"출발시간: {dep_time.strftime('%H:%M')} ({travel_txt})")
                     fb.append(f"귀가가능시간: {ret_time.strftime('%H:%M')}")
                 else:
                     fb.append("기본장소에서 하시는 모임이 아니신데 장소가 정확하지 않아서 출발시간과 귀가시간을 특정하기 어렵습니다.")

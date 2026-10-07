@@ -52,11 +52,42 @@ declare global {
   }
 }
 
+// TTS 발음 정규화: 화면 표기(10/08 18:00 등)를 한국어 날짜·시간 발음으로 변환
+// (필터가 '/'·':'를 제거해 숫자로만 읽히는 문제 방지 — 화면 텍스트는 불변)
+function toSpoken(t: string): string {
+  const hhmm = (hs: string, ms: string) => {
+    const h = parseInt(hs, 10)
+    const m = parseInt(ms, 10)
+    const tail = m > 0 ? ` ${m}분` : ''
+    if (h === 0) return `오전 12시${tail}`
+    if (h < 12) return `오전 ${h}시${tail}`
+    if (h === 12) return `12시${tail}`
+    return `오후 ${h - 12}시${tail}`
+  }
+  // 시간 범위: 15:00~17:00 → 오후 3시부터 오후 5시까지
+  t = t.replace(/(\d{1,2}):(\d{2})\s*~\s*(\d{1,2}):(\d{2})/g,
+    (_m, a, b, c, d) => `${hhmm(a, b)}부터 ${hhmm(c, d)}까지`)
+  // 이미 '시'로 쓰인 범위: 3시~5시 → 3시부터 5시까지
+  t = t.replace(/(\d{1,2})시\s*~\s*(\d{1,2})시/g, '$1시부터 $2시까지')
+  // 단일 시간: 18:00 → 오후 6시
+  t = t.replace(/(\d{1,2}):(\d{2})/g, (_m, a, b) => hhmm(a, b))
+  // 전체 날짜: 2026-10-08 / 2026.10.08 → 2026년 10월 8일
+  t = t.replace(/(20\d{2})[-./](\d{1,2})[-./](\d{1,2})/g,
+    (_m, y, mo, d) => `${y}년 ${parseInt(mo, 10)}월 ${parseInt(d, 10)}일`)
+  // 짧은 날짜: 10/08 → 10월 8일 (월 1~12, 일 1~31 검증)
+  t = t.replace(/(^|[^\d./])(\d{1,2})\/(\d{1,2})(?![\d/])/g, (m, p, mo, d) => {
+    const M = parseInt(mo, 10)
+    const D = parseInt(d, 10)
+    return M >= 1 && M <= 12 && D >= 1 && D <= 31 ? `${p}${M}월 ${D}일` : m
+  })
+  return t
+}
+
 function speak(text: string, lang = 'ko-KR', onEnd?: () => void) {
   const synth = window.speechSynthesis
   if (!synth) return
   synth.cancel()
-  const utter = new SpeechSynthesisUtterance(text.replace(/[^\w\s가-힣ㄱ-ㅎㅏ-ㅣ.,!?~]/g, ''))
+  const utter = new SpeechSynthesisUtterance(toSpoken(text).replace(/[^\w\s가-힣ㄱ-ㅎㅏ-ㅣ.,!?~]/g, ''))
   utter.lang = lang
   utter.rate = 1
   utter.pitch = 1

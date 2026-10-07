@@ -285,8 +285,8 @@ def api_messages():
                     archive_sent.append(entry)
                 else:
                     notice_sent.append(entry)
-            elif any(r.is_read for r in rows) or not _is_sent_personal(rows, friend_ids):
-                # 전원 미확인 + 벗 전원 발신(비공지)만 벗에게 → 그 외(읽음·비벗 대상)는 보관함
+            elif any(r.is_read for r in rows) or any(r.sender_archived for r in rows) or not _is_sent_personal(rows, friend_ids):
+                # 전원 미확인 + 벗 전원 발신(비공지)만 벗에게 → 그 외(읽음·발신보관·비벗 대상)는 보관함
                 archive_sent.append(entry)
             else:
                 sent_entries.append(entry)
@@ -692,6 +692,11 @@ def api_message_send():
                 )
                 db.session.add(msg)
                 sent += 1
+            # 회신=확인: 회신을 보낸 쪽(루트 수신자)의 원문 사본은 읽음 처리 →
+            # 발신자 '벗에게' / 수신자 '벗으로부터' 탭에서 보관함으로 이동
+            if sent and reply_to_id and root.receiver_id == uid and not root.is_read:
+                root.is_read = True
+                root.read_at = datetime.now()
             db.session.commit()
 
     # ── 외부 이메일 발송 ──
