@@ -67,7 +67,7 @@ def main():
 
         targets = []
         for m in rows:
-            if m.is_read or m.is_notice or m.reply_to_id is not None:
+            if m.is_read or m.is_notice or m.reply_to_id is not None or m.receiver_deleted:
                 continue
             if m.sender_id is None or m.sender_id == m.receiver_id:
                 continue
@@ -93,6 +93,7 @@ def main():
             left = 0
             for m in Message.query.all():
                 if (m.is_read or m.is_notice or m.reply_to_id is not None
+                        or m.receiver_deleted
                         or m.sender_id is None or m.sender_id == m.receiver_id):
                     continue
                 if m.receiver_id in reply_senders.get(m.id, ()):
@@ -106,7 +107,8 @@ def main():
         # B. batch_key 없는 레거시 발송 그룹 (같은 발신자·제목·본문·시각±5초)
         legacy = [m for m in rows
                   if m.batch_key is None and m.sender_id is not None
-                  and m.sender_id != m.receiver_id and m.reply_to_id is None]
+                  and m.sender_id != m.receiver_id and m.reply_to_id is None
+                  and not m.receiver_deleted]
         groups = defaultdict(list)
         for m in legacy:
             ts = int(m.created_at.timestamp()) // 5 if m.created_at else 0
@@ -123,7 +125,7 @@ def main():
 
         # C. sender_archived=TRUE 인 비공지 발신
         c = [m for m in rows if m.sender_archived and not m.is_notice
-             and m.sender_id != m.receiver_id]
+             and m.sender_id != m.receiver_id and not m.receiver_deleted]
         log.info('── C. 발신보관 플래그가 있는데 비공지: %d건', len(c))
 
         log.info('완료')

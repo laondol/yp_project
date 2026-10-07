@@ -19,7 +19,7 @@ interface MessageItem {
   sender_is_friend?: boolean; is_root?: boolean; is_unread_reply?: boolean
   batch_key?: string | null; thread_key?: string | null
   receivers?: { id: number; username?: string | null; is_read?: boolean }[]
-  unread_count?: number; total_count?: number
+  unread_count?: number; total_count?: number; view_count?: number
 }
 
 interface ThreadEntry {
@@ -447,6 +447,11 @@ export default function MessageInbox() {
       setOpenThread(null)
       return
     }
+    // 상세보기 = 열람: 받는 사람만 회수 (보낸 사람 열람은 미카운트)
+    const item = messages.find(x => x.id === id)
+    if (item && item.direction !== 'sent' && !item.is_unread_reply) {
+      fetch(`/api/message/${id}/view`, { method: 'POST' }).catch(() => {})
+    }
     await refreshThread(id)
   }
 
@@ -551,7 +556,12 @@ export default function MessageInbox() {
                 <div className="card-body p-3">
                   <div className="d-flex justify-content-between align-items-start">
                     <strong>{m.subject || '(제목 없음)'}</strong>
-                    <small className="text-muted">{m.created_at ? formatKST(m.created_at) : ''}</small>
+                    <div className="d-flex align-items-center gap-1">
+                      {(m.view_count ?? 0) > 0 && (
+                        <span className="badge" style={{ background: '#6c757d', fontSize: '0.65rem' }}>👁 {m.view_count}</span>
+                      )}
+                      <small className="text-muted">{m.created_at ? formatKST(m.created_at) : ''}</small>
+                    </div>
                   </div>
                   <div className="small mb-1 d-flex align-items-center gap-1 flex-wrap">
                     <span className="text-muted">받는이:</span>

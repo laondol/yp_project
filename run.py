@@ -324,6 +324,18 @@ def create_app():
                             'ALTER TABLE message ADD COLUMN sender_archived BOOLEAN NOT NULL DEFAULT FALSE'))
                         _conn.commit()
                     print("[OK] message.sender_archived 컬럼 추가")
+                if 'receiver_deleted' not in _mcols:
+                    with db.engine.connect() as _conn:
+                        _conn.execute(_sa_text(
+                            'ALTER TABLE message ADD COLUMN receiver_deleted BOOLEAN NOT NULL DEFAULT FALSE'))
+                        _conn.commit()
+                    print("[OK] message.receiver_deleted 컬럼 추가")
+                if 'view_count' not in _mcols:
+                    with db.engine.connect() as _conn:
+                        _conn.execute(_sa_text(
+                            'ALTER TABLE message ADD COLUMN view_count INTEGER NOT NULL DEFAULT 0'))
+                        _conn.commit()
+                    print("[OK] message.view_count 컬럼 추가")
             # 노트: 공개 뷰 댓글 허용 옵션
             if 'note' in _tbls:
                 _ncols = [c['name'] for c in _inspector.get_columns('note')]

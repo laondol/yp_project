@@ -1649,7 +1649,7 @@ def api_user_profile(user_id):
     result['point_history'] = ph
     # Messages
     if is_own:
-        msgs = Message.query.filter_by(receiver_id=user.id).order_by(
+        msgs = Message.query.filter_by(receiver_id=user.id, receiver_deleted=False).order_by(
             db.case((Message.sender_role == 'admin', 0),(Message.sender_role == 'leader', 1),else_=2),
             Message.created_at.desc()).all()
     elif is_admin:
@@ -1658,7 +1658,7 @@ def api_user_profile(user_id):
         msgs = Message.query.filter(
             ((Message.sender_id==uid) & (Message.receiver_id==user.id)) |
             ((Message.sender_id==user.id) & (Message.receiver_id==uid))
-        ).order_by(Message.created_at.desc()).all()
+        ).filter(Message.receiver_deleted == False).order_by(Message.created_at.desc()).all()
     result['messages'] = [{"id":m.id,"subject":m.subject,"content":m.content[:200],"created_at":m.created_at.strftime('%m/%d %H:%M') if m.created_at else '','sender_role':m.sender_role or '','is_read':m.is_read} for m in msgs]
     # Posts
     posts = []

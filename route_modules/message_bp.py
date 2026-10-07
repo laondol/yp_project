@@ -173,7 +173,7 @@ def message_count():
     uid = session.get('user_id')
     if not uid:
         return jsonify({'count': 0})
-    cnt = Message.query.filter_by(receiver_id=uid, is_read=False).count()
+    cnt = Message.query.filter_by(receiver_id=uid, is_read=False, receiver_deleted=False).count()
     return jsonify({'count': cnt})
 
 
@@ -240,6 +240,7 @@ def _sent_entry_dict(uid, rows):
         ],
         'unread_count': sum(1 for r in rows if not r.is_read),
         'total_count': len(rows),
+        'view_count': sum(r.view_count or 0 for r in rows),
     }
 
 
@@ -257,6 +258,7 @@ def api_messages():
             msgs = Message.query.filter(
                 Message.receiver_id == uid,
                 Message.is_read == False,
+                Message.receiver_deleted == False,
                 Message.reply_to_id.is_(None),
                 Message.sender_id.in_(friend_ids),
                 Message.is_notice == False,
@@ -281,12 +283,12 @@ def api_messages():
             entry = _sent_entry_dict(uid, rows)
             if any(r.is_notice for r in rows):
                 # 발신 공지: 미확인 → 공지 탭 / 읽혔거나 발신자가 보관(읽음) 처리 → 보관함
-                if any(r.is_read for r in rows) or any(r.sender_archived for r in rows):
+                if any(r.is_read for r in rows) or any(r.sender_archived for r in rows) or any(r.receiver_deleted for r in rows):
                     archive_sent.append(entry)
                 else:
                     notice_sent.append(entry)
-            elif any(r.is_read for r in rows) or any(r.sender_archived for r in rows) or not _is_sent_personal(rows, friend_ids):
-                # 전원 미확인 + 벗 전원 발신(비공지)만 벗에게 → 그 외(읽음·발신보관·비벗 대상)는 보관함
+            elif any(r.is_read for r in rows) or any(r.sender_archived for r in rows) or any(r.receiver_deleted for r in rows) or not _is_sent_personal(rows, friend_ids):
+                # 전원 미확인 + 벗 전원 발신(비공지)만 벗에게 → 그 외(읽음·발신보관·수신자삭제·비벗 대상)는 보관함
                 archive_sent.append(entry)
             else:
                 sent_entries.append(entry)
@@ -298,6 +300,7 @@ def api_messages():
             Message.receiver_id == uid,
             or_(Message.sender_id.is_(None), Message.sender_id != uid),
             Message.is_read == False,
+            Message.receiver_deleted == False,
             Message.reply_to_id.is_(None),
         )
         conds = [Message.is_notice == True]
@@ -330,6 +333,7 @@ def api_messages():
             Message.sender_id != uid,
             Message.reply_to_id.isnot(None),
             Message.is_read == False,
+            Message.receiver_deleted == False,
         ).order_by(Message.created_at.desc()).limit(100).all()
 
         result = [_msg_row_dict(m, uid, friend_ids) for m in recv_read]
@@ -359,6 +363,7 @@ def api_messages_counts():
         received = Message.query.filter(
             Message.receiver_id == uid,
             Message.is_read == False,
+            Message.receiver_deleted == False,
             Message.reply_to_id.is_(None),
             Message.sender_id.in_(friend_ids),
             Message.is_notice == False,
@@ -373,6 +378,7 @@ def api_messages_counts():
         Message.receiver_id == uid,
         or_(Message.sender_id.is_(None), Message.sender_id != uid),
         Message.is_read == False,
+        Message.receiver_deleted == False,
         Message.reply_to_id.is_(None),
     ).filter(or_(*conds)).count()
 
@@ -388,7 +394,7 @@ def api_messages_counts():
     for rows in groups.values():
         if not _is_sent_personal(rows, friend_ids):
             continue  # 공지·비벗 대상 발신은 벗에게 배지에서 제외
-        if not any(r.is_read for r in rows):
+        if not any(r.is_read or r.receiver_deleted for r in rows):
             sent += 1
 
     # 보관함: 읽지 않은 회신
@@ -397,6 +403,7 @@ def api_messages_counts():
         Message.sender_id != uid,
         Message.reply_to_id.isnot(None),
         Message.is_read == False,
+        Message.receiver_deleted == False,
     ).count()
 
     return jsonify({'received': received, 'sent': sent, 'notice': notice, 'archive': archive})
@@ -412,6 +419,7 @@ def api_messages_archive_count():
         Message.sender_id != uid,
         Message.reply_to_id.isnot(None),
         Message.is_read == False,
+        Message.receiver_deleted == False,
     ).count()
     return jsonify({'count': count})
 
@@ -513,7 +521,9 @@ def api_message_thread(msg_id):
             box[bid] = pbox
 
     # 내게 보이는 행만 (공개 fan-out은 참여자마다 행 1개, 개별답신은 발신자/수신자만)
-    my_rows = [r for r in rows if r.sender_id == uid or r.receiver_id == uid]
+    # 수신자가 삭제(소프트)한 행은 수신자에게는 보이지 않게, 발신자에게는 유지
+    my_rows = [r for r in rows if (r.sender_id == uid or r.receiver_id == uid)
+               and not (r.receiver_deleted and r.receiver_id == uid)]
     seen = set()
     entries = []
     for r in sorted(my_rows, key=lambda x: (x.created_at or datetime.min, x.id)):
@@ -1128,13 +1138,27 @@ def api_message_delete(msg_id):
                     return jsonify({'status': 'error', 'msg': '이미 읽은 편지는 삭제할 수 없습니다.'}), 400
                 db.session.delete(msg)
         else:
-            # 수신자: 본인 사본만 삭제
-            db.session.delete(msg)
+            # 수신자: 소프트 삭제 — 발신자 보관함/스레드에는 기록 유지, 수신자 조회에서는 제외
+            msg.receiver_deleted = True
         db.session.commit()
         return jsonify({'status': 'success'})
     except Exception as e:
         db.session.rollback()
         return jsonify({'status': 'error', 'msg': str(e)}), 500
+
+
+@message_bp.route('/api/message/<int:msg_id>/view', methods=['POST'])
+def api_message_view(msg_id):
+    """상세보기 열람 횟수 — 받는 사람 본인 클릭만 카운트"""
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({'error': 'login'}), 401
+    msg = Message.query.get_or_404(msg_id)
+    if msg.receiver_id != uid or msg.receiver_deleted:
+        return jsonify({'error': '권한 없음'}), 403
+    msg.view_count = (msg.view_count or 0) + 1
+    db.session.commit()
+    return jsonify({'status': 'success', 'view_count': msg.view_count})
 
 
 @message_bp.route('/api/message/sender-archive/<int:msg_id>', methods=['POST'])

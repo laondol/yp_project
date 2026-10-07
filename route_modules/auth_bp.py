@@ -604,6 +604,7 @@ def api_login():
     # 읽지 않은 편지 수: 탭(벗으로부터/공지/보관함)에서 보이는 편지만 (본인이 자신에게 보낸 제외, 무발신 시스템 공지 포함)
     _unread = Message.query.filter(
         Message.receiver_id == u.id, Message.is_read == False,
+        Message.receiver_deleted == False,
         or_(Message.sender_id.is_(None), Message.sender_id != u.id),
     ).count()
     return jsonify({'status': 'success', 'user': {'id': u.id, 'username': u.username, 'role': u.role, 'email': u.email, 'real_name': u.real_name, 'managed_pages': u.managed_pages, 'points': u.points, 'town': u.town, 'village': u.village, 'intro_page_enabled': bool(u.intro_page_enabled), 'password_v2': bool(u.password_v2)}, 'unread_count': _unread})

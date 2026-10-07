@@ -895,7 +895,7 @@ def api_admin_construction_notices_toggle(notice_id):
 def api_user_unread():
     uid = session.get('user_id')
     if not uid: return jsonify({"count": 0})
-    count = Message.query.filter_by(receiver_id=uid, is_read=False).count()
+    count = Message.query.filter_by(receiver_id=uid, is_read=False, receiver_deleted=False).count()
     return jsonify({"count": count})
 
 @construction_bp.route('/api/construction/unread')

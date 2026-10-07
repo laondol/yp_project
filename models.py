@@ -342,6 +342,10 @@ class Message(db.Model):
     is_notice = db.Column(db.Boolean, nullable=False, default=False, index=True)
     # 발신자 보관 처리: 발신 공지를 발신자 쪽 보관함으로 이동 (수신자 읽음 상태와 무관)
     sender_archived = db.Column(db.Boolean, nullable=False, default=False)
+    # 수신자 삭제(소프트): 발신자 보관함에는 기록 유지, 수신자 쪽 조회에서는 제외
+    receiver_deleted = db.Column(db.Boolean, nullable=False, default=False)
+    # 상세보기 열람 횟수 (받는 사람의 상세보기 버튼 클릭 수)
+    view_count = db.Column(db.Integer, nullable=False, default=0)
 
 class ShareReport(db.Model):
     id = db.Column(db.Integer, primary_key=True)

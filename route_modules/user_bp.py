@@ -41,6 +41,7 @@ def api_user_dashboard():
     from sqlalchemy import or_ as _or2
     unread_msgs = Message.query.filter(
         Message.receiver_id == uid, Message.is_read == False,
+        Message.receiver_deleted == False,
         _or2(Message.sender_id.is_(None), Message.sender_id != uid),
     ).order_by(Message.created_at.desc()).limit(5).all()
     unread_messages = [{
@@ -120,6 +121,7 @@ def api_user_notification_summary():
     if friend_ids:
         unread_friend_letters = Message.query.filter(
             Message.receiver_id == uid, Message.is_read == False,
+            Message.receiver_deleted == False,
             Message.sender_id.in_(friend_ids),
             Message.reply_to_id.is_(None),
             Message.is_notice == False,
@@ -132,6 +134,7 @@ def api_user_notification_summary():
         notice_conds.append(Message.id != 0)
     unread_notices = Message.query.filter(
         Message.receiver_id == uid, Message.is_read == False,
+        Message.receiver_deleted == False,
         _or(Message.sender_id.is_(None), Message.sender_id != uid),
         Message.reply_to_id.is_(None),
     ).filter(_or(*notice_conds)).count() + notices
@@ -171,7 +174,7 @@ def api_user_profile(user_id):
         running -= h.amount
 
     if user.id == uid:
-        messages = Message.query.filter_by(receiver_id=user.id).order_by(
+        messages = Message.query.filter_by(receiver_id=user.id, receiver_deleted=False).order_by(
             db.case((Message.sender_role == 'admin', 0), (Message.sender_role == 'leader', 1), else_=2),
             Message.created_at.desc()
         ).all()
