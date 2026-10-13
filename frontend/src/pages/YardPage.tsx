@@ -34,7 +34,7 @@ interface YardItem {
   latitude?: number; longitude?: number
   distance_km?: number | null
   created_at: string
-  category?: string  // event(행사/소식), bid(입찰/공고)
+  category?: string  // event(행사/소식), notice(공지), bid(입찰)
 }
 
 interface YardComment {
@@ -48,8 +48,15 @@ export default function YardPage() {
   const { user: authUser } = useAuth()
   const [items, setItems] = useState<YardItem[]>([])
   const [loading, setLoading] = useState(true)
-  const [filter, setFilter] = useState('all')
+  const [filter, setFilter] = useState('event')
   const [tab, setTab] = useState<'event' | 'bid'>('event')
+  const [view, setView] = useState<'list' | 'cal'>('cal')
+  const [calY, setCalY] = useState(() => new Date().getFullYear())
+  const [calM, setCalM] = useState(() => new Date().getMonth())
+  const [selDay, setSelDay] = useState<string | null>(() => {
+    const t = new Date()
+    return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`
+  })
   const [me, setMe] = useState<{ id: number } | null>(null)
   const myId = me?.id ?? (authUser as any)?.id ?? null
 
@@ -191,14 +198,56 @@ export default function YardPage() {
   }, [])
 
   const filtered = items.filter(i => {
-    if (tab === 'bid') return i.category === 'bid'
-    if (i.category === 'bid') return false
+    if (tab === 'bid') return (i.category === 'bid' || i.category === 'notice') && !i.is_past
+    if (i.category === 'bid' || i.category === 'notice') return false
     return filter === 'event' ? (i.category === 'event' || i.kind === 'event') && !i.is_past :
-      filter === 'news' ? (i.category === 'notice' || (i.kind === 'post' && i.category !== 'event')) && !i.is_past :
+      filter === 'news' ? (i.kind === 'post' && i.category !== 'event') && !i.is_past :
       filter === 'village' ? i.platform === 'village_event' && !i.is_past :
       filter === 'past' ? !!i.is_past :
       !i.is_past
   })
+
+  // 행사 달력 (행사 탭 · 행사 필터): 날짜별 행사 맵 (과거 포함, 월 이동 가능)
+  const isEventItem = (i: YardItem) => (i.category === 'event' || i.kind === 'event')
+  const eventDates: Record<string, YardItem[]> = {}
+  const addDate = (key: string, it: YardItem) => {
+    if (!eventDates[key]) eventDates[key] = []
+    if (!eventDates[key].some(x => x.id === it.id && x.kind === it.kind)) eventDates[key].push(it)
+  }
+  items.filter(isEventItem).forEach(it => {
+    const s = (it.event_date_iso || '').slice(0, 10)
+    const e = (it.event_end_iso || '').slice(0, 10)
+    if (s) {
+      const [sy, sm, sd] = s.split('-').map(Number)
+      const start = new Date(sy, sm - 1, sd)
+      let end = start
+      if (e && e >= s) {
+        const [ey, em, ed] = e.split('-').map(Number)
+        end = new Date(ey, em - 1, ed)
+      }
+      let cur = start
+      for (let g = 0; g < 31 && cur <= end; g++) {
+        addDate(`${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}-${String(cur.getDate()).padStart(2, '0')}`, it)
+        cur = new Date(cur.getFullYear(), cur.getMonth(), cur.getDate() + 1)
+      }
+    }
+    const extras = it.extra_schedules || []
+    extras.forEach(x => { if (x.event_start_iso) addDate(x.event_start_iso.slice(0, 10), it) })
+    const repeats = it.repeat_next_list || []
+    repeats.forEach(r => addDate(r.slice(0, 10), it))
+  })
+  const dayItems = selDay ? (eventDates[selDay] || []) : []
+  const showCal = tab === 'event' && filter === 'event' && view === 'cal'
+  // 최신 날짜 순 정렬 (소식·마을·지난것 등 목록 뷰: 날짜 최신이 위로, 날짜 없으면 최신 등록순)
+  const byLatest = (a: YardItem, b: YardItem) => {
+    const ad = a.event_date_iso || ''
+    const bd = b.event_date_iso || ''
+    if (ad && bd) return bd.localeCompare(ad)
+    if (ad) return -1
+    if (bd) return 1
+    return (b.created_at || '').localeCompare(a.created_at || '')
+  }
+  const displayItems = showCal ? dayItems : [...filtered].sort(byLatest)
 
   const vote = (it: YardItem, v: 'like' | 'dislike') => {
     if (!me) { alert('로그인 후 이용하세요.'); return }
@@ -366,21 +415,21 @@ export default function YardPage() {
       <ul className="nav nav-tabs mb-3">
         <li className="nav-item">
           <button className={`nav-link ${tab === 'event' ? 'active fw-bold' : ''}`}
-            onClick={() => { setTab('event'); setFilter('all') }}>
+            onClick={() => { setTab('event'); setFilter('event'); setView('cal'); setSelDay(null) }}>
             🌾 행사·소식
           </button>
         </li>
         <li className="nav-item">
           <button className={`nav-link ${tab === 'bid' ? 'active fw-bold' : ''}`}
             onClick={() => { setTab('bid'); setFilter('all') }}>
-            📋 입찰·공고
+            📋 입찰·공지
           </button>
         </li>
       </ul>
 
       {/* 하위 필터 (행사 탭일 때만) */}
       {tab === 'event' && (
-        <div className="d-flex gap-2 flex-wrap mb-3">
+        <div className="d-flex gap-2 flex-wrap mb-3 align-items-center">
           {[
             { key: 'event', label: '행사' },
             { key: 'news', label: '소식' },
@@ -390,19 +439,90 @@ export default function YardPage() {
             <button key={f.key} className={`btn btn-sm ${filter === f.key ? 'btn-success' : 'btn-outline-success'}`}
               onClick={() => setFilter(f.key)}>{f.label}</button>
           ))}
+          {filter === 'event' && (
+            <div className="btn-group ms-auto">
+              <button className={`btn btn-sm ${view === 'cal' ? 'btn-success' : 'btn-outline-success'}`}
+                onClick={() => setView('cal')}>📅 달력</button>
+              <button className={`btn btn-sm ${view === 'list' ? 'btn-success' : 'btn-outline-success'}`}
+                onClick={() => setView('list')}>📋 목록</button>
+            </div>
+          )}
         </div>
       )}
 
       {loading ? (
         <div className="text-center py-5 text-muted"><div className="spinner-border" /></div>
-      ) : filtered.length === 0 ? (
-        <div className="text-center py-5 text-muted">
-          <div className="fs-1 mb-3">🌾</div>
-          <p>아직 등록된 소식이 없습니다.</p>
-        </div>
       ) : (
-        <div className="row g-3">
-          {filtered.map(it => {
+        <>
+          {/* 행사 달력 */}
+          {showCal && (
+            <>
+              <div className="d-flex align-items-center justify-content-between mb-2">
+                <div className="fw-bold">{calY}년 {calM + 1}월</div>
+                <div className="btn-group">
+                  <button className="btn btn-sm btn-outline-secondary"
+                    onClick={() => { const d = new Date(calY, calM - 1, 1); setCalY(d.getFullYear()); setCalM(d.getMonth()); setSelDay(null) }}>‹</button>
+                  <button className="btn btn-sm btn-outline-secondary"
+                    onClick={() => { const t = new Date(); setCalY(t.getFullYear()); setCalM(t.getMonth()); setSelDay(`${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`) }}>오늘</button>
+                  <button className="btn btn-sm btn-outline-secondary"
+                    onClick={() => { const d = new Date(calY, calM + 1, 1); setCalY(d.getFullYear()); setCalM(d.getMonth()); setSelDay(null) }}>›</button>
+                </div>
+              </div>
+              <div className="border rounded p-2 mb-3 bg-white shadow-sm">
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 4, textAlign: 'center' }}>
+                  {['일', '월', '화', '수', '목', '금', '토'].map((w, i) => (
+                    <div key={w} className="small fw-bold" style={{ color: i === 0 ? '#dc3545' : i === 6 ? '#0d6efd' : '#495057' }}>{w}</div>
+                  ))}
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 4 }}>
+                  {Array.from({ length: new Date(calY, calM, 1).getDay() }).map((_, i) => <div key={`ph${i}`} />)}
+                  {Array.from({ length: new Date(calY, calM + 1, 0).getDate() }, (_, idx) => {
+                    const dnum = idx + 1
+                    const key = `${calY}-${String(calM + 1).padStart(2, '0')}-${String(dnum).padStart(2, '0')}`
+                    const n = (eventDates[key] || []).length
+                    const now = new Date()
+                    const isToday = dnum === now.getDate() && calM === now.getMonth() && calY === now.getFullYear()
+                    const todayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+                    const isPastDay = key < todayKey
+                    return (
+                      <div key={key} onClick={() => { if (n) setSelDay(selDay === key ? null : key) }}
+                        title={n ? `${key.replace(/-/g, '.')} 행사 ${n}건` : ''}
+                        style={{
+                          minHeight: 46, borderRadius: 10, cursor: n ? 'pointer' : 'default', textAlign: 'center', paddingTop: 3,
+                          background: selDay === key ? '#fff3cd' : isToday ? '#e7f5e9' : n ? '#f4faf5' : 'transparent',
+                          border: isToday ? '2px solid #198754' : '1px solid #edf2f7',
+                        }}>
+                        <div style={{ fontSize: '0.8rem', fontWeight: isToday ? 700 : 500, color: isPastDay ? '#adb5bd' : '#212529' }}>{dnum}</div>
+                        {n > 0 && (
+                          <div className="mx-auto d-flex align-items-center justify-content-center rounded-circle"
+                            style={{ width: 18, height: 18, background: '#198754', color: '#fff', fontSize: '0.65rem', fontWeight: 700 }}>
+                            {n}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+              {/* 선택일 행사 목록 헤더 (해당 날짜에 행사가 있을 때만) */}
+              {dayItems.length > 0 && (
+                <div className="d-flex justify-content-between align-items-center mb-2">
+                  <div className="fw-bold small">{selDay ? `${selDay.replace(/-/g, '.')} 행사` : `${calM + 1}월 행사`}</div>
+                  <span className="small text-muted">{dayItems.length}건</span>
+                </div>
+              )}
+            </>
+          )}
+          {displayItems.length === 0 ? (
+            showCal ? null : (
+              <div className="text-center py-5 text-muted">
+                <div className="fs-1 mb-3">🌾</div>
+                <p>아직 등록된 소식이 없습니다.</p>
+              </div>
+            )
+          ) : (
+            <div className="row g-3">
+              {displayItems.map(it => {
             const isPast = !!it.is_past
             return (
               <div key={it.id} className="col-12 col-md-6 col-lg-4" style={{ minWidth: 340 }}>
@@ -527,6 +647,8 @@ export default function YardPage() {
             )
           })}
         </div>
+          )}
+        </>
       )}
 
       {/* 댓글 모달 */}

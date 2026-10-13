@@ -229,6 +229,14 @@ def admin_news_delete(news_id):
         try:
             if os.path.exists(img_path): os.remove(img_path)
         except: pass
+    # 삭제한 기사 URL 블랙리스트 기록 — 자동 수집이 다시 넣지 않도록 영구 차단
+    if article.source_url:
+        try:
+            from models import NewsDeletedUrl
+            if not NewsDeletedUrl.query.filter_by(url=article.source_url).first():
+                db.session.add(NewsDeletedUrl(url=article.source_url))
+        except Exception:
+            pass
     db.session.delete(article)
     db.session.commit()
     return jsonify({"status": "success"})

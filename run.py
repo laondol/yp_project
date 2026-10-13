@@ -336,6 +336,71 @@ def create_app():
                             'ALTER TABLE message ADD COLUMN view_count INTEGER NOT NULL DEFAULT 0'))
                         _conn.commit()
                     print("[OK] message.view_count 컬럼 추가")
+            # 삭제한 뉴스 URL 블랙리스트 (자동 수집 재등록 영구 차단)
+            with db.engine.connect() as _conn:
+                _conn.execute(_sa_text(
+                    "CREATE TABLE IF NOT EXISTS news_deleted_url ("
+                    "id SERIAL PRIMARY KEY, url TEXT NOT NULL UNIQUE, deleted_at TIMESTAMP)"))
+                _conn.commit()
+            # 마당 공지 분류 정리: 제목 기준 입찰/공지 판별 (전 플랫폼 공통)
+            # ※ 승인된 글(is_approved=true)은 관리자 분류 우선 — 자동 재분류하지 않음
+            with db.engine.connect() as _conn:
+                # 0) 게시판 아이콘 텍스트 '새글' 제거 (제목 끝에 붙는 스크레이핑 잔재)
+                _conn.execute(_sa_text(
+                    "UPDATE yard_post SET title = trim(regexp_replace(title, '새글$', '')) "
+                    "WHERE title LIKE '%새글'"))
+                # 1) 입찰성(입찰/개찰) 제목 → 입찰
+                _conn.execute(_sa_text(
+                    "UPDATE yard_post SET category='bid', "
+                    "title='[입찰] ' || regexp_replace(title, '^\\[[^]]+\\]\\s*', '') "
+                    "WHERE is_approved = false AND category IN ('event','notice') "
+                    "AND (regexp_replace(title, '^\\[[^]]+\\]\\s*', '') LIKE '%입찰%' "
+                    "OR regexp_replace(title, '^\\[[^]]+\\]\\s*', '') LIKE '%개찰%')"))
+                # 2) 공지·공고·알림 제목 → 공지
+                _conn.execute(_sa_text(
+                    "UPDATE yard_post SET category='notice' "
+                    "WHERE is_approved = false AND category='event' "
+                    "AND regexp_replace(title, '^\\[[^]]+\\]\\s*', '') ~ '공지|공고|알림'"))
+                # 3) 행사 조건(장소+일정) 미충족인 미승인 공식게시판 글 → 공지 + 게시판 prefix
+                #    (구 규칙: 무키워드 공지→행사 복원은 폐지 — 행사 기준은 장소와 일정 유무로 판별)
+                _conn.execute(_sa_text(
+                    "UPDATE yard_post SET category='notice', "
+                    "title = CASE platform "
+                    "WHEN 'yp21_gonggo' THEN '[군청공고] ' "
+                    "WHEN 'ypedu' THEN '[평생학습공지] ' "
+                    "WHEN 'ypedu_notice' THEN '[평생학습공지] ' "
+                    "WHEN 'tour_yp21' THEN '[관광] ' "
+                    "ELSE '[군청공지] ' END || "
+                    "regexp_replace(title, '^\\[[^]]+\\]\\s*', '') "
+                    "WHERE is_approved = false AND category='event' "
+                    "AND platform IN ('yp21','yp21_gonggo','ypedu','ypedu_notice','tour_yp21') "
+                    "AND (event_date IS NULL OR event_place IS NULL) "
+                    "AND title NOT LIKE '[입찰]%'"))
+                _conn.commit()
+            print("[OK] yard 공지 category 정리")
+            # 과거 건 중 미승인 건 즉시 삭제 (승인 건은 후기로 유지, 연관 일정 먼저 삭제)
+            # ① 일정이 있고 지난 건 ② 일정 없는 건은 어제 이전 수집분 — 일정이 미래인 건 유지
+            with db.engine.connect() as _conn:
+                _conn.execute(_sa_text(
+                    "CREATE TABLE IF NOT EXISTS yard_deleted_url ("
+                    "id SERIAL PRIMARY KEY, url TEXT NOT NULL UNIQUE, deleted_at TIMESTAMP)"))
+                _conn.execute(_sa_text(
+                    "INSERT INTO yard_deleted_url (url, deleted_at) "
+                    "SELECT source_url, now() FROM yard_post "
+                    "WHERE is_approved = false AND source_url IS NOT NULL AND source_url <> '' AND ("
+                    "(COALESCE(event_end, event_date) IS NOT NULL AND COALESCE(event_end, event_date)::date < CURRENT_DATE)"
+                    " OR (COALESCE(event_end, event_date) IS NULL AND created_at::date < CURRENT_DATE)) "
+                    "ON CONFLICT (url) DO NOTHING"))
+                _conn.execute(_sa_text(
+                    "DELETE FROM yard_schedule WHERE post_id IN ("
+                    "SELECT id FROM yard_post WHERE is_approved = false AND ("
+                    "(COALESCE(event_end, event_date) IS NOT NULL AND COALESCE(event_end, event_date)::date < CURRENT_DATE)"
+                    " OR (COALESCE(event_end, event_date) IS NULL AND created_at::date < CURRENT_DATE)))"))
+                _conn.execute(_sa_text(
+                    "DELETE FROM yard_post WHERE is_approved = false AND ("
+                    "(COALESCE(event_end, event_date) IS NOT NULL AND COALESCE(event_end, event_date)::date < CURRENT_DATE)"
+                    " OR (COALESCE(event_end, event_date) IS NULL AND created_at::date < CURRENT_DATE))"))
+                _conn.commit()
             # 노트: 공개 뷰 댓글 허용 옵션
             if 'note' in _tbls:
                 _ncols = [c['name'] for c in _inspector.get_columns('note')]

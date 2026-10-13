@@ -14,6 +14,7 @@ interface YardAdminItem {
   event_date_iso?: string; event_end_iso?: string; event_place?: string
   extra_schedules?: { id: number; display: string }[]
   is_approved: boolean; is_active: boolean
+  category?: string
   created_at: string
 }
 
@@ -165,6 +166,22 @@ export default function AdminYard() {
       setMsg(data.msg || ''); setMsgOk(data.status === 'success')
       if (data.status === 'success') { setPendingPage(1); setApprovedPage(1); load() }
     } catch { setMsg('승인 오류'); setMsgOk(false) }
+  }
+
+  // 분류 직접 변경 (행사/공지/입찰)
+  const handleCategory = async (fid: string, category: string) => {
+    try {
+      const res = await fetch(`/api/yard/${fid}/category`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ category }),
+      })
+      const data = await res.json()
+      setMsg(data.msg || ''); setMsgOk(data.status === 'success')
+      if (data.status === 'success') {
+        setItems(prev => prev.map(x => x.id === fid ? { ...x, category } : x))
+      }
+    } catch { setMsg('분류 변경 오류'); setMsgOk(false) }
   }
 
   const handleDelete = async (fid: string) => {
@@ -406,6 +423,17 @@ export default function AdminYard() {
                         🔗 자세히 보기 (원문) →
                       </a>
                     )}
+                    {/* 분류 선택 (관리자 직접 변경) */}
+                    <div className="d-flex align-items-center gap-2 mt-2">
+                      <span className="small text-muted">분류</span>
+                      <select className="form-select form-select-sm w-auto" style={{ fontSize: '0.8rem' }}
+                        value={p.category || 'event'}
+                        onChange={e => handleCategory(p.id, e.target.value)}>
+                        <option value="event">🌾 행사</option>
+                        <option value="notice">📢 공지</option>
+                        <option value="bid">📋 입찰</option>
+                      </select>
+                    </div>
                     <div className="d-flex gap-1 flex-wrap mt-auto pt-2 border-top">
                       <button className="btn btn-sm btn-outline-primary" onClick={() => openEdit(p)}>✏️ 수정</button>
                       <button className="btn btn-sm btn-success" onClick={() => handleApprove(p.id)}>✅ 승인</button>
@@ -491,6 +519,17 @@ export default function AdminYard() {
                         🔗 자세히 보기 (원문) →
                       </a>
                     )}
+                    {/* 분류 선택 (관리자 직접 변경) */}
+                    <div className="d-flex align-items-center gap-2 mt-2">
+                      <span className="small text-muted">분류</span>
+                      <select className="form-select form-select-sm w-auto" style={{ fontSize: '0.8rem' }}
+                        value={p.category || 'event'}
+                        onChange={e => handleCategory(p.id, e.target.value)}>
+                        <option value="event">🌾 행사</option>
+                        <option value="notice">📢 공지</option>
+                        <option value="bid">📋 입찰</option>
+                      </select>
+                    </div>
                     <div className="d-flex gap-1 flex-wrap mt-auto pt-2 border-top">
                       <button className="btn btn-sm btn-outline-primary" onClick={() => openEdit(p)}>✏️ 수정</button>
                       <button className="btn btn-sm btn-outline-secondary" title="비공개로 전환" onClick={() => handleApprove(p.id)}>숨기기</button>

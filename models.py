@@ -275,6 +275,13 @@ class NewsVote(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.now)
     __table_args__ = (db.UniqueConstraint('user_id', 'news_id'),)
 
+class NewsDeletedUrl(db.Model):
+    """삭제한 뉴스 URL — 자동 수집 재등록 영구 차단"""
+    __tablename__ = 'news_deleted_url'
+    id = db.Column(db.Integer, primary_key=True)
+    url = db.Column(db.Text, nullable=False, unique=True)
+    deleted_at = db.Column(db.DateTime, default=datetime.now)
+
 class LaborNewsArticle(db.Model):
     __tablename__ = 'labor_news_article'
     id = db.Column(db.Integer, primary_key=True)

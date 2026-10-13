@@ -403,6 +403,9 @@ def run_kr_yp_news_scheduler(app):
                 from services.labor_news_collector import collect_kr_yp_news
                 count, mode = collect_kr_yp_news()
                 print(f"[KR_YP_NEWS_SCHEDULER] 자동 수집 완료: {count}건 (경로: {mode})")
+                from services.news_service import ai_triage_pending_news
+                triaged = ai_triage_pending_news()
+                print(f"[KR_YP_NEWS_SCHEDULER] AI 선별: {triaged}건 채점")
         except Exception as e:
             print(f"[KR_YP_NEWS_SCHEDULER] 수집 오류: {e}")
         time.sleep(86400)

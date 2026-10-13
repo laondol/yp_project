@@ -1,8 +1,36 @@
 import requests
 import re
 import time
+import html
 import xml.etree.ElementTree as ET
 from datetime import datetime
+from email.utils import parsedate_to_datetime
+
+def _clean_text(s):
+    """HTML 엔티티(&quot; 등)·태그 제거 — Naver API/RSS 제목·요약 정규화"""
+    s = s or ''
+    s = html.unescape(s)
+    s = re.sub(r'<[^>]+>', '', s)
+    s = html.unescape(s)  # 이중 이스케이프(&amp;quot; 등) 정리
+    return s.strip()
+
+def _within_days(pub_date, days=7):
+    """Google News RSS pubDate(RFC822) 확인 — days일 이내만 수집 (구 기사 차단)"""
+    try:
+        d = parsedate_to_datetime(pub_date or '')
+        return (datetime.now(d.tzinfo) - d).days <= days
+    except Exception:
+        return False
+
+def _news_url_blocked(url):
+    """삭제한 뉴스 URL 블랙리스트 확인 (재수집 영구 차단)"""
+    if not url:
+        return False
+    try:
+        from models import NewsDeletedUrl
+        return NewsDeletedUrl.query.filter_by(url=url).first() is not None
+    except Exception:
+        return False
 
 KOREAN_DOMAINS = [
     '.co.kr', '.or.kr', '.go.kr', '.kr',
@@ -141,8 +169,8 @@ def collect_labor_news():
                     continue
                 seen_urls.add(url)
 
-                title = re.sub(r'<[^>]+>', '', item.get('title', ''))
-                desc = re.sub(r'<[^>]+>', '', item.get('description', ''))
+                title = _clean_text(item.get('title', ''))
+                desc = _clean_text(item.get('description', ''))
                 if not title or len(title) < 5:
                     continue
 
@@ -215,8 +243,8 @@ def collect_labor_news_rss():
                     continue
                 seen_urls.add(link)
 
-                title = re.sub(r'<[^>]+>', '', title)
-                desc = re.sub(r'<[^>]+>', '', desc)
+                title = _clean_text(title)
+                desc = _clean_text(desc)
                 if len(title) < 5:
                     continue
 
@@ -274,9 +302,15 @@ def collect_kr_yp_news_rss():
 
                 root = ET.fromstring(res.content)
                 items = root.findall('.//item')
-                print(f"[KR_YP_RSS] {source['name']} + '{sq}': {len(items)}건 수신")
+                # 7일 이내 신규 기사만, 최신순 상위 5건 (구 기사 재수집 차단)
+                items = [it for it in items
+                         if _within_days(it.findtext('pubDate', ''), 7)]
+                items.sort(key=lambda it: parsedate_to_datetime(it.findtext('pubDate', '')),
+                           reverse=True)
+                items = items[:5]
+                print(f"[KR_YP_RSS] {source['name']} + '{sq}': {len(items)}건 수신(7일 이내)")
 
-                for item in items[:5]:
+                for item in items:
                     title = (item.findtext('title', '') or '').strip()
                     link = (item.findtext('link', '') or '').strip()
                     desc = (item.findtext('description', '') or '').strip()
@@ -285,11 +319,13 @@ def collect_kr_yp_news_rss():
                         continue
                     seen_urls.add(link)
 
-                    title = re.sub(r'<[^>]+>', '', title)
-                    desc = re.sub(r'<[^>]+>', '', desc)
+                    title = _clean_text(title)
+                    desc = _clean_text(desc)
                     if len(title) < 5:
                         continue
 
+                    if _news_url_blocked(link):
+                        continue
                     existing = NewsArticle.query.filter_by(source_url=link).first()
                     if existing:
                         continue
@@ -340,9 +376,15 @@ def collect_kr_yp_local_rss():
 
             root = ET.fromstring(res.content)
             items = root.findall('.//item')
+            # 7일 이내 신규 기사만, 최신순 상위 5건 (구 기사 재수집 차단)
+            items = [it for it in items
+                     if _within_days(it.findtext('pubDate', ''), 7)]
+            items.sort(key=lambda it: parsedate_to_datetime(it.findtext('pubDate', '')),
+                       reverse=True)
+            items = items[:5]
             saved_cnt = 0
 
-            for item in items[:5]:
+            for item in items:
                 title = (item.findtext('title', '') or '').strip()
                 link = (item.findtext('link', '') or '').strip()
                 desc = (item.findtext('description', '') or '').strip()
@@ -351,8 +393,8 @@ def collect_kr_yp_local_rss():
                     continue
                 seen_urls.add(link)
 
-                title = re.sub(r'<[^>]+>', '', title)
-                desc = re.sub(r'<[^>]+>', '', desc)
+                title = _clean_text(title)
+                desc = _clean_text(desc)
                 if len(title) < 5:
                     continue
 
@@ -363,6 +405,8 @@ def collect_kr_yp_local_rss():
                 if _is_junk_title(title):
                     continue
 
+                if _news_url_blocked(link):
+                    continue
                 existing = NewsArticle.query.filter_by(source_url=link).first()
                 if existing:
                     continue
@@ -421,9 +465,20 @@ def collect_kr_yp_news():
     now = datetime.now()
 
     search_queries = [
-        "물가 인상", "정부 지원금", "농산물 가격", "복지 지원",
-        "의료 정책", "고용 정책", "귀농 귀촌", "전원주택",
-        "대중교통", "국내 경제",
+        # 1순위: 환경
+        "환경 정책", "환경 오염",
+        # 양평군민 생활 필수
+        "물가 인상", "정부 지원금", "농산물 가격", "임업 임산물",
+        "복지 지원", "장애인 지원", "의료 정책", "건강 보험",
+        "고용 정책", "대중교통", "국내 경제",
+        # 국토·도로·공사·계획 (오픈 정보, 민감)
+        "도로 건설 계획", "국토 도로 공사",
+        # 인구·사이버피해
+        "인구 감소 대책", "사이버 범죄 피해",
+        # 농촌·주거
+        "귀농 귀촌", "전원주택",
+        # 지역 행사 (다가오는 행사 위주 — 선별 단계에서 과거행사 하향)
+        "양평 축제",
     ]
 
     for sq in search_queries:
@@ -450,11 +505,13 @@ def collect_kr_yp_news():
                 if not _is_korean_source(url):
                     continue
 
-                title = re.sub(r'<[^>]+>', '', item.get('title', ''))
-                desc = re.sub(r'<[^>]+>', '', item.get('description', ''))
+                title = _clean_text(item.get('title', ''))
+                desc = _clean_text(item.get('description', ''))
                 if not title or len(title) < 5:
                     continue
 
+                if _news_url_blocked(url):
+                    continue
                 existing = NewsArticle.query.filter_by(source_url=url).first()
                 if existing:
                     skipped_existing += 1
@@ -530,11 +587,13 @@ def collect_world_news():
                     continue
                 seen_urls.add(link)
 
-                title = re.sub(r'<[^>]+>', '', title)
-                desc = re.sub(r'<[^>]+>', '', desc)
+                title = _clean_text(title)
+                desc = _clean_text(desc)
                 if len(title) < 5:
                     continue
 
+                if _news_url_blocked(link):
+                    continue
                 existing = NewsArticle.query.filter_by(source_url=link).first()
                 if existing:
                     continue
@@ -626,11 +685,13 @@ def collect_world_news():
                         continue
                     seen_urls.add(url)
 
-                    title = re.sub(r'<[^>]+>', '', item.get('title', ''))
-                    desc = re.sub(r'<[^>]+>', '', item.get('description', ''))
+                    title = _clean_text(item.get('title', ''))
+                    desc = _clean_text(item.get('description', ''))
                     if not title or len(title) < 5:
                         continue
 
+                    if _news_url_blocked(url):
+                        continue
                     existing = NewsArticle.query.filter_by(source_url=url).first()
                     if existing:
                         continue

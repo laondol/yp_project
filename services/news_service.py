@@ -130,6 +130,80 @@ def ai_translate_and_format(title, content, source_lang="en"):
         print(f"[NewsService] 번역 실패: {title[:50]}")
     return result
 
+def ai_triage_pending_news(batch_limit=60):
+    """수집 기사에 '양평군민이 알아야 할 대한민국 소식' 기준 AI 채점 (점수+사유).
+
+    - 미채점(ai_score=0) 최근 7일 기사만 대상 (idempotent)
+    - 결과: ai_score 부여, ai_reason 앞에 '[점수] 사유' 접기 (관리자 💡 컬럼에서 확인)
+    - 게시(is_selected)는 하지 않음 — 관리자 👁️ 확정 전용
+    """
+    from datetime import datetime, timedelta
+    from models import db, NewsArticle
+    cutoff = datetime.now() - timedelta(days=7)
+    pending = (NewsArticle.query
+               .filter(NewsArticle.is_ai_generated == True,
+                       NewsArticle.created_at >= cutoff,
+                       db.or_(NewsArticle.ai_score == 0, NewsArticle.ai_score.is_(None)))
+               .order_by(NewsArticle.created_at.desc())
+               .limit(batch_limit).all())
+    if not pending:
+        return 0
+
+    system = ("당신은 양평군민을 위한 뉴스 선별가입니다. "
+              "'양평군민이 기본적으로 알아야 할 대한민국 소식'을 판단해 기사별 점수(0~100)와 사유를 냅니다.")
+    import json as _json
+
+    def _score_chunk(chunk):
+        articles = [{
+            "id": a.id,
+            "title": a.title or "",
+            "summary": (a.summary or "")[:150],
+            "category": a.category or "",
+        } for a in chunk]
+        prompt = f"""다음 뉴스 기사들을 채점하세요. JSON으로만 답하세요.
+
+채점 기준 (중요도 순):
+1. 환경이 1순위: 환경 오염·재해·기후·생태·하천/수질 관련 → 85~100
+2. 양평군민 생활 필수: 농업/임업, 대중교통, 복지, 건강·의료, 장애인, 사이버피해 예방, 지역 인구감소 해법, 물가·지원금 → 75~95
+3. 국토·도로·공사·계획의 공개(오픈) 정보: 도로 건설·국토계획·공사 착공/개통/노선 변경 등 → 80~100 (매우 중요, 민감 정보)
+4. 지역 행사: 다가오는(미래 날짜의) 좋은 행사 → 70~90 / 이미 지난 행사는 → 0~20
+5. 광고·홍보·연예·중요도 낮은 타 지역 잡소식 → 0~30
+양평이나 대한민국 주민 생활에 직접 관련되면 가산점.
+
+각 기사마다 사유는 한국어 25자 이내. 입력된 모든 기사를 반드시 포함하세요.
+기사 목록:
+{_json.dumps(articles, ensure_ascii=False)}
+
+출력 형식: {{"articles": [{{"id": 1, "score": 90, "reason": "사유"}}]}}"""
+        result = _motif_text(system, prompt, format_json=True, provider='groq', max_tokens=4000)
+        items = result.get("articles") if isinstance(result, dict) else None
+        return items or []
+
+    by_id = {}
+    for i in range(0, len(pending), 20):  # 20건 단위 청크 (누락 방지)
+        for it in _score_chunk(pending[i:i + 20]):
+            try:
+                by_id[int(it.get("id"))] = (int(it.get("score", 0)), str(it.get("reason", ""))[:60])
+            except (TypeError, ValueError):
+                continue
+    if not by_id:
+        print("[TRIAGE] AI 응답 없음")
+        return 0
+    n = 0
+    for a in pending:
+        r = by_id.get(a.id)
+        if not r:
+            continue
+        score, reason = r
+        score = max(0, min(100, score))
+        a.ai_score = score
+        base = (a.ai_reason or "").strip()
+        a.ai_reason = f"[선별 {score}] {reason}" + (f" | {base}" if base else "")
+        n += 1
+    db.session.commit()
+    print(f"[TRIAGE] AI 선별 완료: {n}건 채점 (대상 {len(pending)}건)")
+    return n
+
 def ai_summarize_url(text):
     system = "당신은 기사 요약 전문가입니다. 한국어로 답변하세요. '본문바로가기','블로그','카테고리','검색','메뉴','이웃추가','공유하기','URL복사','신고하기','폰트크기' 등 블로그 UI/네비게이션 텍스트는 전부 무시하고, 오직 기사의 핵심 본문 내용만 요약하세요."
     prompt = f"""다음 웹페이지 내용 중 기사 본문만 골라 분석하여 양평군민에게 유용한 정보인지 판단하고 아래 JSON으로 출력하세요:

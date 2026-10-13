@@ -111,6 +111,67 @@ def _fetch_blog_content(url):
         return ''
 
 
+def _extract_best_date(text):
+    """본문/제목에서 날짜 직접 추출 (AI 실패 폴백).
+    우선순위: 연도 포함 날짜 → 연도+월 → 연도 없는 날짜(요일 표기 있을 때만).
+    미래 후보 중 가장 가까운 날짜, 전부 과거면 가장 최근 과거 날짜 반환."""
+    if not text:
+        return None
+    today = datetime.now().date()
+
+    def _pick(cands):
+        if not cands:
+            return None
+        future = sorted(c for c in cands if c >= today)
+        return future[0] if future else max(cands)
+
+    # 연도 포함: 2025.9.8 / 2025-09-08 / 2025년 9월 8일
+    full = []
+    for m in re.finditer(r'(20\d{2})\s*[.\-/]\s*(\d{1,2})\s*[.\-/]\s*(\d{1,2})', text):
+        try:
+            full.append(datetime(int(m.group(1)), int(m.group(2)), int(m.group(3))).date())
+        except ValueError:
+            pass
+    for m in re.finditer(r'(20\d{2})년\s*(\d{1,2})월\s*(\d{1,2})일', text):
+        try:
+            full.append(datetime(int(m.group(1)), int(m.group(2)), int(m.group(3))).date())
+        except ValueError:
+            pass
+    d = _pick(full)
+    if d:
+        return datetime.combine(d, datetime.min.time())
+
+    # 연도+월만 있는 경우 (예: "2026년 8월 ... 보고" → 해당 월 1일)
+    month_only = []
+    for m in re.finditer(r'(20\d{2})년\s*(\d{1,2})월(?!\s*\d)', text):
+        try:
+            month_only.append(datetime(int(m.group(1)), int(m.group(2)), 1).date())
+        except ValueError:
+            pass
+    d = _pick(month_only)
+    if d:
+        return datetime.combine(d, datetime.min.time())
+
+    # 연도 없는 날짜는 요일 표기(10/13(화), 9.8.(월))가 있을 때만 신뢰
+    m_y = re.search(r'(20\d{2})년', text)
+    base_year = int(m_y.group(1)) if m_y else today.year
+    ymd = []
+    for m in re.finditer(r'(\d{1,2})\s*[./]\s*(\d{1,2})[.]?\s*\(?[월화수목금토일]\)', text):
+        try:
+            ymd.append(datetime(base_year, int(m.group(1)), int(m.group(2))).date())
+        except ValueError:
+            pass
+    for m in re.finditer(r'(\d{1,2})월\s*(\d{1,2})일\s*\(?[월화수목금토일]\)?', text):
+        try:
+            ymd.append(datetime(base_year, int(m.group(1)), int(m.group(2))).date())
+        except ValueError:
+            pass
+    d = _pick(ymd)
+    if d:
+        return datetime.combine(d, datetime.min.time())
+    return None
+
+
 def _ai_event_filter(title, desc, full_content=''):
     """AI로 참여형 행사/공지 여부 판정 + 일시·장소 추출.
     단순 홍보·일반 정보·후기·지식 공유는 제외.
@@ -125,8 +186,9 @@ def _ai_event_filter(title, desc, full_content=''):
             f"""오늘 날짜: {datetime.now().strftime('%Y-%m-%d (%A)')}
 
 다음 블로그 글이 주민이 참여/방문할 수 있는 행사·모임·모집·프로그램 공지인지 판정하세요.
-일시·장소 정보가 있는 실제 참여형 소식만 true입니다.
+행사로 판정하려면 **장소와 일정이 모두** 있어야 합니다. 하나라도 텍스트에 없으면 false입니다.
 단순 홍보, 일반 정보(지식/상식), 후기, 소개 글, 이미 지나간 행사는 false입니다.
+event_date_iso는 원문에 적힌 날짜를 그대로 넣으세요. 과거 날짜여도 절대 오늘/올해 날짜로 바꾸지 마세요.
 event_date_iso의 연도는 반드시 오늘 날짜를 기준으로 판단하세요.
 이미지에만 정보가 있고 텍스트에 정보가 없으면 false로 판정하세요 (텍스트 정보 우선).
 JSON으로만 출력:
@@ -142,18 +204,17 @@ JSON으로만 출력:
             d = None
             try:
                 d = datetime.strptime(event_date_iso, '%Y-%m-%d')
-                # 연도 보정: AI가 엉뚱한 연도를 줬다면 올해로 교정
-                if d.year != datetime.now().year:
-                    d = d.replace(year=datetime.now().year)
-                    event_date_iso = d.strftime('%Y-%m-%d')
-                # 과거 행사 제외
-                if d.date() < datetime.now().date():
-                    return {'is_event': False, 'event_date': '', 'event_place': '', 'event_date_obj': None,
-                            'event_end_obj': None, 'start_time': '', 'end_time': '',
-                            'event_start': '', 'event_end': '', 'is_allday': False}
             except ValueError:
-                event_date_iso = ''
                 d = None
+            # AI가 날짜를 못 준 경우 제목/본문에서 직접 추출 (날짜 인식 폴백)
+            if d is None:
+                d = _extract_best_date(f"{title}\n{analysis_text}")
+            # 과거 일정 — 날짜를 남겨 수집기의 '지난 일정 스킵'/삭제가 동작하게 함
+            if d and d.date() < datetime.now().date():
+                return {'is_event': False, 'event_date': d.strftime('%m/%d'), 'event_place': '',
+                        'event_date_obj': d, 'event_end_obj': None, 'start_time': '', 'end_time': '',
+                        'event_start': '', 'event_end': '', 'is_allday': False,
+                        'apply_start': '', 'apply_end': ''}
 
             # 시작/종료시간 파싱 → datetime 조합
             start_dt = end_dt = None
@@ -184,10 +245,13 @@ JSON으로만 출력:
                         'event_start': '', 'event_end': '', 'is_allday': False,
                         'contact': str(result.get('contact') or '')[:100],
                         'reserve_url': str(result.get('reserve_url') or '')[:500]}
+            # 행사 기준(사용자 확정): 장소와 일정이 모두 있어야 행사
+            place = str(result.get('event_place') or '').strip()
+            is_event = bool(result.get('is_event')) and bool(d) and bool(place)
             return {
-                'is_event': bool(result.get('is_event')),
+                'is_event': is_event,
                 'event_date': str(result.get('event_date') or '')[:60],
-                'event_place': str(result.get('event_place') or '')[:100],
+                'event_place': place[:100],
                 'event_date_obj': start_dt or d,
                 'event_end_obj': end_dt,
                 'start_time': st,
@@ -197,14 +261,18 @@ JSON으로만 출력:
                 'event_start': event_start_iso,
                 'event_end': event_end_iso,
                 'is_allday': is_allday,
+                'apply_start': str(result.get('apply_start') or '')[:10],
+                'apply_end': str(result.get('apply_end') or '')[:10],
             }
     except Exception as e:
         print(f'[YARD-AI] 판정 오류: {e}')
-    # 휴리스틱 fallback (과거 판단 불가 → 수집 허용, 연락처는 전화번호 정규식 추출)
+    # 휴리스틱 fallback (AI 실패 시): 키워드 + 본문 날짜 추출이 있을 때만 행사 (장소는 확인 불가)
     heur = any(k in title + desc for k in EVENT_KEYWORDS)
+    hd = _extract_best_date(f'{title}\n{desc}')
     m_phone = re.search(r'(\d{2,3}-\d{3,4}-\d{4})', desc)
-    return {'is_event': heur, 'event_date': '', 'event_place': '', 'event_date_obj': None,
-            'event_end_obj': None, 'start_time': '', 'end_time': '',
+    return {'is_event': bool(heur and hd), 'event_date': hd.strftime('%m/%d') if hd else '',
+            'event_place': '', 'event_date_obj': hd, 'event_end_obj': None,
+            'start_time': '', 'end_time': '',
             'contact': m_phone.group(1) if m_phone else '', 'reserve_url': '',
             'event_start': '', 'event_end': '', 'is_allday': False, 'apply_start': '', 'apply_end': ''}
 
@@ -323,7 +391,7 @@ def _collect_org_rss():
                 if len(title) < 5 or not link:
                     continue
                 # URL/제목 중복 차단
-                if YardPost.query.filter_by(source_url=link).first():
+                if YardPost.query.filter_by(source_url=link).first() or _yard_url_blocked(link):
                     continue
                 norm_title = re.sub(r'\s+', ' ', title).strip()
                 if YardPost.query.filter_by(title=norm_title).first():
@@ -377,7 +445,7 @@ def _collect_org_rss():
 def collect_yard_notices():
     """네이버 블로그/카페에서 양평 단체 공지·소식을 수집하여 마당에 자동 등록"""
     from flask import current_app
-    from models import YardPost, db
+    from models import YardPost, YardSchedule, db
 
     try:
         cid = current_app.config.get('NAVER_SEARCH_CLIENT_ID', '')
@@ -429,8 +497,11 @@ def collect_yard_notices():
                 if '양평' not in title + desc:
                     continue
 
+                # 제목 기준 분류 (입찰/공지/행사) — 마을공지 등 공지성은 공지탭
+                title, post_cat = _classify_notice_title(title, '[공지]')
+
                 # URL 중복 차단
-                existing = YardPost.query.filter_by(source_url=url).first()
+                existing = YardPost.query.filter_by(source_url=url).first() or _yard_url_blocked(url)
                 if existing:
                     continue
 
@@ -449,6 +520,12 @@ def collect_yard_notices():
                 judge = _ai_event_filter(title, desc, full_content)
                 if not judge['is_event']:
                     print(f'[YARD] 스킵(홍보/일반): {title[:40]}')
+                    continue
+
+                # 이미 지난 일정의 글은 수집 안 함 (승인 전 방치 후 삭제 대상 방지)
+                _end_dt = judge.get('event_end_obj') or judge.get('event_date_obj') or _parse_dt(judge.get('apply_end'))
+                if _end_dt and _end_dt.date() < datetime.now().date():
+                    print(f'[YARD] 스킵(지난 일정): {title[:40]}')
                     continue
 
                 platform = 'navercafe' if api == 'cafearticle' else 'naverblog'
@@ -470,6 +547,7 @@ def collect_yard_notices():
                     apply_end=_parse_dt(judge.get('apply_end')),
                     reserve_url=(judge.get('reserve_url') or None),
                     is_approved=False,  # 관리자 승인 후 공개
+                    category=post_cat,
                     created_at=now,
                 )
                 # 장소 지오코딩 (거리 정렬용)
@@ -486,30 +564,18 @@ def collect_yard_notices():
             print(f'[YARD] {q} 수집 오류: {e}')
             continue
 
-    # 행사일이 지났는데 승인(채택)되지 않은 소식 삭제 (마당은 미래의 일정만 수집, 승인 건은 후기 받으려고 유지)
-    past_unapp = YardPost.query.filter(
-        YardPost.event_date.isnot(None),
-        YardPost.event_date < datetime.now(),
-        YardPost.is_approved == False,
-    )
-    past_cnt = past_unapp.count()
-    if past_cnt:
-        past_unapp.delete(synchronize_session=False)
-        db.session.commit()
-        print(f'[YARD] 행사일 지난 미승인건 {past_cnt}건 삭제')
-
-    # 오래된 자동수집건 정리 (30일 초과)
+    # 오래된 자동수집건 정리 (30일 초과) — 연관 추가일정(yard_schedule) 먼저 삭제
     from datetime import timedelta
     cutoff = datetime.now() - timedelta(days=30)
-    old = YardPost.query.filter(
+    old_ids = [r[0] for r in YardPost.query.with_entities(YardPost.id).filter(
         YardPost.source_type == 'sns_auto',
         YardPost.created_at < cutoff,
-    )
-    old_cnt = old.count()
-    if old_cnt:
-        old.delete(synchronize_session=False)
+    ).all()]
+    if old_ids:
+        YardSchedule.query.filter(YardSchedule.post_id.in_(old_ids)).delete(synchronize_session=False)
+        YardPost.query.filter(YardPost.id.in_(old_ids)).delete(synchronize_session=False)
         db.session.commit()
-        print(f'[YARD] 30일 경과 자동수집건 {old_cnt}건 삭제')
+        print(f'[YARD] 30일 경과 자동수집건 {len(old_ids)}건 삭제')
 
     # 3) 관리자 등록 단체의 블로그 RSS 수집 (등록 블로그 최신 글)
     org_new = _collect_org_rss()
@@ -526,6 +592,35 @@ def collect_yard_notices():
     # 6) 양평관광(tour.yp21.go.kr) 공지사항 수집
     tour_new = _collect_yp_tour()
     total_new += tour_new
+
+    # 과거 건 중 미승인 삭제 (승인 건은 후기로 유지) — 전 소스 수집 후 최종 정리
+    # ① 일정이 있고 지난 건 ② 일정 없는 건은 어제 이전 수집분(방치건) — 일정이 미래인 건은 유지
+    from sqlalchemy import func as _sa_func, and_ as _sa_and, or_ as _sa_or
+    _end_col = _sa_func.coalesce(YardPost.event_end, YardPost.event_date)
+    _midnight = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    past_ids = [r[0] for r in YardPost.query.with_entities(YardPost.id).filter(
+        YardPost.is_approved == False,
+        _sa_or_(
+            _sa_and_(_end_col.isnot(None), _end_col < _midnight),
+            _sa_and_(_end_col.is_(None), YardPost.created_at < _midnight),
+        ),
+    ).all()]
+    if past_ids:
+        # 자동삭제된 글 URL은 블랙리스트에 기록 (게시판에 남아 있어도 재수집 차단)
+        from sqlalchemy import text as _T
+        _urls = [r[0] for r in YardPost.query.with_entities(YardPost.source_url).filter(
+            YardPost.id.in_(past_ids),
+            YardPost.source_url.isnot(None),
+            YardPost.source_url != '',
+        ).all()]
+        for _u in _urls:
+            db.session.execute(_T(
+                "INSERT INTO yard_deleted_url (url, deleted_at) VALUES (:u, now()) "
+                "ON CONFLICT (url) DO NOTHING"), {'u': _u[:500]})
+        YardSchedule.query.filter(YardSchedule.post_id.in_(past_ids)).delete(synchronize_session=False)
+        YardPost.query.filter(YardPost.id.in_(past_ids)).delete(synchronize_session=False)
+        db.session.commit()
+        print(f'[YARD] 과거(지난 일정/방치) 미승인 {len(past_ids)}건 삭제 (블랙리스트 {len(_urls)}건)')
 
     print(f'[YARD] 마당 소식 자동 수집 완료: 신규 {total_new}건 (단체블로그 {org_new}건, 군청 {gov_new}건, 평생학습 {edu_new}건, 관광 {tour_new}건)')
     return total_new
@@ -545,6 +640,32 @@ def _title_similarity_blocked(title):
         if difflib.SequenceMatcher(None, norm, t).ratio() >= 0.8:
             return True
     return False
+
+
+def _classify_notice_title(title, prefix, default_cat='event'):
+    """제목 기준 분류: 입찰성(입찰/개찰)→[입찰]/bid, 공지·공고·알림→prefix/notice,
+    그 외→default_cat (공식 게시판은 default_cat='notice': 행사 조건 미충족 시 무조건 공지)"""
+    if '입찰' in title or '개찰' in title:
+        return f'[입찰] {title}', 'bid'
+    if any(k in title for k in ('공지', '공고', '알림')):
+        return f'{prefix} {title}', 'notice'
+    if default_cat == 'notice':
+        return f'{prefix} {title}', 'notice'
+    return title, 'event'
+
+
+def _yard_url_blocked(url):
+    """미승인으로 자동삭제된 글의 재수집 영구 차단 (yard_deleted_url 블랙리스트)"""
+    from sqlalchemy import text as _T
+    from models import db
+    if not url:
+        return False
+    try:
+        return db.session.execute(
+            _T("SELECT 1 FROM yard_deleted_url WHERE url = :u"),
+            {'u': url[:500]}).first() is not None
+    except Exception:
+        return False
 
 
 def _collect_yp_gov():
@@ -577,7 +698,7 @@ def _collect_yp_gov():
                 a_tag = row.find('a')
                 if not a_tag:
                     continue
-                title = a_tag.get_text(strip=True)
+                title = a_tag.get_text(strip=True).removesuffix('새글').strip()
                 if len(title) < 5:
                     continue
                 link = a_tag.get('href', '')
@@ -585,48 +706,43 @@ def _collect_yp_gov():
                     if link.startswith('./'):
                         link = link[2:]  # ./ → /selectBbsNttView...
                     link = f'https://www.yp21.go.kr/www/{link}'
+                # 제목 기준 분류 (입찰/공지/행사)
+                disp_title, post_cat = _classify_notice_title(title, '[군청공지]')
                 # 중복 체크
-                if YardPost.query.filter_by(source_url=link).first():
+                if YardPost.query.filter_by(source_url=link).first() or _yard_url_blocked(link):
                     continue
-                if _title_similarity_blocked(f'[군청] {title}'):
+                if _title_similarity_blocked(disp_title):
                     continue
-                # 날짜 추출
-                date_text = cols[-1].get_text(strip=True) if cols else ''
-                event_dt = None
-                for fmt in ('%Y-%m-%d', '%Y.%m.%d', '%Y/%m/%d'):
-                    try:
-                        event_dt = datetime.strptime(date_text[:10], fmt)
-                        break
-                    except ValueError:
-                        continue
                 # 본문 가져오기
                 full_content = _fetch_blog_content(link)
                 desc = full_content[:1500] if full_content else title
 
-                # 마감된 자료 수집 방지 (날짜가 있고 오늘 이전이면 스킵)
-                if event_dt and event_dt.date() < datetime.now().date():
-                    print(f'[YARD-GOV] 스킵(마감): {title[:40]}')
-                    continue
-
                 # AI 판정 + 정리
                 judge = _ai_event_filter(title, desc, full_content)
-                if event_dt:
-                    judge['event_date_obj'] = event_dt
                 polished = _ai_polish_content(title, desc, judge)
 
+                # 이미 지난 일정의 글은 수집 안 함 (미승인으로 남아 삭제 대상이 되는 것 방지)
+                _end_dt = judge.get('event_end_obj') or judge.get('event_date_obj') or _parse_dt(judge.get('apply_end'))
+                if _end_dt and _end_dt.date() < datetime.now().date():
+                    print(f'[YARD-GOV] 스킵(지난 일정): {title[:40]}')
+                    continue
+                # 장소+일정 미충족 → 공지 (행사 기준: 장소와 일정 모두 필요)
+                if post_cat == 'event' and not judge['is_event']:
+                    disp_title, post_cat = _classify_notice_title(title, '[군청공지]', default_cat='notice')
+
                 p = YardPost(
-                    title=f'[군청공지] {title}',
+                    title=disp_title,
                     content=polished,
                     source_type='gov_auto',
                     platform='yp21',
                     source_url=link[:500],
                     author_name='양평군청',
-                    event_date=judge.get('event_date_obj') or event_dt,
+                    event_date=judge.get('event_date_obj'),
                     event_place=judge.get('event_place') or None,
                     contact=(judge.get('contact') or None),
                     reserve_url=(judge.get('reserve_url') or None),
                     is_approved=False,  # 관리자 승인 후 공개
-                    category='event',
+                    category=post_cat,
                     created_at=datetime.now(),
                 )
                 db.session.add(p)
@@ -637,76 +753,58 @@ def _collect_yp_gov():
     except Exception as e:
         print(f'[YARD-GOV] 공지사항 수집 오류: {e}')
 
-    # 2) 입찰공고 수집
+    # 2) 고시/공고 수집 (구 입찰시스템 URL 폐쇄 → 공고판 대체, 입찰성은 [입찰] 분류)
     try:
         res = requests.get(
-            'http://27.101.129.102/contract/l4170000/bidInfoURL.do',
+            'https://www.yp21.go.kr/www/selectBbsNttList.do',
+            params={'bbsNo': 5, 'key': 1119, 'pageIndex': 1},
             headers=headers, timeout=15
         )
         if res.status_code == 200:
             from bs4 import BeautifulSoup
             soup = BeautifulSoup(res.text, 'html.parser')
-            rows = soup.select('table tbody tr')
+            rows = soup.select('table.board_list tbody tr') or soup.select('table tbody tr')
             saved = 0
             for row in rows[:10]:
                 cols = row.find_all('td')
-                if len(cols) < 4:
+                if len(cols) < 3:
                     continue
                 a_tag = row.find('a')
                 if not a_tag:
                     continue
-                title = a_tag.get_text(strip=True)
+                title = a_tag.get_text(strip=True).removesuffix('새글').strip()
                 if len(title) < 5:
                     continue
                 link = a_tag.get('href', '')
                 if link and not link.startswith('http'):
-                    link = f'http://27.101.129.102{link}'
+                    if link.startswith('./'):
+                        link = link[2:]
+                    link = f'https://www.yp21.go.kr/www/{link}'
+                disp_title, post_cat = _classify_notice_title(title, '[군청공고]', default_cat='notice')
                 # 중복 체크
-                if YardPost.query.filter_by(source_url=link).first():
+                if YardPost.query.filter_by(source_url=link).first() or _yard_url_blocked(link):
                     continue
-                if _title_similarity_blocked(f'[입찰] {title}'):
-                    continue
-                # 날짜 추출
-                date_text = cols[-1].get_text(strip=True) if cols else ''
-                event_dt = None
-                for fmt in ('%Y-%m-%d', '%Y.%m.%d', '%Y/%m/%d'):
-                    try:
-                        event_dt = datetime.strptime(date_text[:10], fmt)
-                        break
-                    except ValueError:
-                        continue
-                # 금액 추출
-                amount = ''
-                for col in cols:
-                    txt = col.get_text(strip=True)
-                    if '원' in txt or txt.replace(',', '').replace('.', '').isdigit():
-                        amount = txt
-                        break
-
-                # 마감된 자료 수집 방지
-                if event_dt and event_dt.date() < datetime.now().date():
-                    print(f'[YARD-GOV] 스킵(마감): {title[:40]}')
+                if _title_similarity_blocked(disp_title):
                     continue
 
                 p = YardPost(
-                    title=f'[입찰] {title}',
-                    content=f'입찰금액: {amount}' if amount else title,
+                    title=disp_title,
+                    content=title,
                     source_type='gov_auto',
-                    platform='yp21_bid',
+                    platform='yp21_gonggo',
                     source_url=link[:500],
                     author_name='양평군청',
-                    event_date=event_dt,
-                    is_approved=False,
-                    category='bid',
+                    is_approved=False,  # 관리자 승인 후 공개
+                    category=post_cat,
                     created_at=datetime.now(),
                 )
                 db.session.add(p)
                 total += 1
                 saved += 1
             db.session.commit()
-            print(f'[YARD-GOV] 입찰공고: 확인 {len(rows[:10])}건, 신규 {saved}건')
+            print(f'[YARD-GOV] 고시·공고: 확인 {len(rows[:10])}건, 신규 {saved}건')
     except Exception as e:
-        print(f'[YARD-GOV] 입찰공고 수집 오류: {e}')
+        print(f'[YARD-GOV] 고시·공고 수집 오류: {e}')
 
     return total
 
@@ -739,7 +837,7 @@ def _collect_yp_edu():
                 a_tag = card if card.name == 'a' else card.find('a')
                 if not a_tag:
                     continue
-                title = a_tag.get_text(strip=True)
+                title = a_tag.get_text(strip=True).removesuffix('새글').strip()
                 if len(title) < 5 or '전체' in title or '목록' in title:
                     continue
                 link = a_tag.get('href', '')
@@ -747,7 +845,7 @@ def _collect_yp_edu():
                     link = f'https://ypedu.gseek.kr{link}'
                 if not link or len(link) < 10:
                     continue
-                if YardPost.query.filter_by(source_url=link).first():
+                if YardPost.query.filter_by(source_url=link).first() or _yard_url_blocked(link):
                     continue
                 if _title_similarity_blocked(f'[평생학습] {title}'):
                     continue
@@ -761,8 +859,16 @@ def _collect_yp_edu():
                 judge = _ai_event_filter(title, full_content, full_content)
                 polished = _ai_polish_content(title, full_content, judge)
 
+                # 이미 지난 일정의 강좌는 수집 안 함
+                _end_dt = judge.get('event_end_obj') or judge.get('event_date_obj') or _parse_dt(judge.get('apply_end'))
+                if _end_dt and _end_dt.date() < datetime.now().date():
+                    print(f'[YARD-EDU] 스킵(지난 일정 강좌): {title[:40]}')
+                    continue
+
+                # 행사 기준: 장소+일정 둘 다 충족 시에만 event, 아니면 공지
+                _ev = bool(judge['is_event'])
                 p = YardPost(
-                    title=f'[평생학습] {title}',
+                    title=(f'[평생학습] {title}' if _ev else f'[평생학습공지] {title}'),
                     content=polished,
                     source_type='edu_auto',
                     platform='ypedu',
@@ -776,7 +882,7 @@ def _collect_yp_edu():
                     apply_start=_parse_dt(judge.get('apply_start')),
                     apply_end=_parse_dt(judge.get('apply_end')),
                     is_approved=False,
-                    category='event',
+                    category=('event' if _ev else 'notice'),
                     created_at=datetime.now(),
                 )
                 db.session.add(p)
@@ -802,25 +908,19 @@ def _collect_yp_edu():
                 a_tag = row.find('a')
                 if not a_tag:
                     continue
-                title = a_tag.get_text(strip=True)
+                title = a_tag.get_text(strip=True).removesuffix('새글').strip()
                 if len(title) < 5:
                     continue
                 link = a_tag.get('href', '')
                 if link and not link.startswith('http'):
                     link = f'https://ypedu.gseek.kr{link}'
-                if YardPost.query.filter_by(source_url=link).first():
+                # 제목 기준 분류 (입찰/공지/행사)
+                disp_title, post_cat = _classify_notice_title(title, '[평생학습공지]')
+                if YardPost.query.filter_by(source_url=link).first() or _yard_url_blocked(link):
                     continue
-                if _title_similarity_blocked(f'[평생학습공지] {title}'):
+                if _title_similarity_blocked(disp_title):
                     continue
                 cols = row.find_all('td')
-                date_text = cols[-1].get_text(strip=True) if cols else ''
-                event_dt = None
-                for fmt in ('%Y-%m-%d', '%Y.%m.%d', '%Y/%m/%d'):
-                    try:
-                        event_dt = datetime.strptime(date_text[:10], fmt)
-                        break
-                    except ValueError:
-                        continue
 
                 # 원본 본문 가져오기
                 full_content = _fetch_blog_content(link)
@@ -829,23 +929,30 @@ def _collect_yp_edu():
 
                 # AI 판정 + 정리
                 judge = _ai_event_filter(title, full_content, full_content)
-                if event_dt:
-                    judge['event_date_obj'] = event_dt
                 polished = _ai_polish_content(title, full_content, judge)
 
+                # 이미 지난 일정의 글은 수집 안 함
+                _end_dt = judge.get('event_end_obj') or judge.get('event_date_obj') or _parse_dt(judge.get('apply_end'))
+                if _end_dt and _end_dt.date() < datetime.now().date():
+                    print(f'[YARD-EDU] 스킵(지난 일정): {title[:40]}')
+                    continue
+                # 장소+일정 미충족 → 공지 (행사 기준: 장소와 일정 모두 필요)
+                if post_cat == 'event' and not judge['is_event']:
+                    disp_title, post_cat = _classify_notice_title(title, '[평생학습공지]', default_cat='notice')
+
                 p = YardPost(
-                    title=f'[평생학습공지] {title}',
+                    title=disp_title,
                     content=polished,
                     source_type='edu_auto',
                     platform='ypedu_notice',
                     source_url=link[:500],
                     author_name='양평매력캠퍼스',
-                    event_date=judge.get('event_date_obj') or event_dt,
+                    event_date=judge.get('event_date_obj'),
                     event_place=judge.get('event_place') or None,
                     contact=(judge.get('contact') or None),
                     reserve_url=(judge.get('reserve_url') or None),
                     is_approved=False,
-                    category='event',
+                    category=post_cat,
                     created_at=datetime.now(),
                 )
                 db.session.add(p)
@@ -892,7 +999,7 @@ def _collect_yp_tour():
             a_tag = row.find('a')
             if not a_tag:
                 continue
-            title = a_tag.get_text(strip=True)
+            title = a_tag.get_text(strip=True).removesuffix('새글').strip()
             if len(title) < 5:
                 continue
 
@@ -902,32 +1009,25 @@ def _collect_yp_tour():
                     link = link[2:]
                 link = f'https://tour.yp21.go.kr/www/{link}'
 
-            if YardPost.query.filter_by(source_url=link).first():
+            if YardPost.query.filter_by(source_url=link).first() or _yard_url_blocked(link):
                 continue
             if _title_similarity_blocked(f'[관광] {title}'):
                 continue
 
-            date_text = cols[-1].get_text(strip=True) if cols else ''
-            event_dt = None
-            for fmt in ('%Y-%m-%d', '%Y.%m.%d', '%Y/%m/%d'):
-                try:
-                    event_dt = datetime.strptime(date_text[:10], fmt)
-                    break
-                except ValueError:
-                    continue
-
             full_content = _fetch_blog_content(link)
             desc = full_content[:1500] if full_content else title
 
-            if event_dt and event_dt.date() < datetime.now().date():
-                print(f'[YARD-TOUR] 스킵(마감): {title[:40]}')
-                continue
-
             judge = _ai_event_filter(title, desc, full_content)
-            if event_dt:
-                judge['event_date_obj'] = event_dt
             polished = _ai_polish_content(title, desc, judge)
 
+            # 이미 지난 일정의 글은 수집 안 함
+            _end_dt = judge.get('event_end_obj') or judge.get('event_date_obj') or _parse_dt(judge.get('apply_end'))
+            if _end_dt and _end_dt.date() < datetime.now().date():
+                print(f'[YARD-TOUR] 스킵(지난 일정): {title[:40]}')
+                continue
+
+            # 행사 기준: 장소+일정 둘 다 충족 시에만 event, 아니면 공지
+            _ev = bool(judge['is_event'])
             p = YardPost(
                 title=f'[관광] {title}',
                 content=polished,
@@ -935,12 +1035,12 @@ def _collect_yp_tour():
                 platform='tour_yp21',
                 source_url=link[:500],
                 author_name='양평관광',
-                event_date=judge.get('event_date_obj') or event_dt,
+                event_date=judge.get('event_date_obj'),
                 event_place=judge.get('event_place') or None,
                 contact=(judge.get('contact') or None),
                 reserve_url=(judge.get('reserve_url') or None),
                 is_approved=False,
-                category='event',
+                category=('event' if _ev else 'notice'),
                 created_at=datetime.now(),
             )
             db.session.add(p)

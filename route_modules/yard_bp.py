@@ -601,6 +601,7 @@ def api_yard_admin_list():
         'repeat_end': p.repeat_end_time.strftime('%H:%M') if p.repeat_end_time else '',
         'extra_schedules': _post_schedules(p.id),
             'event_place': p.event_place or '',
+            'category': p.category or 'event',
             'is_approved': bool(p.is_approved), 'is_active': bool(p.is_active),
             'created_at': p.created_at.isoformat() if p.created_at else '',
         })
@@ -621,6 +622,27 @@ def api_yard_approve(fid):
     db.session.commit()
     return jsonify({"status": "success", "is_approved": p.is_approved,
                     "msg": "✅ 승인 — 마당에 공개되었습니다." if p.is_approved else "승인 해제 — 비공개로 전환했습니다."})
+
+
+@yard_bp.route('/api/yard/<string:fid>/category', methods=['POST'])
+def api_yard_category(fid):
+    """관리자: 분류(행사/공지/입찰) 직접 변경"""
+    if not _require_admin():
+        return jsonify({"status": "error", "msg": "권한 없음"}), 403
+    if not fid.startswith('p'):
+        return jsonify({"status": "error", "msg": "마을행사는 분류 대상이 아닙니다."}), 400
+    p = YardPost.query.get(int(fid[1:]))
+    if not p:
+        return jsonify({"status": "error", "msg": "없는 글입니다."}), 404
+    f = request.get_json(silent=True) or {}
+    cat = str(f.get('category') or '').strip()
+    if cat not in ('event', 'notice', 'bid'):
+        return jsonify({"status": "error", "msg": "분류는 행사/공지/입찰만 가능합니다."}), 400
+    p.category = cat
+    db.session.commit()
+    labels = {'event': '행사', 'notice': '공지', 'bid': '입찰'}
+    return jsonify({"status": "success", "category": p.category,
+                    "msg": f"✅ 분류를 '{labels[cat]}'(으)로 변경했습니다."})
 
 
 @yard_bp.route('/api/yard/orgs', methods=['GET'])
