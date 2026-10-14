@@ -1,6 +1,7 @@
 import { useRef, useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import LeafletMap from '../components/LeafletMap'
+import ContentEditor, { type ContentEditorHandle } from '../components/contentEditor/ContentEditor'
 import { offlineQueue, MAX_OFFLINE_FILES, MAX_QUEUE_FILES, type OfflineFile, type OfflineItem } from '../utils/offlineQueue'
 
 export default function ShareReport({ yardEventId: propEventId, yardEventTitle: propEventTitle, yardEventCategory: propEventCategory, onBack }: { yardEventId?: string | null; yardEventTitle?: string; yardEventCategory?: string; onBack?: () => void } = {}) {
@@ -30,6 +31,7 @@ export default function ShareReport({ yardEventId: propEventId, yardEventTitle: 
   const syncingRef = useRef(false)
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const editorRef = useRef<ContentEditorHandle>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const cameraInputRef = useRef<HTMLInputElement>(null)
   const videoInputRef = useRef<HTMLInputElement>(null)
@@ -41,12 +43,14 @@ export default function ShareReport({ yardEventId: propEventId, yardEventTitle: 
   const [searchParams] = useSearchParams()
   const yardEventId = propEventId != null ? propEventId : searchParams.get('yard_event')
   const yardEventTitle = propEventTitle != null ? propEventTitle : (searchParams.get('title') || '')
+  const [editorKey, setEditorKey] = useState('share-report')
 
   useEffect(() => {
     if (yardEventId && yardEventTitle) {
       const cat = propEventCategory === 'village' ? '마을후기' : '행사후기'
       setTitle(`[${cat}] ${decodeURIComponent(yardEventTitle)} 후기`)
       setDescription(`${decodeURIComponent(yardEventTitle)}에 다녀오신 후기를 남겨주세요.`)
+      setEditorKey(`yard-${yardEventId}`)
     }
   }, [yardEventId, yardEventTitle, propEventCategory])
 
@@ -378,7 +382,8 @@ const res = await fetch('/share-report/auto-save', { method: 'POST', body: fd, c
   }
 
   async function postSubmit() {
-    if (!hasContent && !title.trim() && !description.trim()) {
+    const descHtml = editorRef.current?.getContent() || description
+    if (!hasContent && !title.trim() && !descHtml.trim()) {
       alert('내용을 입력하거나 사진/파일을 선택해 주세요.')
       return
     }
@@ -403,7 +408,7 @@ const res = await fetch('/share-report/auto-save', { method: 'POST', body: fd, c
         reportId: reportIdRef.current,
         files,
         drawing: drawing && drawing.length > 2000 ? drawing : null,
-        title, description, lat, lon,
+        title, description: descHtml, lat, lon,
         yardEventId: yardEventId || null,
         yardEventCategory: propEventCategory || null,
         createdAt: new Date().toISOString(),
@@ -427,7 +432,7 @@ const res = await fetch('/share-report/auto-save', { method: 'POST', body: fd, c
 
     const fd = new FormData()
     fd.append('title', title)
-    fd.append('description', description)
+    fd.append('description', descHtml)
     if (yardEventId) fd.append('yard_event_id', yardEventId)
     if (propEventCategory) fd.append('yard_event_category', propEventCategory)
     if (lat && lon) {
@@ -573,7 +578,13 @@ const res = await fetch('/share-report/auto-save', { method: 'POST', body: fd, c
             </div>
             <div className="mb-3">
               <label className="form-label fw-bold small">설명 (선택)</label>
-              <textarea className="form-control" rows={3} placeholder="자세한 내용이 있으면 적어주세요." value={description} onChange={e => setDescription(e.target.value)} />
+              <ContentEditor
+                key={editorKey}
+                ref={editorRef}
+                initialContent={description}
+                showLocation={false}
+                placeholder="자세한 내용이 있으면 적어주세요. (사진은 Ctrl+V로 붙여넣기 가능)"
+              />
             </div>
             <div className="mb-3">
               <label className="form-label fw-bold small">현재 위치 <span className="text-muted fw-normal">(핀을 드래그하여 보정)</span></label>

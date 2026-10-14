@@ -167,8 +167,8 @@ export default function ShareDetail() {
               </div>
             )}
             {(r.image_path ? extraImages : extraImages.slice(0, 6)).map((img, i) => (
-              <div key={i} className="col-4 col-md-3">
-                <img src={img} className="img-fluid rounded" style={{height: 120, objectFit: 'contain', width: '100%', backgroundColor:'#f8f9fa'}} />
+              <div key={i} className="col-12">
+                <img src={img} className="img-fluid rounded" style={{ width: '100%', maxHeight: 640, objectFit: 'contain', backgroundColor: '#f8f9fa' }} />
               </div>
             ))}
             {!r.image_path && extraImages.length === 0 && !r.drawing_path && (
@@ -202,7 +202,7 @@ export default function ShareDetail() {
             </div>
           )}
 
-          {r.description && <p style={{whiteSpace: 'pre-wrap'}}>{r.description}</p>}
+          {r.description && <div className="share-desc" style={{ lineHeight: 1.8 }} dangerouslySetInnerHTML={{ __html: r.description }} />}
           <hr />
 
           <div className="d-flex justify-content-between small text-muted">

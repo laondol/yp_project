@@ -166,7 +166,7 @@ export default function AdminPageManagers() {
                     checked={Boolean(u.share_mod_approved)}
                     onChange={() => togglePage(u.id, '__share_mod__')} />
                   <label className="form-check-label small" htmlFor={`sharemod_${u.id}`}>
-                    {u.share_mod_approved && '✅ '}공유마당 심사 참여 허용 (마을지기에게만 부여)
+                    {u.share_mod_approved && '✅ '}공유마당 심사 참여 허용
                   </label>
                 </div>
               </div>

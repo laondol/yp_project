@@ -139,10 +139,10 @@ def _send_auto_saved_notice(report, created_new=False):
 
 
 def _share_mgr():
-    """공유마당 운영자 판정: 관리자/책임자 전체, 또는 공유 심사 승인 받은 마을지기"""
+    """공유마당 운영자 판정: 책임자(leader) 전체, 또는 공유마당 권한(share_mod_approved)이 있는 관리자/마을지기"""
     u = User.query.get(session.get('user_id')) if session.get('user_id') else None
     role = session.get('role') or (u.role if u else '')
-    if role in ('admin', 'leader'):
+    if role == 'leader':
         return True
     return bool(u and u.share_mod_approved)
 
@@ -739,10 +739,11 @@ def share_report_edit(report_id):
             _df.flush()
     except Exception:
         pass
-    is_admin = _share_mgr()
+    is_leader = (session.get('role') == 'leader')
+    is_share_mgr = _share_mgr()
     is_author = report.user_id == session.get('user_id')
     is_anonymous_share = not report.user_id or report.user_id == 0
-    if not (is_author or (is_admin and is_anonymous_share)):
+    if not (is_author or is_leader or (is_share_mgr and is_anonymous_share)):
         return jsonify({"status": "error", "msg": "권한 없음"}), 403
     if request.method == 'POST':
         try:
@@ -1016,8 +1017,18 @@ def share_report_edit(report_id):
                         place_id=(report.store_suggestion_id and str(report.store_suggestion_id) or None),
                         name=l, sub_category=(labels[i] if i < len(labels) else '기타'), ai_generated=True))
 
+        # 작성자 지정 (관리자만, 이메일로 사용자 변경)
+        author_email = request.form.get('author_email', '').strip()
+        if author_email and is_leader:
+            from models import User as _User
+            from sqlalchemy import func as _func
+            _target = _User.query.filter(_func.lower(_User.email) == author_email.lower()).first()
+            if _target:
+                report.user_id = _target.id
+                report.author_name = _target.real_name or _target.username
+
         # 작성자가 수정하면 다시 심사 중으로 변경
-        if is_author and not is_admin and report.status == 'approved':
+        if is_author and not is_leader and not is_share_mgr and report.status == 'approved':
             report.status = 'pending'
             report.moderation_result = 'pending'
             report.moderation_reason = '작성자 수정으로 재심사'
@@ -1030,10 +1041,11 @@ def share_report_edit(report_id):
 @share_bp.route('/share-report/delete-image/<int:report_id>', methods=['POST'])
 def share_report_delete_image(report_id):
     report = ShareReport.query.get_or_404(report_id)
-    is_admin = _share_mgr()
+    is_leader = (session.get('role') == 'leader')
+    is_share_mgr = _share_mgr()
     is_author = report.user_id == session.get('user_id')
     is_anonymous_share = not report.user_id or report.user_id == 0
-    if not (is_author or (is_admin and is_anonymous_share)):
+    if not (is_author or is_leader or (is_share_mgr and is_anonymous_share)):
         return jsonify({"status": "error", "msg": "권한 없음"}), 403
     data = request.get_json()
     path = data.get('image_path', '')

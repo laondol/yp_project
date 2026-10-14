@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import LeafletMap from '../components/LeafletMap'
+import ContentEditor, { type ContentEditorHandle } from '../components/contentEditor/ContentEditor'
 
 interface Photo { path: string }
 
@@ -57,6 +58,7 @@ export default function ShareEdit({ reportId: propId, onDone }: { reportId?: str
   const [editedBlobs, setEditedBlobs] = useState<Record<string, Blob>>({})
 
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const editorRef = useRef<ContentEditorHandle>(null)
   const originalLatRef = useRef('')
   const originalLonRef = useRef('')
 
@@ -81,7 +83,6 @@ export default function ShareEdit({ reportId: propId, onDone }: { reportId?: str
       }
       originalLatRef.current = d.latitude || ''
       originalLonRef.current = d.longitude || ''
-      if (d.author_email) setAuthorEmail(d.author_email)
       setLoading(false)
     })
     fetch('/api/me').then(r => r.json()).then(d => { if (d.id) setMe(d) }).catch(() => {})
@@ -243,9 +244,10 @@ export default function ShareEdit({ reportId: propId, onDone }: { reportId?: str
     e.preventDefault()
     if (submitting) return
     setSubmitting(true)
+    const descHtml = editorRef.current?.getContent() || description
     const fd = new FormData()
     fd.append('title', title)
-    fd.append('description', description)
+    fd.append('description', descHtml)
     fd.append('ai_category', aiCategory)
     fd.append('latitude', lat)
     fd.append('longitude', lon)
@@ -410,7 +412,13 @@ export default function ShareEdit({ reportId: propId, onDone }: { reportId?: str
 
             <div className="mb-3">
               <label className="form-label fw-bold small">설명</label>
-              <textarea className="form-control" rows={4} value={description} onChange={e => setDescription(e.target.value)} />
+              <ContentEditor
+                key={`share-edit-${id}`}
+                ref={editorRef}
+                initialContent={description}
+                showLocation={false}
+                placeholder="자세한 내용을 입력해 주세요. (사진은 Ctrl+V로 붙여넣기 가능)"
+              />
             </div>
 
             <div className="mb-3">

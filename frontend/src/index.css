@@ -66,3 +66,15 @@ div.container[style*="max-width"] {
   }
   body.print-from-modal .print-paper img { max-width: 100% !important; height: auto !important; }
 }
+
+/* 공유마당 상세: 설명 내 이미지 폭 맞춤 */
+.share-desc img {
+  max-width: 100% !important;
+  height: auto !important;
+  display: block;
+  margin: 0.4rem 0;
+  border-radius: 8px;
+}
+.share-desc p { margin-bottom: 0.5rem; }
+.share-desc table { max-width: 100%; border-collapse: collapse; }
+.share-desc table td, .share-desc table th { border: 1px solid #dee2e6; padding: 4px 8px; }

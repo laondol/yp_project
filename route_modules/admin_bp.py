@@ -95,6 +95,15 @@ def api_admin_users_search():
         'did': DIDDocument.query.filter_by(user_id=u.id).first().did if DIDDocument.query.filter_by(user_id=u.id).first() else None,
     } for u in users])
 
+@admin_bp.route('/api/admin/user-by-email')
+def api_admin_user_by_email():
+    if not (_is_admin_or_leader()): return jsonify({'error': '권한 없음'}), 403
+    email = request.args.get('email', '').strip()
+    if not email: return jsonify({'found': False})
+    u = User.query.filter(db.func.lower(User.email) == email.lower()).first()
+    if not u: return jsonify({'found': False})
+    return jsonify({'found': True, 'id': u.id, 'name': u.real_name or u.username, 'email': u.email})
+
 @admin_bp.route('/api/admin/stores')
 def api_admin_stores():
     if not (_is_admin_or_leader() or _has_managed_page('admin_stores')): return jsonify({'error': '권한 없음'}), 403
