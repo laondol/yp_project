@@ -24,7 +24,7 @@ interface ShareDetailData {
   like_count: number; dislike_count: number
   status: string; created_at: string; moderation_at?: string | null
   auto_sent?: boolean
-  store_suggestion_id?: number | null; store_menus?: any[]; sub_category?: string; my_role?: string
+  store_suggestion_id?: number | null; store_menus?: any[]; store_info?: { name: string; phone?: string; address?: string; category?: string; place_url?: string } | null; meal_note?: string; sub_category?: string; my_role?: string
   nearby_shares: NearbyShare[]
   local_news: LocalNews[]
   local_links: LocalLink[]
@@ -213,6 +213,23 @@ export default function ShareDetail() {
             <span>위치: {r.address || `양평군 ${r.town} ${r.village}`}</span>
             {r.ai_confidence ? <span>AI 신뢰도: {Math.round(r.ai_confidence * 100)}%</span> : null}
           </div>
+
+          {r.store_info && (
+            <div className="mt-3 p-3 bg-light rounded border-start border-5 border-success">
+              <div className="fw-bold small mb-1">
+                🏪 <a href={`/construction/store/${encodeURIComponent(r.store_info.name)}`} className="text-decoration-none">{r.store_info.name}</a>
+                <span className="badge bg-light text-dark ms-1 border">{r.store_info.category || '음식점'}</span>
+              </div>
+              {r.store_info.phone && <div className="small text-muted">📞 {r.store_info.phone}</div>}
+              {r.store_info.address && <div className="small text-muted">📍 {r.store_info.address}</div>}
+              {r.store_menus && r.store_menus.length > 0 && (
+                <div className="small mt-1">🍽️ 메뉴: {r.store_menus.map((m: any) => m.name).join(', ')}</div>
+              )}
+            </div>
+          )}
+          {r.meal_note && (
+            <div className="mt-2 small"><span className="fw-bold">✅ 경험 기록:</span> {r.meal_note}</div>
+          )}
 
           {canEdit && (
             <div className="mt-3 d-flex gap-2">

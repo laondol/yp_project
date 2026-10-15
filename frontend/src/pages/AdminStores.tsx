@@ -13,12 +13,14 @@ interface StoreInfo {
   smartplace?: string
   latitude?: number
   longitude?: number
+  ai_profile?: string | null
 }
 
 export default function AdminStores() {
   const [stores, setStores] = useState<StoreInfo[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [aiLoading, setAiLoading] = useState<number | null>(null)
 
   const load = async () => {
     setLoading(true)
@@ -36,6 +38,24 @@ export default function AdminStores() {
   }
 
   useEffect(() => { load() }, [])
+
+  const generateAiProfile = async (storeId: number) => {
+    setAiLoading(storeId)
+    try {
+      const res = await fetch(`/construction/store-ai-profile/${storeId}`, { method: 'POST' })
+      const data = await res.json()
+      if (data.success) {
+        alert('AI 프로필이 생성되었습니다.')
+        load()
+      } else {
+        alert(data.error || '생성 실패')
+      }
+    } catch {
+      alert('생성 중 오류 발생')
+    } finally {
+      setAiLoading(null)
+    }
+  }
 
   if (loading) return (
     <div className="px-0 px-md-2">
@@ -69,6 +89,7 @@ export default function AdminStores() {
                       <th>가게홈페이지</th>
                       <th>스마트플레이스</th>
                       <th>좌표</th>
+                      <th>AI 프로필</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -117,6 +138,19 @@ export default function AdminStores() {
                           {s.latitude != null && s.longitude != null
                             ? `${s.latitude.toFixed(4)}, ${s.longitude.toFixed(4)}`
                             : '-'}
+                        </td>
+                        <td>
+                          {s.ai_profile ? (
+                            <span className="badge bg-success">✅ 있음</span>
+                          ) : (
+                            <button
+                              className="btn btn-sm btn-outline-primary"
+                              onClick={() => generateAiProfile(s.id)}
+                              disabled={aiLoading === s.id}
+                            >
+                              {aiLoading === s.id ? '생성중...' : '🤖 생성'}
+                            </button>
+                          )}
                         </td>
                       </tr>
                     ))}

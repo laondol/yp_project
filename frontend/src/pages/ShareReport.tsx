@@ -9,6 +9,9 @@ export default function ShareReport({ yardEventId: propEventId, yardEventTitle: 
   const [description, setDescription] = useState('')
   const [lat, setLat] = useState('')
   const [lon, setLon] = useState('')
+  const [mealNote, setMealNote] = useState('')
+  const [nearbyPlaces, setNearbyPlaces] = useState<any[]>([])
+  const [ssid, setSsid] = useState('')
   const [locationStatus, setLocationStatus] = useState('위치 수집 중... (브라우저 권한 허용 필요)')
   const [addressDetail, setAddressDetail] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -164,6 +167,9 @@ export default function ShareReport({ yardEventId: propEventId, yardEventTitle: 
         setLat(lt)
         setLon(ln)
         setLocationStatus('주소 변환 중...')
+        // 근처 장소 로드 (자동 매칭 참고용)
+        fetch(`/share/nearby-places?lat=${lt}&lon=${ln}&max_km=1`)
+          .then(r => r.json()).then(d => setNearbyPlaces(d.places || [])).catch(() => {})
         fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lt}&lon=${ln}&accept-language=ko`)
           .then(r => r.json())
           .then(data => {
@@ -439,6 +445,8 @@ const res = await fetch('/share-report/auto-save', { method: 'POST', body: fd, c
       fd.append('latitude', lat)
       fd.append('longitude', lon)
     }
+    if (mealNote.trim()) fd.append('meal_note', mealNote.trim())
+    if (ssid) fd.append('store_suggestion_id', ssid)
     const c = canvasRef.current
     if (c) {
       const dataUrl = c.toDataURL('image/png')
@@ -585,6 +593,26 @@ const res = await fetch('/share-report/auto-save', { method: 'POST', body: fd, c
                 showLocation={false}
                 placeholder="자세한 내용이 있으면 적어주세요. (사진은 Ctrl+V로 붙여넣기 가능)"
               />
+            </div>
+            {nearbyPlaces.length > 0 && (
+              <div className="mb-3">
+                <label className="form-label fw-bold small">📍 근처 장소 (선택하면 자동 연결)</label>
+                <div className="d-flex flex-wrap gap-1">
+                  {nearbyPlaces.map((p: any) => (
+                    <button key={p.source + '-' + (p.id ?? p.name)} type="button"
+                      className={`btn btn-sm ${ssid === String(p.id || '') && p.id ? 'btn-primary' : 'btn-outline-secondary'}`}
+                      style={{ borderRadius: 20, fontSize: 12 }}
+                      onClick={() => { if (p.id) { setSsid(String(p.id)); } }}>
+                      {p.name} <span className="text-muted">({p.distance_m}m {p.direction})</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="mb-3">
+              <label className="form-label fw-bold small">경험 기록 (선택)</label>
+              <input type="text" className="form-control" value={mealNote} onChange={e => setMealNote(e.target.value)}
+                placeholder="여기서 무엇을 했나요? 예: 라떼 한 잔, 산책, 된장찌개" />
             </div>
             <div className="mb-3">
               <label className="form-label fw-bold small">현재 위치 <span className="text-muted fw-normal">(핀을 드래그하여 보정)</span></label>

@@ -387,7 +387,7 @@ def construction_local_stores():
         for si in store_infos:
             if si.latitude and si.longitude:
                 d = haversine_km(si.latitude, si.longitude, float(gv["lat"]), float(gv["lng"]))
-                if d <= 0.005:
+                if d <= 0.15:
                     gv["name"] = si.name
                     gv["name_status"] = "confirmed"
                     gv["phone"] = si.phone or None
@@ -412,7 +412,7 @@ def construction_local_stores():
         for sg in all_sugs:
             if sg.lat and sg.lon:
                 d = haversine_km(sg.lat, sg.lon, float(gv["lat"]), float(gv["lng"]))
-                if d <= 0.005:
+                if d <= 0.15:
                     gv["name"] = sg.top_name or sg.name
                     if sg.phone:
                         gv["phone"] = sg.phone
@@ -475,8 +475,16 @@ def construction_local_stores():
 
 @construction_bp.route('/construction/store/<string:store_name>')
 def construction_store_detail(store_name):
+    """가게 상세 — React SPA(StoreDetailPage)가 store_name으로 조회.
+    이름이 StoreInfo/StoreSuggestion에 있으면 SPA 서빙, 없으면 404."""
+    from urllib.parse import unquote
+    decoded = unquote(store_name).strip()
+    si = StoreInfo.query.filter(StoreInfo.name == decoded).first()
+    sg_match = any(ss.top_name == decoded for ss in StoreSuggestion.query.all())
+    if si or sg_match:
+        return _serve_spa()
+
     uid = session.get('user_id')
-    user = User.query.get(uid) if uid else None
     town = request.args.get('town','')
     village = request.args.get('village','')
     target_lat = request.args.get('lat','0')
@@ -494,11 +502,10 @@ def construction_store_detail(store_name):
             if d <= 0.15:
                 grouped.append(s)
     if not grouped:
-        from urllib.parse import unquote
-        name = _normalize_store_name(unquote(store_name))
+        name = _normalize_store_name(decoded)
         grouped = [s for s in stores if _normalize_store_name(s.canonical_name or s.title) == name]
     if not grouped:
-        return "가게를 찾을 수 없습니다.", 404
+        return _serve_spa()  # 이름이 DB에 없어도 SPA에서 적절히 안내
 
     # StoreInfo 매칭
     store_link = None
@@ -559,22 +566,52 @@ def construction_store_detail(store_name):
 # ─── 가게 상세 JSON API ────────────────────────────────────────────────
 @construction_bp.route('/construction/store-info-json')
 def store_info_json():
-    """가게 상세 정보 JSON: 사진, StoreInfo, 투표 현황"""
+    """가게 상세 정보 JSON: 사진, StoreInfo, 투표 현황, 메뉴
+    좌표(lat/lng) 또는 시설 이름(store_name)으로 조회"""
     uid = session.get('user_id')
     lat = request.args.get('lat', type=float)
     lng = request.args.get('lng', type=float)
     town = request.args.get('town', '')
     village = request.args.get('village', '')
+    store_name = request.args.get('store_name', '').strip()
+
+    # 이름 기반 조회: StoreInfo → StoreSuggestion에서 좌표 획득
+    store_info = None
+    suggestion = None
+    if store_name:
+        store_info = StoreInfo.query.filter(StoreInfo.name == store_name).first()
+        if store_info:
+            lat = store_info.latitude
+            lng = store_info.longitude
+        if not lat:
+            # StoreSuggestion에서 이름 매칭
+            for sg in StoreSuggestion.query.all():
+                if sg.top_name == store_name and sg.lat and sg.lon:
+                    suggestion = sg
+                    lat = sg.lat
+                    lng = sg.lon
+                    break
 
     if not lat or not lng:
-        return jsonify({"error": "좌표가 필요합니다."}), 400
+        return jsonify({"error": "좌표 또는 시설 이름이 필요합니다."}), 400
 
-    # 30m 이내 사진 + 투표 현황
-    photos = ShareReport.query.filter_by(town=town, village=village, status='approved').all()
+    # 150m 이내 사진 + 투표 현황 (클러스터링 반경과 동일) — 시간순(최신순)
+    photos = ShareReport.query.filter_by(status='approved') \
+        .order_by(ShareReport.created_at.desc()).all()
     gallery = []
+    seen_images = set()
     for p in photos:
-        if p.latitude and p.longitude and haversine_km(lat, lng, p.latitude, p.longitude) <= 0.005:
-            if p.image_path and p.image_path not in [g["image"] for g in gallery]:
+        if p.latitude and p.longitude and haversine_km(lat, lng, p.latitude, p.longitude) <= 0.15:
+            # 메인 사진 + 추가 사진 모두 갤러리에 포함
+            all_imgs = []
+            if p.image_path:
+                all_imgs.append(p.image_path)
+            if p.extra_images:
+                all_imgs.extend([e.strip() for e in p.extra_images.split(',') if e.strip()])
+            for img_path in all_imgs:
+                if img_path in seen_images:
+                    continue
+                seen_images.add(img_path)
                 up = StoreInfoVote.query.filter_by(photo_id=p.id, vote_type='up').count()
                 down = StoreInfoVote.query.filter_by(photo_id=p.id, vote_type='down').count()
                 my_vote = None
@@ -583,39 +620,56 @@ def store_info_json():
                     v = StoreInfoVote.query.filter_by(photo_id=p.id, user_id=uid).first()
                     my_vote = v.vote_type if v else None
                     my_comment = v.comment if v else None
-                # 코멘트 목록 (틀린정보)
                 comments = StoreInfoVote.query.filter_by(
                     photo_id=p.id, vote_type='down'
                 ).filter(StoreInfoVote.comment.isnot(None), StoreInfoVote.comment != '').order_by(StoreInfoVote.created_at.desc()).limit(5).all()
-                comment_list = [{"user": User.query.get(c.user_id).nickname if User.query.get(c.user_id) else "익명", "text": c.comment, "date": c.created_at.strftime('%m/%d') if c.created_at else ""} for c in comments]
+                comment_list = [{"user": User.query.get(c.user_id).username if User.query.get(c.user_id) else "익명", "text": c.comment, "date": c.created_at.strftime('%m/%d') if c.created_at else ""} for c in comments]
 
                 gallery.append({
-                    "image": p.image_path, "title": p.title or "", "id": p.id,
+                    "image": img_path, "title": p.title or "", "id": p.id,
+                    "description": (p.description or "")[:200],
+                    "author": p.author_name or "익명",
+                    "created_at": p.created_at.strftime('%Y-%m-%d') if p.created_at else "",
+                    "meal_note": p.meal_note or "",
+                    "share_url": f"/share/detail/{p.id}",
                     "up_count": up, "down_count": down, "my_vote": my_vote,
                     "my_comment": my_comment, "comments": comment_list,
                 })
 
-    # StoreInfo 매칭
-    store_info = None
-    all_si = StoreInfo.query.all()
-    for si in all_si:
-        if si.latitude and si.longitude and haversine_km(lat, lng, si.latitude, si.longitude) <= 0.005:
-            store_info = si
-            break
-
-    # StoreSuggestion 매칭 (StoreInfo 없으면)
-    suggestion = None
+    # StoreInfo 매칭 (이름 기반 조회가 이미 찾았으면 유지)
     if not store_info:
+        all_si = StoreInfo.query.all()
+        for si in all_si:
+            if si.latitude and si.longitude and haversine_km(lat, lng, si.latitude, si.longitude) <= 0.15:
+                store_info = si
+                break
+
+    # StoreSuggestion 매칭 (StoreInfo 없으면, 이름 기반 조회가 이미 찾았으면 유지)
+    if not store_info and not suggestion:
         all_sugs = StoreSuggestion.query.filter(
             StoreSuggestion.lat.isnot(None), StoreSuggestion.lon.isnot(None)
         ).all()
         for sg in all_sugs:
-            if sg.lat and sg.lon and haversine_km(lat, lng, sg.lat, sg.lon) <= 0.005:
+            if sg.lat and sg.lon and haversine_km(lat, lng, sg.lat, sg.lon) <= 0.15:
                 suggestion = sg
                 break
 
+    # 메뉴 정보 (StoreSuggestion 기준)
+    menus = []
+    all_sugs_for_menu = StoreSuggestion.query.filter(
+        StoreSuggestion.lat.isnot(None), StoreSuggestion.lon.isnot(None)
+    ).all()
+    target_sg = suggestion
+    if not target_sg:
+        for sg in all_sugs_for_menu:
+            if sg.lat and sg.lon and haversine_km(lat, lng, sg.lat, sg.lon) <= 0.15:
+                target_sg = sg
+                break
+    if target_sg and target_sg.place_id:
+        menus = StoreMenu.query.filter_by(place_id=target_sg.place_id).order_by(StoreMenu.sub_category).limit(20).all()
+
     # 투표 현황 (전체 합산)
-    photo_ids = [g["id"] for g in gallery]
+    photo_ids = list(set(g["id"] for g in gallery))
     if photo_ids:
         correct_count = StoreInfoVote.query.filter(StoreInfoVote.photo_id.in_(photo_ids), StoreInfoVote.vote_type=='up').count()
         wrong_count = StoreInfoVote.query.filter(StoreInfoVote.photo_id.in_(photo_ids), StoreInfoVote.vote_type=='down').count()
@@ -628,12 +682,44 @@ def store_info_json():
         u = User.query.get(uid)
         user_points = u.points if u else 0
 
+    manager_info = None
+    if store_info:
+        if store_info.manager_user_id:
+            mu = User.query.get(store_info.manager_user_id)
+            manager_info = {
+                "username": mu.username if mu else '?',
+                "verified": bool(store_info.manager_verified),
+                "requested": bool(store_info.manager_requested_at and not store_info.manager_verified),
+                "verified_at": store_info.manager_verified_at.strftime('%Y-%m-%d') if store_info.manager_verified_at else None,
+            }
+        else:
+            manager_info = {"username": None, "verified": False, "requested": False, "verified_at": None}
+
+    # 편집 권한: 책임자(인증) 또는 리더/관리자
+    can_edit = False
+    if store_info and uid:
+        if session.get('role') in ('admin', 'leader'):
+            can_edit = True
+        elif store_info.manager_verified and store_info.manager_user_id == uid:
+            can_edit = True
+
     return jsonify({
-        "store_name": store_info.name if store_info else (suggestion.top_name if suggestion else ""),
+        "store_name": store_info.name if store_info else (suggestion.top_name if suggestion else (store_name or '')),
+        "store_info_id": store_info.id if store_info else None,
+        "category": (store_info.category if store_info else None) or '음식점',
         "phone": store_info.phone if store_info else (suggestion.phone if suggestion else None),
-        "address": (store_info.town or '') + ' ' + (store_info.village or '') if store_info else (suggestion.address if suggestion else ""),
+        "address": ((store_info.town or '') + ' ' + (store_info.village or '')).strip() if store_info else (suggestion.address if suggestion else ""),
         "store_link": (store_info.our_link or store_info.smartplace) if store_info else (suggestion.place_url if suggestion else None),
+        "ai_profile": store_info.ai_profile if store_info else None,
+        "business_hours": store_info.business_hours if store_info else None,
+        "reservation_url": store_info.reservation_url if store_info else None,
+        "detail_info": store_info.detail_info if store_info else None,
+        "last_share_at": store_info.last_share_at.strftime('%Y-%m-%d %H:%M') if store_info and store_info.last_share_at else None,
+        "can_edit": can_edit,
+        "lat": lat, "lng": lng,
+        "manager": manager_info,
         "gallery": gallery,
+        "menus": [{"name": m.name, "category": m.sub_category, "price": m.price} for m in menus],
         "correct_count": correct_count,
         "wrong_count": wrong_count,
         "user_points": user_points,
@@ -708,17 +794,35 @@ def construction_local_scenery():
         village=user.curr_village,
         status='approved'
     ).order_by(ShareReport.created_at.desc()).all()
+
+    # 장소 사전 (배지용): StoreSuggestion + StoreInfo 이름→(카테고리,전화) 매핑
+    store_map = {}
+    for ss in StoreSuggestion.query.all():
+        store_map[ss.id] = {"name": ss.top_name, "category": ss.category or '음식점', "phone": ss.phone}
+    from services.geocode import haversine as _hv
+    store_infos = StoreInfo.query.all()
+
+    def _place_of(s):
+        """공유글의 연결 장소 반환 (ssid 우선, 없으면 150m 내 탐색)"""
+        if s.store_suggestion_id and s.store_suggestion_id in store_map:
+            p = dict(store_map[s.store_suggestion_id]); p['id'] = s.store_suggestion_id; return p
+        if s.latitude and s.longitude:
+            best = None; best_d = 0.16
+            for si in store_infos:
+                if si.latitude is None or si.longitude is None: continue
+                d = _hv(s.latitude, s.longitude, si.latitude, si.longitude)
+                if d < best_d:
+                    best_d = d; best = {"id": None, "name": si.name, "category": si.category or '음식점', "phone": si.phone}
+            if best: return best
+        return None
+
     scenery = []
     for s in all_approved:
         if not s.image_path:
             continue
         if s.created_at and s.created_at.month in season_months and s.id:
-            # 같은 게시물이 scenery와 stores에 모두 나오는 것 방지: 
-            # ai_category가 'store'/'가게'면 건너뛰기
-            cat = (s.ai_category or '').lower()
-            if cat in ('store','가게','상점','마트','음식점','식당','카페'):
-                continue
             scenery.append(s)
+
     return jsonify({
         "town": user.curr_town,
         "village": user.curr_village,
@@ -729,6 +833,10 @@ def construction_local_scenery():
             "image_path": s.image_path,
             "description": (s.description or "")[:100],
             "created_at": s.created_at.strftime("%Y-%m-%d") if s.created_at else "",
+            "latitude": s.latitude,
+            "longitude": s.longitude,
+            "meal_note": s.meal_note or '',
+            "place": _place_of(s),
         } for s in scenery[:30]],
     })
 
@@ -1640,5 +1748,244 @@ def admin_review_action(review_id, action):
 
     return jsonify({
         "success": True,
-        "msg": f"{'반영' if action == 'approve' else '반려'} 완료" + (f" (제공자 {review.reporter_id}번에게 1니아 지급)" if action == 'approve' else ""),
+        "msg": f"{'반영' if action == 'approve' else '반려'} 완료" + (f" (제공자 {review.reporter_id}번에게 1니아 지급)" if action == "approve" else ""),
     })
+
+
+@construction_bp.route('/construction/store-ai-profile/<int:store_info_id>', methods=['POST'])
+def store_ai_profile(store_info_id):
+    """AI가 같은 가게이름 정보를 모아 가게 프로필 통합 생성 (admin/leader 전용)"""
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({"error": "로그인이 필요합니다."}), 401
+    user = User.query.get(uid)
+    if not user or user.role not in ('admin', 'leader'):
+        return jsonify({"error": "관리자/리더만 가능합니다."}), 403
+
+    si = StoreInfo.query.get_or_404(store_info_id)
+
+    # 같은 이름의 모든 소스 수집
+    sources = {
+        "store_info": {"id": si.id, "name": si.name, "phone": si.phone, "address": f"{si.town} {si.village}"},
+        "store_suggestions": [],
+        "store_menus": [],
+        "share_reports": [],
+    }
+
+    # StoreSuggestion에서 같은 이름 검색
+    sugs = StoreSuggestion.query.filter(StoreSuggestion.name.ilike(f'%{si.name}%')).all()
+    for sg in sugs:
+        sources["store_suggestions"].append({
+            "name": sg.name, "votes": sg.vote_count, "phone": sg.phone,
+            "address": sg.address, "place_url": sg.place_url,
+        })
+        # 해당 suggestion의 메뉴도 수집
+        menus = StoreMenu.query.filter_by(place_id=sg.place_id).all()
+        for m in menus:
+            sources["store_menus"].append({"name": m.name, "category": m.sub_category, "price": m.price})
+
+    # ShareReport에서 같은 위치(150m)의 후기 수집
+    last_share = None
+    if si.latitude and si.longitude:
+        nearby = ShareReport.query.filter_by(status='approved') \
+            .order_by(ShareReport.created_at.desc()).all()
+        for r in nearby:
+            if r.latitude and r.longitude and haversine_km(si.latitude, si.longitude, r.latitude, r.longitude) <= 0.15:
+                sources["share_reports"].append({
+                    "title": r.title, "description": (r.description or "")[:300],
+                    "author": r.author_name, "likes": r.like_count,
+                    "meal_note": r.meal_note or '',
+                    "created_at": r.created_at.strftime('%Y-%m-%d') if r.created_at else '',
+                })
+                if not last_share:
+                    last_share = r.created_at
+
+    # AI 프로필 생성 (Gemini API) — JSON으로 받아 구조화
+    import json as _json
+    import requests as _requests
+    prompt = f"""다음은 "{si.name}" 시설({si.category or '음식점'})에 대한 수집된 정보입니다.
+회원 공유글·메뉴·제안 정보를 종합해 시설 프로필을 정리해주세요.
+
+반드시 아래 JSON 형식으로만 반환하세요 (마크다운 코드블록 없이):
+{{
+  "profile": "3-5문장 시설 소개 (특징, 분위기, 회원 후기 요약)",
+  "business_hours": "영업시간 추정 (공유글/메뉴 정보에서 유추. 없으면 빈 문자열)",
+  "menu_highlights": "대표 메뉴 3-5개 (가격 포함, 없으면 빈 문자열)",
+  "reservation_info": "예약 관련 정보 (없으면 빈 문자열)"
+}}
+
+수집된 정보:
+{_json.dumps(sources, ensure_ascii=False, indent=2)}
+"""
+
+    from config import Config
+    api_key = getattr(Config, 'MOTIF_API_KEY', '')
+    ai_profile = None
+    if api_key:
+        try:
+            r = _requests.post('https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
+                headers={'Authorization': 'Bearer ' + api_key, 'Content-Type': 'application/json'},
+                json={'model': 'gemini-3.8-flash',
+                      'messages': [{'role': 'user', 'content': prompt}],
+                      'temperature': 0.3}, timeout=45)
+            raw = r.json()['choices'][0]['message']['content'].strip()
+            # JSON 파싱 시도 (코드블록 제거)
+            cleaned = raw
+            if cleaned.startswith('```'):
+                cleaned = cleaned.split('\n', 1)[1].rsplit('```', 1)[0].strip()
+            try:
+                parsed = _json.loads(cleaned)
+                ai_profile = (parsed.get('profile') or '').strip()
+                # 구조화 필드 자동 저장 (비어있지 않을 때만)
+                if parsed.get('business_hours') and not si.business_hours:
+                    si.business_hours = parsed['business_hours'].strip()[:200]
+                if parsed.get('reservation_info') and not si.reservation_url:
+                    # reservation_info가 URL이면 그대로, 아니면 detail에 기록
+                    ri = parsed['reservation_info'].strip()
+                    if ri.startswith('http'):
+                        si.reservation_url = ri[:500]
+                if parsed.get('menu_highlights'):
+                    mh = parsed['menu_highlights'].strip()
+                    if mh and not si.detail_info:
+                        si.detail_info = f"<p><b>대표 메뉴:</b> {mh}</p>"
+            except Exception:
+                ai_profile = raw  # JSON 아니면 텍스트 그대로
+            if last_share:
+                si.last_share_at = last_share
+        except Exception as e:
+            ai_profile = f"AI 생성 실패: {str(e)[:100]}"
+
+    if ai_profile:
+        si.ai_profile = ai_profile
+        si.ai_profile_at = datetime.now()
+        si.ai_sources = _json.dumps(sources, ensure_ascii=False)
+        db.session.commit()
+
+    return jsonify({
+        "success": True,
+        "ai_profile": ai_profile,
+        "business_hours": si.business_hours,
+        "reservation_url": si.reservation_url,
+        "detail_info": si.detail_info,
+        "last_share_at": si.last_share_at.strftime('%Y-%m-%d %H:%M') if si.last_share_at else None,
+        "sources_count": {
+            "suggestions": len(sources["store_suggestions"]),
+            "menus": len(sources["store_menus"]),
+            "reports": len(sources["share_reports"]),
+        }
+    })
+
+
+# ---- 시설 책임자 인증 ----
+@construction_bp.route('/construction/store-manager/request/<int:store_info_id>', methods=['POST'])
+def store_manager_request(store_info_id):
+    """주민인증 회원이 시설 책임자 신청 (승인은 리더/관리자)"""
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({"success": False, "msg": "로그인이 필요합니다."}), 401
+    user = User.query.get(uid)
+    if not user:
+        return jsonify({"success": False, "msg": "사용자를 찾을 수 없습니다."}), 404
+    # 주민인증 확인: town/village 존재 = 주민인증 완료
+    if not (user.town or user.curr_town):
+        return jsonify({"success": False, "msg": "주민인증 회원만 신청할 수 있습니다."}), 403
+    si = StoreInfo.query.get_or_404(store_info_id)
+    if si.manager_user_id and si.manager_verified:
+        return jsonify({"success": False, "msg": "이미 책임자가 인증되어 있습니다."}), 409
+    if si.manager_user_id == uid:
+        return jsonify({"success": False, "msg": "이미 신청한 시설입니다. 승인 대기 중입니다."}), 409
+    si.manager_user_id = uid
+    si.manager_requested_at = datetime.now()
+    db.session.commit()
+    return jsonify({"success": True, "msg": "책임자 신청이 접수되었습니다. 리더/관리자 승인 후 인증됩니다."})
+
+
+@construction_bp.route('/construction/store-manager/verify/<int:store_info_id>', methods=['POST'])
+def store_manager_verify(store_info_id):
+    """리더/관리자가 시설 책임자 승인/취소"""
+    if session.get('role') not in ('admin', 'leader'):
+        return jsonify({"success": False, "msg": "권한 없음"}), 403
+    data = request.get_json(silent={}) or {}
+    approve = data.get('approve', True)
+    si = StoreInfo.query.get_or_404(store_info_id)
+    if approve:
+        if not si.manager_user_id:
+            return jsonify({"success": False, "msg": "신청자가 없습니다."}), 400
+        si.manager_verified = True
+        si.manager_verified_at = datetime.now()
+        si.manager_requested_at = None
+        # 신청자에게 통보
+        try:
+            mu = User.query.get(si.manager_user_id)
+            if mu:
+                admin_user = User.query.filter(User.role == 'admin').first()
+                db.session.add(Message(
+                    sender_id=admin_user.id if admin_user else 0,
+                    sender_name='함께사는양평', sender_role='admin',
+                    receiver_id=mu.id,
+                    subject=f'[{si.name}] 시설 책임자 인증 완료',
+                    content=f'{si.name}의 시설 책임자로 인증되었습니다. 이제 시설 정보 관리 권한이 있습니다.',
+                    is_notice=True
+                ))
+        except Exception:
+            pass
+        msg = '책임자로 인증했습니다.'
+    else:
+        si.manager_verified = False
+        si.manager_verified_at = None
+        si.manager_user_id = None
+        si.manager_requested_at = None
+        msg = '책임자 인증을 취소했습니다.'
+    db.session.commit()
+    return jsonify({"success": True, "msg": msg})
+
+
+@construction_bp.route('/construction/store-manager/pending')
+def store_manager_pending():
+    """승인 대기 중인 책임자 신청 목록 (리더/관리자용)"""
+    if session.get('role') not in ('admin', 'leader'):
+        return jsonify({"success": False, "msg": "권한 없음"}), 403
+    rows = StoreInfo.query.filter(
+        StoreInfo.manager_requested_at.isnot(None),
+        StoreInfo.manager_verified == False  # noqa: E712
+    ).order_by(StoreInfo.manager_requested_at.desc()).all()
+    items = []
+    for si in rows:
+        mu = User.query.get(si.manager_user_id) if si.manager_user_id else None
+        items.append({
+            "store_info_id": si.id, "name": si.name,
+            "category": si.category or '음식점',
+            "applicant": mu.username if mu else '?',
+            "applicant_id": si.manager_user_id,
+            "requested_at": si.manager_requested_at.strftime('%Y-%m-%d %H:%M') if si.manager_requested_at else '',
+        })
+    return jsonify({"success": True, "pending": items})
+
+
+@construction_bp.route('/construction/store-info-edit/<int:store_info_id>', methods=['POST'])
+def store_info_edit(store_info_id):
+    """시설 상세정보 편집 — 인증 책임자 또는 리더/관리자"""
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({"success": False, "msg": "로그인이 필요합니다."}), 401
+    si = StoreInfo.query.get_or_404(store_info_id)
+    is_admin_leader = session.get('role') in ('admin', 'leader')
+    is_verified_manager = si.manager_verified and si.manager_user_id == uid
+    if not (is_admin_leader or is_verified_manager):
+        return jsonify({"success": False, "msg": "편집 권한이 없습니다. 시설 책임자 인증 또는 리더/관리자만 편집할 수 있습니다."}), 403
+
+    data = request.get_json(silent=True) or {}
+    if 'business_hours' in data:
+        si.business_hours = (data.get('business_hours') or '').strip() or None
+    if 'reservation_url' in data:
+        si.reservation_url = (data.get('reservation_url') or '').strip() or None
+    if 'detail_info' in data:
+        si.detail_info = (data.get('detail_info') or '').strip() or None
+    if 'phone' in data:
+        si.phone = (data.get('phone') or '').strip() or None
+    if 'category' in data:
+        cat = (data.get('category') or '').strip()
+        if cat:
+            si.category = cat
+    db.session.commit()
+    return jsonify({"success": True, "msg": "시설 정보가 저장되었습니다."})

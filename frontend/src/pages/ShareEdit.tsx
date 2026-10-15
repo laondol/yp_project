@@ -22,6 +22,7 @@ export default function ShareEdit({ reportId: propId, onDone }: { reportId?: str
   const [storeResults, setStoreResults] = useState<any[]>([])
   const [storeSuggestionId, setStoreSuggestionId] = useState('')
   const [selectedStore, setSelectedStore] = useState('')
+  const [mealNote, setMealNote] = useState('')
   const [menuText, setMenuText] = useState('')
   const [menuResult, setMenuResult] = useState('')
 
@@ -67,6 +68,7 @@ export default function ShareEdit({ reportId: propId, onDone }: { reportId?: str
       setTitle(d.title || '')
       setDescription(d.description || '')
       setAiCategory(d.ai_category || '')
+      setMealNote(d.meal_note || '')
       setLat(d.latitude || '')
       setLon(d.longitude || '')
       const existing: Photo[] = []
@@ -78,6 +80,7 @@ export default function ShareEdit({ reportId: propId, onDone }: { reportId?: str
       if (d.store_suggestion_id) {
         setStoreSuggestionId(String(d.store_suggestion_id))
         if (d.store_menus) setStoreMenus(d.store_menus)
+        if (d.store_info?.name) setSelectedStore(`${d.store_info.name} (${d.store_info.address || ''})`)
         const menuLines = (d.store_menus || []).map((m: any) => `${m.name} ${m.price || ''}`.trim()).join('\n')
         if (menuLines) setMenuText(menuLines)
       }
@@ -182,6 +185,7 @@ export default function ShareEdit({ reportId: propId, onDone }: { reportId?: str
     fetch(url).then(r => r.json()).then(d => setStoreResults(d.results || []))
   }
   function pickStore(p: any) {
+    setStoreQuery(p.name || '')
     setSelectedStore(`${p.name} (${p.address || ''})`)
     setStoreResults([])
     setStoreSuggestionId(String(p.suggestion_id || ''))
@@ -254,6 +258,7 @@ export default function ShareEdit({ reportId: propId, onDone }: { reportId?: str
     fd.append('original_lat', originalLatRef.current)
     fd.append('original_lon', originalLonRef.current)
     if (storeSuggestionId) fd.append('store_suggestion_id', storeSuggestionId)
+    if (mealNote.trim()) fd.append('meal_note', mealNote.trim())
     if (menuText.trim()) fd.append('menu_text', menuText)
     if (isMgr && authorEmail.trim()) fd.append('author_email', authorEmail.trim())
 
@@ -376,13 +381,15 @@ export default function ShareEdit({ reportId: propId, onDone }: { reportId?: str
 
             {storeSuggestionId && (
               <div className="mb-3">
-                <label className="form-label fw-bold small">가게 메뉴 목록</label>
+                <label className="form-label fw-bold small">가게 메뉴 목록 <small className="text-muted">(클릭 시 경험 기록에 추가)</small></label>
                 {storeMenus.length > 0 && (
                   <div className="mb-2">
                     {storeMenus.map((m: any) => (
                       <div key={m.id} className="d-flex align-items-center gap-2 mb-1 p-1 bg-light rounded small">
                         <span className="badge bg-secondary">{m.sub_category}</span>
-                        <span className="flex-grow-1">{m.name}</span>
+                        <button type="button" className="btn btn-sm text-start flex-grow-1 p-0" title="경험 기록에 추가" onClick={() => setMealNote(prev => prev ? `${prev}, ${m.name}` : m.name)}>
+                          <span className="text-primary text-decoration-underline">{m.name}</span>
+                        </button>
                         {m.price && <span className="text-muted">{m.price}</span>}
                         <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => deleteMenu(m.id)} style={{ padding: '0 4px', fontSize: 10 }}>X</button>
                       </div>
@@ -402,6 +409,11 @@ export default function ShareEdit({ reportId: propId, onDone }: { reportId?: str
                 </div>
               </div>
             )}
+
+            <div className="mb-3">
+              <label className="form-label fw-bold small">경험 기록</label>
+              <input type="text" className="form-control" value={mealNote} onChange={e => setMealNote(e.target.value)} placeholder="여기서 무엇을 했나요? 예: 라떼 한 잔, 산책, 된장찌개" />
+            </div>
 
             <div className="mb-3">
               <label className="form-label fw-bold small">메뉴 (AI 자동 분류)</label>

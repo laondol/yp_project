@@ -6,7 +6,7 @@ from flask import Blueprint, render_template, request, redirect, url_for, jsonif
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import or_
 from werkzeug.utils import secure_filename
-from models import db, User, ShareReport, ShareComment, ShareVote, Message, Post, Comment, NewsArticle, VillagePage, RampApplication, PointHistory, Friend, VillageWish, LegalPost, ChatMessage, FriendGroup, LegalAppointment, TongBot, TongBotDraft, ConstructionNotice, GpsCalibration, StoreSuggestion, StoreMenu, YardPost
+from models import db, User, ShareReport, ShareComment, ShareVote, Message, Post, Comment, NewsArticle, VillagePage, RampApplication, PointHistory, Friend, VillageWish, LegalPost, ChatMessage, FriendGroup, LegalAppointment, TongBot, TongBotDraft, ConstructionNotice, GpsCalibration, StoreSuggestion, StoreMenu, StoreInfo, YardPost
 from services.security import save_village_file
 from services.ai_service import background_process_share, moderate_image
 from services.geocode import haversine, gps_to_town_village, gps_to_address, get_nearby_reports, is_in_yangpyeong, YANGPYEONG_BOUNDS, YANGPYEONG_VILLAGES
@@ -19,6 +19,31 @@ share_bp = Blueprint('share', __name__)
 
 def _share_upload_base():
     return os.path.join(current_app.root_path, 'static', 'uploads', 'share_reports')
+
+
+def _find_nearby_place(lat, lon, radius_km=0.15):
+    """GPS 좌표 기준 radius_km 내 가장 가까운 장소(StoreInfo→StoreSuggestion) 탐색.
+    반환: (source, place_id_or_none, name, phone, address, category, distance_km) 또는 None"""
+    best = None
+    best_d = radius_km + 1
+
+    for si in StoreInfo.query.all():
+        if si.latitude is None or si.longitude is None:
+            continue
+        d = haversine(lat, lon, si.latitude, si.longitude)
+        if d <= radius_km and d < best_d:
+            best_d = d
+            best = ('store_info', None, si.name, si.phone, None, si.category or '음식점', d)
+
+    for ss in StoreSuggestion.query.all():
+        if ss.lat is None or ss.lon is None:
+            continue
+        d = haversine(lat, lon, ss.lat, ss.lon)
+        if d <= radius_km and d < best_d:
+            best_d = d
+            best = ('store_suggestion', ss.id, ss.top_name, ss.phone, ss.address, ss.category or '음식점', d)
+
+    return best
 
 
 def _move_report_files(report, target_sub):
@@ -256,6 +281,15 @@ def share_report():
     share_address = gps_to_address(latitude, longitude) or \
         f"경기도 양평군 {share_town} {share_village}".strip()
 
+    # 경험 기록 + 가게 자동 매칭
+    meal_note = request.form.get('meal_note', '').strip() or None
+    ssid = request.form.get('store_suggestion_id', '').strip()
+    ssid = int(ssid) if ssid.isdigit() else None
+    if not ssid:
+        near = _find_nearby_place(latitude, longitude)
+        if near:
+            ssid = near[1]  # StoreSuggestion.id (StoreInfo면 None)
+
     report = ShareReport(
         user_id=user.id if user else 0,
         author_name=user.username if user else '익명',
@@ -277,6 +311,8 @@ def share_report():
         ai_region_news='',
         ai_news_links='[]',
         ai_danger_alert=False,
+        store_suggestion_id=ssid,
+        meal_note=meal_note,
         auto_sent=auto_sent
     )
     if video_path:
@@ -768,6 +804,9 @@ def share_report_edit(report_id):
         ssid = request.form.get('store_suggestion_id', type=int)
         if ssid:
             report.store_suggestion_id = ssid
+        # 경험 기록
+        if 'meal_note' in request.form:
+            report.meal_note = request.form.get('meal_note', '').strip() or None
         # 기존 사진 삭제 처리
         delete_imgs = request.form.getlist('delete_image')
         if delete_imgs:
@@ -1221,6 +1260,15 @@ def share_nearby():
     nearby = get_nearby_reports(reports, lat, lon, max_count=12, max_km=max_km)
     items = []
     for r, dist in nearby:
+        place = None
+        if r.store_suggestion_id:
+            ss = StoreSuggestion.query.get(r.store_suggestion_id)
+            if ss:
+                place = {"name": ss.top_name, "category": ss.category or '음식점'}
+        if not place:
+            near = _find_nearby_place(r.latitude, r.longitude) if r.latitude and r.longitude else None
+            if near:
+                place = {"name": near[2], "category": near[5]}
         items.append({
             "id": r.id,
             "title": r.title or "제목 없음",
@@ -1230,10 +1278,103 @@ def share_nearby():
             "image": r.image_path or r.drawing_path or "",
             "summary": (r.ai_summary or r.description or "")[:100],
             "distance": dist,
+            "meal_note": r.meal_note or '',
+            "place": place,
             "like_count": r.like_count,
             "dislike_count": r.dislike_count
         })
     return jsonify({"status": "success", "items": items})
+
+
+def _bearing_deg(lat1, lon1, lat2, lon2):
+    """두 좌표 사이 방위각(도). 0=북, 90=동, 180=남, 270=서"""
+    from math import radians, degrees, atan2, sin, cos
+    phi1, phi2 = radians(lat1), radians(lat2)
+    dlon = radians(lon2 - lon1)
+    x = sin(dlon) * cos(phi2)
+    y = cos(phi1) * sin(phi2) - sin(phi1) * cos(phi2) * cos(dlon)
+    return (degrees(atan2(x, y)) + 360) % 360
+
+
+def _compass(deg):
+    dirs = ['북', '북북동', '북동', '동북동', '동', '동남동', '남동', '남남동',
+            '남', '남남서', '남서', '서남서', '서', '서북서', '북서', '북북서']
+    return dirs[int((deg + 11.25) / 22.5) % 16]
+
+
+@share_bp.route('/share/nearby-places')
+def share_nearby_places():
+    """내 주변 시설 목록 — 시설 1행=콘텐츠 수, 방향+거리, 책임자 정보"""
+    lat = request.args.get('lat', type=float)
+    lon = request.args.get('lon', type=float)
+    max_km = request.args.get('max_km', 5, type=float)
+    if not lat or not lon:
+        return jsonify({"status": "error", "msg": "위치가 필요합니다."}), 400
+
+    # 위치 기반 콘텐츠 수 계산용: approved 공유글 좌표 목록
+    approved = ShareReport.query.filter(
+        ShareReport.status == 'approved',
+        ShareReport.latitude.isnot(None)
+    ).all()
+
+    def _content_count(place_lat, place_lon, radius_km=0.15):
+        n = 0
+        for r in approved:
+            if r.latitude is None or r.longitude is None:
+                continue
+            if haversine(place_lat, place_lon, r.latitude, r.longitude) <= radius_km:
+                n += 1
+        return n
+
+    facilities = []
+    seen = set()
+
+    for si in StoreInfo.query.all():
+        if si.latitude is None or si.longitude is None:
+            continue
+        d = haversine(lat, lon, si.latitude, si.longitude)
+        if d <= max_km:
+            key = ('si', si.name)
+            if key in seen:
+                continue
+            seen.add(key)
+            manager = None
+            if si.manager_user_id:
+                mu = User.query.get(si.manager_user_id)
+                manager = {"username": mu.username if mu else '?', "verified": bool(si.manager_verified)}
+            facilities.append({
+                "source": "store_info", "id": si.id, "name": si.name,
+                "category": si.category or '음식점', "phone": si.phone,
+                "address": None, "lat": si.latitude, "lon": si.longitude,
+                "distance_km": round(d, 3), "distance_m": int(d * 1000),
+                "direction": _compass(_bearing_deg(lat, lon, si.latitude, si.longitude)),
+                "content_count": _content_count(si.latitude, si.longitude),
+                "ai_profile": (si.ai_profile or '')[:150] or None,
+                "manager": manager,
+                "manager_requested": bool(si.manager_requested_at and not si.manager_verified),
+            })
+
+    for ss in StoreSuggestion.query.all():
+        if ss.lat is None or ss.lon is None:
+            continue
+        d = haversine(lat, lon, ss.lat, ss.lon)
+        if d <= max_km:
+            key = ('ss', ss.place_id, ss.top_name)
+            if key in seen:
+                continue
+            seen.add(key)
+            facilities.append({
+                "source": "store_suggestion", "id": ss.id, "name": ss.top_name,
+                "category": ss.category or '음식점', "phone": ss.phone,
+                "address": ss.address, "lat": ss.lat, "lon": ss.lon,
+                "distance_km": round(d, 3), "distance_m": int(d * 1000),
+                "direction": _compass(_bearing_deg(lat, lon, ss.lat, ss.lon)),
+                "content_count": _content_count(ss.lat, ss.lon),
+                "manager": None, "manager_requested": False,
+            })
+
+    facilities.sort(key=lambda p: (-p['content_count'], p['distance_km']))
+    return jsonify({"status": "success", "places": facilities[:30]})
 
 @share_bp.route('/share-report/toggle/<int:report_id>/<string:action>', methods=['GET', 'POST'])
 def share_report_toggle(report_id, action):
@@ -1488,6 +1629,22 @@ def api_share_detail(report_id):
         menus = StoreMenu.query.filter_by(store_suggestion_id=r.store_suggestion_id).all()
         store_menus_data = [{"id": m.id, "name": m.name, "price": m.price, "sub_category": m.sub_category, "ai_generated": m.ai_generated} for m in menus]
 
+    # 연결된 가게 정보 (StoreSuggestion + StoreInfo)
+    store_info_data = None
+    if r.store_suggestion_id:
+        ss = StoreSuggestion.query.get(r.store_suggestion_id)
+        if ss:
+            store_info_data = {
+                "name": ss.top_name, "phone": ss.phone, "address": ss.address,
+                "category": ss.category or '음식점', "place_url": ss.place_url,
+                "lat": ss.lat, "lon": ss.lon,
+            }
+    if not store_info_data and r.latitude and r.longitude:
+        from route_modules.share_bp import _find_nearby_place as _fnp
+        near = _fnp(r.latitude, r.longitude)
+        if near:
+            store_info_data = {"name": near[2], "phone": near[3], "address": near[4], "category": near[5], "place_url": None, "lat": None, "lon": None}
+
     # 마당 행사 연결: 위치/날짜 자동 보충
     yp_event = YardPost.query.get(r.yard_event_id) if r.yard_event_id else None
 
@@ -1513,6 +1670,8 @@ def api_share_detail(report_id):
         "moderation_at": r.moderation_at.strftime('%Y-%m-%d') if r.moderation_at else None,
         "store_suggestion_id": r.store_suggestion_id,
         "store_menus": store_menus_data,
+        "store_info": store_info_data,
+        "meal_note": r.meal_note or '',
         "sub_category": r.sub_category or '',
         "my_role": session.get('role') or '',
         "nearby_shares": nearby_shares,

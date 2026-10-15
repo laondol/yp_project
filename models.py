@@ -393,6 +393,7 @@ class ShareReport(db.Model):
     smartplace_url = db.Column(db.String(500))
     store_suggestion_id = db.Column(db.Integer, db.ForeignKey('store_suggestion.id'), nullable=True)
     sub_category = db.Column(db.String(50), default='')
+    meal_note = db.Column(db.Text)                           # 경험 기록 (음식/활동/경험)
     promotion_allowed = db.Column(db.Boolean, default=False)
     auto_sent = db.Column(db.Boolean, default=False)        # True=자동 발송(접수 버튼 미사용), False=수동 접수
     rejected_at = db.Column(db.DateTime)                    # 반려 시각 (30일 후 로컬 보관 이동 기준)
@@ -420,6 +421,20 @@ class StoreInfo(db.Model):
     store_homepage = db.Column(db.String(500))  # 가게 자체 홈페이지
     smartplace = db.Column(db.String(500))
     phone = db.Column(db.String(30))
+    category = db.Column(db.String(30), default='음식점')     # 시설 유형 (음식점/카페/병원/공원 등)
+    business_hours = db.Column(db.String(200))   # 영업시간 (예: "09:00-21:00, 일요일 휴무")
+    reservation_url = db.Column(db.String(500))  # 예약링크
+    detail_info = db.Column(db.Text)             # 상세정보 (HTML, 리치에디터/그리기)
+    last_share_at = db.Column(db.DateTime)       # 마지막 영업 공유 시간 (최근 승인 공유글 기준)
+    # 시설 책임자 인증 (주민인증 회원이 신청 → 리더/관리자 승인)
+    manager_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    manager_verified = db.Column(db.Boolean, default=False)
+    manager_verified_at = db.Column(db.DateTime)
+    manager_requested_at = db.Column(db.DateTime)   # 책임자 신청 시각 (승인 대기)
+    # AI 통합 프로필 (같은 가게이름 정보 자동 수집·정리)
+    ai_profile = db.Column(db.Text)          # AI가 정리한 가게 소개/특징
+    ai_profile_at = db.Column(db.DateTime)   # 마지막 AI 정리 시각
+    ai_sources = db.Column(db.Text)          # 어떤 소스에서 모았는지 JSON
     created_at = db.Column(db.DateTime, default=datetime.now)
 
 
@@ -462,6 +477,7 @@ class StoreSuggestion(db.Model):
     address = db.Column(db.String(200))
     place_url = db.Column(db.String(500))
     phone = db.Column(db.String(30))
+    category = db.Column(db.String(30), default='음식점')     # 시설 유형 (음식점/카페/병원/공원 등)
     created_at = db.Column(db.DateTime, default=datetime.now)
 
     @property

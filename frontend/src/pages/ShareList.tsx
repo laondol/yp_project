@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import AuthorName from '../components/AuthorName'
+import LeafletMap from '../components/LeafletMap'
 
 interface ShareItem {
   id: number | string; title: string; description: string
@@ -26,6 +27,21 @@ function haversine(lat1: number, lon1: number, lat2: number, lon2: number) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 }
 
+const placeIconMap: Record<string, string> = {
+  '음식점': '🍽️', '식당': '🍽️', '카페': '☕', '병원': '🏥', '약국': '💊',
+  '공원': '🌳', '편의점': '🏪', '숙박': '🏨', '문화': '🎭', '교육': '🏫',
+  '마트': '🛒', '상점': '🏪', '기타': '📍',
+}
+const placeIcon = (cat?: string) => placeIconMap[cat || ''] || '📍'
+
+// 마커 깜빡임 CSS (1회 주입)
+if (typeof document !== 'undefined' && !document.getElementById('yp-blink-css')) {
+  const st = document.createElement('style')
+  st.id = 'yp-blink-css'
+  st.textContent = '@keyframes ypBlink{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.25;transform:scale(1.5)}}.yp-blink{animation:ypBlink .6s ease-in-out infinite}'
+  document.head.appendChild(st)
+}
+
 export default function ShareList() {
   const [items, setItems] = useState<ShareItem[]>([])
   const [towns, setTowns] = useState<string[]>([])
@@ -34,7 +50,8 @@ export default function ShareList() {
   const [category, setCategory] = useState('')
   const [loading, setLoading] = useState(true)
   const [nearbyOpen, setNearbyOpen] = useState(false)
-  const [nearbyItems, setNearbyItems] = useState<any[]>([])
+  const [nearbyPlaces, setNearbyPlaces] = useState<any[]>([])
+  const [blinkTarget, setBlinkTarget] = useState<string | null>(null)
   const [nearbyLoading, setNearbyLoading] = useState(false)
   const [userLoc, setUserLoc] = useState<{ lat: number; lon: number } | null>(null)
   const [myId, setMyId] = useState<number | null>(null)
@@ -96,9 +113,12 @@ export default function ShareList() {
     if (!navigator.geolocation) return alert('GPS를 지원하지 않습니다')
     setNearbyLoading(true)
     navigator.geolocation.getCurrentPosition(pos => {
-      fetch(`/share/nearby?lat=${pos.coords.latitude}&lon=${pos.coords.longitude}&max_km=20`)
+      const la = pos.coords.latitude, lo = pos.coords.longitude
+      setUserLoc({ lat: la, lon: lo })
+      fetch(`/share/nearby-places?lat=${la}&lon=${lo}&max_km=5`)
         .then(r => r.json()).then(d => {
-          setNearbyItems(d.items || [])
+          setNearbyPlaces(d.places || [])
+          setBlinkTarget(null)
           setNearbyOpen(true)
         }).finally(() => setNearbyLoading(false))
     }, () => { alert('GPS 권한 필요'); setNearbyLoading(false) }, { enableHighAccuracy: true, timeout: 10000 })
@@ -133,36 +153,96 @@ export default function ShareList() {
         )}
       </div>
 
-      {nearbyOpen && (
+      {nearbyOpen && userLoc && (() => {
+        const mapCenter: [number, number] = (() => {
+          if (blinkTarget) {
+            const bp = nearbyPlaces.find((p: any) => (p.source + '-' + (p.id ?? p.name)) === blinkTarget)
+            if (bp && bp.lat && bp.lon) return [bp.lat, bp.lon] as [number, number]
+          }
+          return [userLoc.lat, userLoc.lon] as [number, number]
+        })()
+        return (
         <div className="mb-4">
           <div className="card border-0 shadow-sm p-3" style={{borderRadius:16}}>
-            <h6 className="fw-bold mb-3">📍 내 주변 공유 (20km 이내)</h6>
-            {nearbyItems.length > 0 ? (
-              <div className="row g-2">
-                {nearbyItems.map((item: any) => (
-                  <div key={item.id} className="col-6 col-md-4 col-lg-3 p-2" style={{cursor:'pointer',borderRadius:12}}
-                    onClick={() => window.location.href = `/share/detail/${item.id}`}>
-                    <div className="d-flex gap-2 align-items-start">
-                      {item.image ? <img src={item.image} style={{width:50,height:50,objectFit:'cover',borderRadius:8}} />
-                        : <div style={{width:50,height:50,background:'#eee',borderRadius:8}} />}
-                      <div className="small">
-                        <strong>{item.title}</strong><br />
-                        <span className="text-muted">{item.category} · {item.town} {item.village}</span><br />
-                        <span className="text-primary">📍 {item.distance}km</span>
+            <h6 className="fw-bold mb-3">📍 내 주변 (지도 = 내 위치 기준)</h6>
+            <style>{`@keyframes ypBlink2{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.2;transform:scale(1.6)}}`}</style>
+            <LeafletMap
+              center={mapCenter}
+              zoom={blinkTarget ? 17 : 15}
+              markers={[
+                { position: [userLoc.lat, userLoc.lon], id: 'me', iconHtml: '<div style="font-size:22px;">🧑</div>', iconSize: [30, 30] as [number, number], popup: '내 위치' },
+                ...nearbyPlaces.filter((p: any) => p.lat && p.lon).map((p: any) => {
+                  const key = p.source + '-' + (p.id ?? p.name)
+                  const blinking = blinkTarget === key
+                  const icon = placeIcon(p.category)
+                  return {
+                    position: [p.lat, p.lon] as [number, number],
+                    id: key,
+                    iconHtml: blinking
+                      ? `<div style="font-size:26px;animation:ypBlink2 .5s ease-in-out infinite;filter:drop-shadow(0 0 6px #ff0);">${icon}</div>`
+                      : `<div style="font-size:20px;filter:drop-shadow(0 1px 2px rgba(0,0,0,.5));">${icon}</div>`,
+                    iconSize: [30, 30] as [number, number],
+                    popup: blinking
+                      ? `<b>${p.name}</b><br>${p.category} · ${p.distance_m}m ${p.direction}<br><a href="/compass?lat=${p.lat}&lng=${p.lon}&name=${encodeURIComponent(p.name)}">🧭 나침반으로 길찾기</a>`
+                      : `<b>${p.name}</b><br>${p.category} · ${p.distance_m}m ${p.direction}`,
+                  }
+                }),
+              ]}
+              onMarkerClick={info => {
+                const key = String(info.id)
+                if (key === 'me') return
+                if (blinkTarget === key) {
+                  const p = nearbyPlaces.find((x: any) => (x.source + '-' + (x.id ?? x.name)) === key)
+                  if (p) window.location.href = `/compass?lat=${p.lat}&lng=${p.lon}&name=${encodeURIComponent(p.name)}`
+                } else {
+                  setBlinkTarget(key)
+                }
+              }}
+              style={{ height: 300, borderRadius: 12 }}
+              className="mb-3"
+            />
+            <div className="small text-muted mb-2">💡 시설을 누르면 지도에서 깜빡이고, 깜빡이는 마커를 누르면 🧭 나침반으로 길찾기가 시작됩니다.</div>
+            {nearbyPlaces.length > 0 ? (
+              <>
+                <div className="fw-bold small mb-2">🏪 주변 시설 (콘텐츠 많은 순)</div>
+                <div className="list-group mb-3" style={{ maxHeight: 340, overflowY: 'auto' }}>
+                  {nearbyPlaces.map((p: any) => {
+                    const key = p.source + '-' + (p.id ?? p.name)
+                    return (
+                      <div key={key} className="list-group-item d-flex justify-content-between align-items-center">
+                        <button type="button" className="btn btn-sm text-start p-1 flex-grow-1"
+                          onClick={() => setBlinkTarget(blinkTarget === key ? null : key)}
+                          title="지도에서 위치 깜빡임">
+                          <span className={`fw-bold ${blinkTarget === key ? 'text-danger' : ''}`}>
+                            {placeIcon(p.category)} {p.name}
+                          </span>
+                          <span className="badge bg-light text-dark ms-1 border">{p.category}</span>
+                          {p.content_count > 0 && <span className="badge bg-primary ms-1">📸 {p.content_count}</span>}
+                          {p.manager?.verified && <span className="badge bg-success ms-1">✅ 책임자</span>}
+                          <div className="small text-muted">
+                            {p.direction} {p.distance_m >= 1000 ? p.distance_km + 'km' : p.distance_m + 'm'}
+                            {p.manager?.verified && <span className="text-success ms-1"> · {p.manager.username}</span>}
+                          </div>
+                        </button>
+                        <div className="text-nowrap ms-2">
+                          <button type="button" className="btn btn-sm btn-outline-primary py-0 px-2"
+                            onClick={() => window.location.href = `/construction/store/${encodeURIComponent(p.name)}`}>
+                            상세 ›
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
+                    )
+                  })}
+                </div>
+              </>
             ) : (
-              <div className="text-muted small py-3 text-center">
-                내 주변 20km 이내에 공유가 없습니다. 첫 공유자가 되어보세요!
-              </div>
+              <div className="text-muted small py-2 text-center">주변에 등록된 시설이 없습니다.</div>
             )}
             <button className="btn btn-sm btn-outline-secondary mt-2" onClick={() => setNearbyOpen(false)}>접기</button>
           </div>
         </div>
-      )}
+        )
+      })()}
 
       <div className="card border-0 shadow-sm mb-4 p-3" style={{borderRadius:16}}>
         <div className="row g-2">

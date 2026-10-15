@@ -7,6 +7,7 @@ import Loading from '../components/common/Loading'
 import ErrorMessage from '../components/common/ErrorMessage'
 import EmptyState from '../components/common/EmptyState'
 import FacilityMap from '../components/FacilityMap'
+import LeafletMap from '../components/LeafletMap'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { formatKST } from '../utils/format';
@@ -16,8 +17,10 @@ interface HeritageItem {
   category?: string; type?: string; image_url?: string; dist?: number
   stamped?: boolean; near_home?: boolean; dist_from_home?: number
 }
+interface SceneryPlace { id?: number | null; name: string; category?: string; phone?: string }
 interface SceneryItem {
   id: number; title: string; image_path: string; description?: string; created_at?: string
+  latitude?: number | null; longitude?: number | null; meal_note?: string; place?: SceneryPlace | null
 }
 interface StoreGroup {
   name: string; lat: number; lng: number; image?: string; store_link?: string
@@ -39,6 +42,12 @@ const typeLabels: Record<string, string> = {
 const typeColors: Record<string, string> = {
   traffic_incident: 'bg-danger', traffic_congestion: 'bg-secondary', road_construction: 'bg-warning text-dark', building_permit: 'bg-info',
 }
+const placeIcons: Record<string, string> = {
+  '음식점': '🍽️', '식당': '🍽️', '카페': '☕', '병원': '🏥', '약국': '💊',
+  '공원': '🌳', '편의점': '🏪', '숙박': '🏨', '문화': '🎭', '교육': '🏫',
+  '마트': '🛒', '상점': '🏪', '기타': '📍',
+}
+export const placeIcon = (cat?: string) => placeIcons[cat || ''] || '📍'
 
 export default function ConstructionPage() {
   const { user } = useAuth()
@@ -54,6 +63,7 @@ export default function ConstructionPage() {
   const [heritageLoading, setHeritageLoading] = useState(false)
 
   const [scenery, setScenery] = useState<SceneryItem[]>([])
+  const [selectedScenery, setSelectedScenery] = useState<SceneryItem | null>(null)
   const [stores, setStores] = useState<StoreGroup[]>([])
   const navigate = useNavigate()
   const [nameRec, setNameRec] = useState<{lat: number; lng: number; town: string; village: string} | null>(null)
@@ -491,16 +501,43 @@ export default function ConstructionPage() {
               <EmptyState icon="🌄" title={`${sceneryTown} ${sceneryVillage}의 풍경이 없습니다.`} />
             ) : (
               <>
-                <p className="text-muted small mb-3">{sceneryTown} {sceneryVillage} · {scenerySeason} season</p>
+                <p className="text-muted small mb-2">{sceneryTown} {sceneryVillage} · {scenerySeason} season</p>
+                {/* 풍경 지도: 좌표 있는 풍경 마커 + 선택 시 하이라이트 */}
+                {(() => {
+                  const pts = scenery.filter(s => s.latitude && s.longitude)
+                  if (pts.length === 0) return null
+                  const first = selectedScenery && selectedScenery.latitude ? selectedScenery : pts[0]
+                  return (
+                    <LeafletMap
+                      key={`scenery-map-${selectedScenery?.id || 'default'}`}
+                      center={[first.latitude!, first.longitude!]}
+                      zoom={selectedScenery ? 16 : 14}
+                      markers={pts.map(s => ({
+                        position: [s.latitude!, s.longitude!] as [number, number],
+                        id: s.id,
+                        iconHtml: `<div style="font-size:20px;filter:drop-shadow(0 1px 2px rgba(0,0,0,.5));">${selectedScenery?.id === s.id ? '📍' : '🌄'}</div>`,
+                        iconSize: [28, 28],
+                        popup: `<b>${s.title}</b>${s.place ? `<br>${placeIcon(s.place.category)} ${s.place.name}` : ''}`,
+                      }))}
+                      onMarkerClick={info => { const s = scenery.find(x => x.id === info.id); if (s) setSelectedScenery(s) }}
+                      style={{ height: 240, borderRadius: 12 }}
+                      className="mb-3"
+                    />
+                  )
+                })()}
                 <div className="row g-3">
                   {scenery.map(s => (
                     <div key={s.id} className="col-6 col-md-4">
-                      <div className="card border-0 shadow-sm" style={{ borderRadius: 16 }}>
-                        <a href={s.image_path} target="_blank" rel="noopener noreferrer">
+                      <div className="card border-0 shadow-sm" style={{ borderRadius: 16, outline: selectedScenery?.id === s.id ? '2px solid #0d6efd' : undefined, cursor: 'pointer' }} onClick={() => setSelectedScenery(selectedScenery?.id === s.id ? null : s)}>
+                        <a href={s.image_path} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}>
                           <img src={s.image_path} className="card-img-top" style={{ height: 160, objectFit: 'cover', borderRadius: '16px 16px 0 0' }} alt={s.title} />
                         </a>
                         <div className="card-body p-2">
                           <small className="fw-bold">{s.title}</small>
+                          {s.place && (
+                            <div className="small fw-bold" style={{ color: '#0d6efd' }}>{placeIcon(s.place.category)} {s.place.name} <span className="text-muted fw-normal">{s.place.category}</span></div>
+                          )}
+                          {s.meal_note && <div className="small text-success">✅ {s.meal_note}</div>}
                           {s.description && <p className="small text-muted mb-0">{s.description}</p>}
                         </div>
                       </div>
