@@ -7,7 +7,7 @@ from sqlalchemy import or_
 from models import db, User, Post, Message, NewsArticle, ShareReport, AiKnowledge, VillageAlert, PostVote, Note
 page_bp = Blueprint('page', __name__)
 from route_modules.user_bp import _cleanup_expired_posts
-from route_modules.common import author_email_for as _author_email, is_privileged_viewer, mask_name, mask_title, mask_post_item, is_ramp_post
+from route_modules.common import author_email_for as _author_email, is_privileged_viewer, mask_name, mask_title, mask_post_item, is_ramp_post, view_email
 
 def _serve_spa():
     path = os.path.join(current_app.root_path, 'frontend', 'dist', 'index.html')
@@ -113,7 +113,7 @@ def ai_chat_send():
     if uid:
         u = User.query.get(uid)
         if u:
-            user_info = f'현재 대화중인 사용자: {u.real_name or u.username} (이웃인증: {"O" if u.is_verified_resident else "X"})'
+            user_info = f'현재 대화중인 사용자: {view_email(u.id, u.email) or u.username} (이웃인증: {"O" if u.is_verified_resident else "X"})'
     context = f"함께사는양평 현황: 회원 {user_count}명, 꿈꾸기 제안 {post_count}건. {user_info}"
     kb_text = ''
     try:
@@ -161,7 +161,7 @@ def ai_chat_send():
                 content=f'사용자: {msg}\n\nAI답변: {reply[:300]}',
                 alert_type='ai_feedback',
                 urgency='normal',
-                author_name=session.get('real_name') or session.get('username') or '익명'
+                author_name=session.get('email') or session.get('username') or '익명'
             )
             db.session.add(alert)
             db.session.commit()

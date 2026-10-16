@@ -8,6 +8,7 @@ from services.route_worker import enqueue_recalc
 from services.rag import build_context
 from datetime import datetime, timezone, timedelta, timezone
 import os, uuid
+from route_modules.common import view_email
 
 tongbot_bp = Blueprint('tongbot', __name__)
 
@@ -553,7 +554,7 @@ def bot_memos_shared():
     from models import User
     return jsonify({"memos": [{
         "id": m.id, "content": m.content, "author": m.author,
-        "user_name": (User.query.get(m.user_id).real_name or User.query.get(m.user_id).username) if User.query.get(m.user_id) else '',
+        "user_name": (User.query.get(m.user_id).email or User.query.get(m.user_id).username) if User.query.get(m.user_id) else '',
         "created_at": m.created_at.isoformat() if m.created_at else '',
     } for m in shared]})
 
@@ -581,7 +582,7 @@ def bot_memo_comments(memo_id):
     from models import User
     return jsonify({"comments": [{
         "id": c.id, "content": c.content,
-        "user_name": (User.query.get(c.user_id).real_name or User.query.get(c.user_id).username) if User.query.get(c.user_id) else '익명',
+        "user_name": (User.query.get(c.user_id).email or User.query.get(c.user_id).username) if User.query.get(c.user_id) else '익명',
         "is_own": c.user_id == uid,
         "created_at": c.created_at.isoformat() if c.created_at else '',
     } for c in comments]})
@@ -673,7 +674,7 @@ def bot_leaderboard():
         score = (int(b.level or 1) * 10) + (int(b.intimacy or 0)) + (knowledge_count * 5) + (praise_count * 3)
         result.append({
             "user_id": b.user_id, "bot_name": b.bot_name or b.bot_id or '통벗',
-            "username": user.real_name or user.username,
+            "username": user.email or user.username,
             "level": b.level or 1, "intimacy": b.intimacy or 0,
             "knowledge_count": knowledge_count, "memo_count": memo_count,
             "praise_count": praise_count, "score": score,
@@ -2757,7 +2758,7 @@ def chat_friends():
         db.session.add(FriendCache(user_id=uid, friend_ids=json.dumps(friend_ids)))
         db.session.commit()
     users = User.query.filter(User.id.in_(friend_ids)).all() if friend_ids else []
-    return jsonify({"friends":[{"id":u.id,"username":u.username,"name":u.real_name or u.username,"town":u.town or "","village":u.village or ""} for u in users]})
+    return jsonify({"friends":[{"id":u.id,"username":u.username,"email":view_email(u.id, u.email),"name":view_email(u.id, u.email) or u.username,"town":u.town or "","village":u.village or ""} for u in users]})
 
 def _rebuild_friend_cache(uid):
     from models import Friend

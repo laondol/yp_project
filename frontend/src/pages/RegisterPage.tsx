@@ -106,7 +106,7 @@ export default function RegisterPage() {
   const [passwordConfirm, setPasswordConfirm] = useState('')
   const [showPw, setShowPw] = useState(false)
   const [showPwConfirm, setShowPwConfirm] = useState(false)
-  const [realName, setRealName] = useState('')
+  const [username, setUsername] = useState('')
   const [homeAddress, setHomeAddress] = useState('')
   const [officeAddress, setOfficeAddress] = useState('')
   const [lat, setLat] = useState<number | null>(null)
@@ -240,7 +240,7 @@ export default function RegisterPage() {
       const fd = new FormData()
       const { hashPassword } = await import('../lib/password')
       fd.append('password_hash', await hashPassword(password))
-      fd.append('real_name', realName)
+      if (username) fd.append('username', username)
       if (homeAddress) fd.append('home_address', homeAddress)
       if (officeAddress) fd.append('office_address', officeAddress)
       if (lat !== null) fd.append('lat', String(lat))
@@ -382,10 +382,10 @@ export default function RegisterPage() {
                 </div>
               </div>
 
-              {/* 이름 */}
+              {/* 계정이름 */}
               <div className="mb-3">
-                <label className="form-label small fw-bold">이름 (선택)</label>
-                <input type="text" className="form-control" value={realName} onChange={e => setRealName(e.target.value)} placeholder="이름" />
+                <label className="form-label small fw-bold">계정이름 (선택)</label>
+                <input type="text" className="form-control" value={username} onChange={e => setUsername(e.target.value)} placeholder="사이트에 표시되는 이름. 비워두면 이메일 앞부분으로 자동 생성됩니다." maxLength={30} />
               </div>
 
               {/* 집주소 */}

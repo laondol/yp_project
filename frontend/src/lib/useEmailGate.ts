@@ -16,7 +16,7 @@ export function useEmailGate(service: 'legal' | 'psycho') {
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null }
     if (user && user.id) {
       setEmail(user.email || '')
-      setName(user.real_name || user.username || '')
+      setName(user.email || user.username || '')
       setVerified(true)
       setMode('member')
       return

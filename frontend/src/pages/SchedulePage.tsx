@@ -886,7 +886,7 @@ export default function SchedulePage() {
                           checked={shareSelectedIds.includes(u.id)}
                           onChange={() => setShareSelectedIds(prev => prev.includes(u.id) ? prev.filter(x => x !== u.id) : [...prev, u.id])} />
                         <label className="form-check-label small" htmlFor={`share-${u.id}`}>
-                          {u.username}{u.real_name ? ` (${u.real_name})` : ''}
+                          {u.username}
                         </label>
                       </div>
                     ))}

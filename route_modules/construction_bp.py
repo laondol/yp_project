@@ -6,6 +6,7 @@ from models import db, ConstructionNotice, StoreInfo, VillageAlert, HeritageStam
 from services.construction import sync_construction_notices, sync_traffic_incidents, sync_congestion_info, sync_building_permits
 from services.transit import haversine_km
 from config import Config
+from route_modules.common import view_email, display_author
 
 construction_bp = Blueprint('construction', __name__)
 
@@ -352,7 +353,7 @@ def construction_local_stores():
             g = grouped[matched_key]
             g["posts"].append({
                 "id": s.id, "title": s.title, "desc": (s.description or "")[:100],
-                "user": s.author_name or "익명", "image": s.image_path,
+                "user": display_author(getattr(s, "user_id", None), s.author_name) or "익명", "image": s.image_path,
                 "date": s.created_at.strftime("%m/%d") if s.created_at else ""
             })
             if s.image_path and not g["image"]:
@@ -367,7 +368,7 @@ def construction_local_stores():
                 "name": s.title or "제목없음",
                 "posts": [{
                     "id": s.id, "title": s.title, "desc": (s.description or "")[:100],
-                    "user": s.author_name or "익명", "image": s.image_path,
+                    "user": display_author(getattr(s, "user_id", None), s.author_name) or "익명", "image": s.image_path,
                     "date": s.created_at.strftime("%m/%d") if s.created_at else ""
                 }],
                 "image": s.image_path,
@@ -596,45 +597,84 @@ def store_info_json():
         return jsonify({"error": "좌표 또는 시설 이름이 필요합니다."}), 400
 
     # 150m 이내 사진 + 투표 현황 (클러스터링 반경과 동일) — 시간순(최신순)
+    # 다른 시설/위치 사진 제외: ① 다른 시설이 사진에 더 가까우면 제외 ② 다른 시설로 명시 연결된 사진 제외
+    cur_name_n = _normalize_store_name(
+        store_info.name if store_info else (suggestion.top_name if suggestion else store_name))
+    other_store_coords = [
+        (si.latitude, si.longitude) for si in StoreInfo.query.all()
+        if si.latitude and si.longitude and not (store_info and si.id == store_info.id)
+    ]
+    other_sug_coords = [
+        (sg.lat, sg.lon) for sg in StoreSuggestion.query.all()
+        if sg.lat and sg.lon and not (suggestion and sg.id == suggestion.id)
+    ]
+
     photos = ShareReport.query.filter_by(status='approved') \
         .order_by(ShareReport.created_at.desc()).all()
     gallery = []
     seen_images = set()
     for p in photos:
-        if p.latitude and p.longitude and haversine_km(lat, lng, p.latitude, p.longitude) <= 0.15:
-            # 메인 사진 + 추가 사진 모두 갤러리에 포함
-            all_imgs = []
-            if p.image_path:
-                all_imgs.append(p.image_path)
-            if p.extra_images:
-                all_imgs.extend([e.strip() for e in p.extra_images.split(',') if e.strip()])
-            for img_path in all_imgs:
-                if img_path in seen_images:
+        if not (p.latitude and p.longitude):
+            continue
+        d = haversine_km(lat, lng, p.latitude, p.longitude)
+        if d > 0.15:
+            continue
+        # 회원이 가게명을 명시한 경우: 현재 시설 이름과 다르면 제외 (위치와 무관)
+        # 현재 시설 이름과 일치하면 다른 시설이 더 가까워도 포함
+        explicit_store_match = False
+        if p.store_name:
+            pname_n = _normalize_store_name(p.store_name)
+            if cur_name_n and pname_n:
+                if pname_n != cur_name_n:
                     continue
-                seen_images.add(img_path)
-                up = StoreInfoVote.query.filter_by(photo_id=p.id, vote_type='up').count()
-                down = StoreInfoVote.query.filter_by(photo_id=p.id, vote_type='down').count()
-                my_vote = None
-                my_comment = None
-                if uid:
-                    v = StoreInfoVote.query.filter_by(photo_id=p.id, user_id=uid).first()
-                    my_vote = v.vote_type if v else None
-                    my_comment = v.comment if v else None
-                comments = StoreInfoVote.query.filter_by(
-                    photo_id=p.id, vote_type='down'
-                ).filter(StoreInfoVote.comment.isnot(None), StoreInfoVote.comment != '').order_by(StoreInfoVote.created_at.desc()).limit(5).all()
-                comment_list = [{"user": User.query.get(c.user_id).username if User.query.get(c.user_id) else "익명", "text": c.comment, "date": c.created_at.strftime('%m/%d') if c.created_at else ""} for c in comments]
+                explicit_store_match = True
+        # 더 가까운 다른 시설이 있으면 이 사진은 그 시설 소유 → 제외 (명시 일치가 아닐 때만)
+        if not explicit_store_match and any(haversine_km(p.latitude, p.longitude, olat, olng) < d
+               for olat, olng in other_store_coords + other_sug_coords):
+            continue
+        # 다른 시설로 명시 연결(store_suggestion_id)된 사진 제외
+        if p.store_suggestion_id:
+            linked_sg = StoreSuggestion.query.get(p.store_suggestion_id)
+            if linked_sg:
+                lname = _normalize_store_name(linked_sg.top_name or linked_sg.name)
+                if cur_name_n and lname and lname != cur_name_n:
+                    continue
+        # 메인 사진 + 추가 사진 모두 갤러리에 포함
+        all_imgs = []
+        if p.image_path:
+            all_imgs.append(p.image_path)
+        if p.extra_images:
+            all_imgs.extend([e.strip() for e in p.extra_images.split(',') if e.strip()])
+        for img_path in all_imgs:
+            if img_path in seen_images:
+                continue
+            seen_images.add(img_path)
+            up = StoreInfoVote.query.filter_by(photo_id=p.id, vote_type='up').count()
+            down = StoreInfoVote.query.filter_by(photo_id=p.id, vote_type='down').count()
+            my_vote = None
+            my_comment = None
+            if uid:
+                v = StoreInfoVote.query.filter_by(photo_id=p.id, user_id=uid).first()
+                my_vote = v.vote_type if v else None
+                my_comment = v.comment if v else None
+            comments = StoreInfoVote.query.filter_by(
+                photo_id=p.id, vote_type='down'
+            ).filter(StoreInfoVote.comment.isnot(None), StoreInfoVote.comment != '').order_by(StoreInfoVote.created_at.desc()).limit(5).all()
+            comment_list = [{"user": User.query.get(c.user_id).username if User.query.get(c.user_id) else "익명", "text": c.comment, "date": c.created_at.strftime('%m/%d') if c.created_at else ""} for c in comments]
 
-                gallery.append({
-                    "image": img_path, "title": p.title or "", "id": p.id,
-                    "description": (p.description or "")[:200],
-                    "author": p.author_name or "익명",
-                    "created_at": p.created_at.strftime('%Y-%m-%d') if p.created_at else "",
-                    "meal_note": p.meal_note or "",
-                    "share_url": f"/share/detail/{p.id}",
-                    "up_count": up, "down_count": down, "my_vote": my_vote,
-                    "my_comment": my_comment, "comments": comment_list,
-                })
+            _au = User.query.get(p.user_id) if p.user_id else None
+            gallery.append({
+                "image": img_path, "title": p.title or "", "id": p.id,
+                "description": (p.description or "")[:200],
+                "author": display_author(getattr(p, "user_id", None), p.author_name) or "익명",
+                "author_email": view_email(_au.id, _au.email) if _au else None,
+                "user_id": p.user_id,
+                "created_at": p.created_at.strftime('%Y-%m-%d') if p.created_at else "",
+                "meal_note": p.meal_note or "",
+                "share_url": f"/share/detail/{p.id}",
+                "up_count": up, "down_count": down, "my_vote": my_vote,
+                "my_comment": my_comment, "comments": comment_list,
+            })
 
     # StoreInfo 매칭 (이름 기반 조회가 이미 찾았으면 유지)
     if not store_info:
@@ -669,13 +709,39 @@ def store_info_json():
         menus = StoreMenu.query.filter_by(place_id=target_sg.place_id).order_by(StoreMenu.sub_category).limit(20).all()
 
     # 투표 현황 (전체 합산)
+    # down 투표 중 comment가 현재 시설 이름을 언급하는 것은 "다른 가게 아님, 이 가게" 확인이므로 틀린정보에서 제외
     photo_ids = list(set(g["id"] for g in gallery))
     if photo_ids:
         correct_count = StoreInfoVote.query.filter(StoreInfoVote.photo_id.in_(photo_ids), StoreInfoVote.vote_type=='up').count()
-        wrong_count = StoreInfoVote.query.filter(StoreInfoVote.photo_id.in_(photo_ids), StoreInfoVote.vote_type=='down').count()
+        down_votes = StoreInfoVote.query.filter(StoreInfoVote.photo_id.in_(photo_ids), StoreInfoVote.vote_type=='down').all()
+        wrong_count = 0
+        for dv in down_votes:
+            dv_comment_n = _normalize_store_name(dv.comment or '')
+            if cur_name_n and dv_comment_n and dv_comment_n == cur_name_n:
+                continue  # 현재 시설 이름 확인 = 틀린정보 아님
+            wrong_count += 1
     else:
         correct_count = 0
         wrong_count = 0
+
+    # 회원 공유글 기반 기본정보 (StoreInfo가 없으면 위치로 묶인 공유글 제목/내용이 시설 기본정보)
+    member_basic = None
+    gallery_last_at = gallery[0].get('created_at') if gallery else None
+    if not store_info and gallery:
+        titles = [g["title"] for g in gallery if g.get("title")][:5]
+        first_desc = next((g["description"] for g in gallery if g.get("description")), "")
+        member_basic = {
+            "titles": titles,
+            "summary": first_desc[:200],
+            "content_count": len(gallery),
+            "last_share_at": gallery_last_at,
+        }
+    # StoreInfo가 있어도 마지막 영업공유시간이 비어있으면 갤러리 최신으로 표시
+    last_share_display = None
+    if store_info and store_info.last_share_at:
+        last_share_display = store_info.last_share_at.strftime('%Y-%m-%d %H:%M')
+    elif gallery_last_at:
+        last_share_display = gallery_last_at
 
     user_points = 0
     if uid:
@@ -714,7 +780,8 @@ def store_info_json():
         "business_hours": store_info.business_hours if store_info else None,
         "reservation_url": store_info.reservation_url if store_info else None,
         "detail_info": store_info.detail_info if store_info else None,
-        "last_share_at": store_info.last_share_at.strftime('%Y-%m-%d %H:%M') if store_info and store_info.last_share_at else None,
+        "last_share_at": last_share_display,
+        "member_basic": member_basic,
         "can_edit": can_edit,
         "lat": lat, "lng": lng,
         "manager": manager_info,
@@ -1793,7 +1860,7 @@ def store_ai_profile(store_info_id):
             if r.latitude and r.longitude and haversine_km(si.latitude, si.longitude, r.latitude, r.longitude) <= 0.15:
                 sources["share_reports"].append({
                     "title": r.title, "description": (r.description or "")[:300],
-                    "author": r.author_name, "likes": r.like_count,
+                    "author": display_author(getattr(r, "user_id", None), r.author_name), "likes": r.like_count,
                     "meal_note": r.meal_note or '',
                     "created_at": r.created_at.strftime('%Y-%m-%d') if r.created_at else '',
                 })

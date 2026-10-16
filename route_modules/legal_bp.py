@@ -1,7 +1,7 @@
 import os
 from flask import Blueprint, render_template, request, redirect, url_for, jsonify, session, current_app, send_file
 from models import db, LegalPost, User, Message, LawyerSchedule, LegalAppointment, TongBotSchedule, BlockedEmail
-from route_modules.common import is_privileged_viewer, mask_name, mask_title, mask_post_item, masked_email, is_legal_manager, LEADER_EMAIL
+from route_modules.common import is_privileged_viewer, mask_name, mask_title, mask_post_item, masked_email, is_legal_manager, LEADER_EMAIL, display_author
 
 legal_bp = Blueprint('legal', __name__)
 
@@ -46,7 +46,7 @@ def legal_issues_write():
             except Exception as e:
                 content = f'AI 콘텐츠 생성 실패: {e}'
         post = LegalPost(title=title, content=content, email=session.get('email',''),
-                       author_name=session.get('real_name') or session.get('username','이훈노무사'),
+                       author_name=session.get('email') or session.get('username','이훈노무사'),
                        user_id=session.get('user_id'), password='', labor_approved=True)
         db.session.add(post)
         db.session.commit()
@@ -69,7 +69,7 @@ def legal_issue_comment(post_id):
         return f"<script>alert('{reason}'); history.back();</script>"
     post = LegalPost.query.get_or_404(post_id)
     comments = post.comments or ''
-    name = session.get('real_name') or session.get('username','익명')
+    name = session.get('email') or session.get('username','익명')
     comments += f'\n[{name}] {content} ({datetime.now(timezone.utc).strftime("%m/%d %H:%M")})'
     post.comments = comments
     db.session.commit()
@@ -144,7 +144,7 @@ def legal_issues_ai_save():
         title=title,
         content=f'<p>{content_html}</p><p class="text-muted small">출처: {source}</p>',
         email=session.get('email',''),
-        author_name=session.get('real_name','이훈노무사'),
+        author_name=session.get('email') or '이훈노무사',
         user_id=session.get('user_id'),
         password='',
         labor_approved=False
@@ -195,7 +195,7 @@ def legal_issues_import_url():
             title=result.get('title', '가져온 기사'),
             content=f'<p>{result.get("summary", "")}</p>' + chr(10) + f'<p><a href="{url}" target="_blank">원문보기</a></p>',
             email=session.get('email',''),
-            author_name=session.get('real_name','이훈노무사'),
+            author_name=session.get('email') or '이훈노무사',
             user_id=session.get('user_id'),
             password='',
             labor_approved=False
@@ -244,7 +244,7 @@ def api_legal_posts():
     items = []
     for p in posts.items:
         d = {
-            'id': p.id, 'title': p.title, 'author_name': p.author_name,
+            'id': p.id, 'title': p.title, 'author_name': display_author(p.user_id, p.author_name),
             'status': p.status, 'is_public': p.is_public,
             'answer': p.answer, 'created_at': p.created_at.isoformat() if p.created_at else None,
             'answered_at': p.answered_at.isoformat() if p.answered_at else None,
@@ -266,7 +266,7 @@ def api_legal_post(post_id):
     if not (_is_legal_author(post) or is_legal_manager()):
         return jsonify({
             'id': post.id, 'title': mask_title(post.title, keep=0.4), 'content': '',
-            'author_name': post.author_name, 'email': masked_email(post.email),
+            'author_name': display_author(post.user_id, post.author_name), 'email': masked_email(post.email),
             'answer': '', 'comments': '', 'status': post.status,
         'has_attachment': bool(p.file_path),
             'is_public': post.is_public, 'fee': post.fee,
@@ -276,7 +276,7 @@ def api_legal_post(post_id):
         })
     return jsonify({
         'id': post.id, 'user_id': post.user_id, 'title': post.title, 'content': post.content,
-        'author_name': post.author_name, 'answer': post.answer,
+        'author_name': display_author(post.user_id, post.author_name), 'answer': post.answer,
         'comments': post.comments, 'status': post.status,
         'file_path': post.file_path,
         'link': post.link,
@@ -361,7 +361,7 @@ def api_legal_comment(post_id):
         return jsonify({'status': 'error', 'msg': '내용을 입력하세요.'})
     post = LegalPost.query.get_or_404(post_id)
     comments = post.comments or ''
-    name = session.get('real_name') or session.get('username', '익명')
+    name = session.get('email') or session.get('username', '익명')
     from datetime import datetime, timezone
     comments += f'\n[{name}] {content} ({datetime.now(timezone.utc).strftime("%m/%d %H:%M")})'
     post.comments = comments
@@ -459,7 +459,7 @@ def api_legal_issues():
     news = LaborNewsArticle.query.filter(LaborNewsArticle.is_selected == True).order_by(LaborNewsArticle.created_at.desc()).limit(20).all()
     post_items = [{
         'id': p.id, 'title': p.title, 'content': (p.content or '')[:200],
-        'author_name': p.author_name, 'comments_count': len(p.comments.split('\n')) if p.comments else 0,
+        'author_name': display_author(p.user_id, p.author_name), 'comments_count': len(p.comments.split('\n')) if p.comments else 0,
         'created_at': p.created_at.isoformat() if p.created_at else None,
         'type': 'post',
     } for p in posts]
@@ -489,13 +489,13 @@ def api_legal_issue(post_id):
     if not is_labor and not (_is_legal_author(post) or is_privileged_viewer(post.user_id, 'legal')):
         return jsonify({
             'id': post.id, 'title': mask_title(post.title, keep=0.4), 'content': '',
-            'author_name': post.author_name, 'email': masked_email(post.email),
+            'author_name': display_author(post.user_id, post.author_name), 'email': masked_email(post.email),
             'comments': [], 'can_view_content': False,
             'created_at': post.created_at.isoformat() if post.created_at else None,
         })
     return jsonify({
         'id': post.id, 'user_id': post.user_id, 'title': post.title, 'content': post.content,
-        'author_name': post.author_name, 'email': masked_email(post.email),
+        'author_name': display_author(post.user_id, post.author_name), 'email': masked_email(post.email),
         'comments': comments,
         'created_at': post.created_at.isoformat() if post.created_at else None,
     })
@@ -513,7 +513,7 @@ def api_legal_issues_write():
         prompt = f"다음 주제에 대한 노동법률 정보를 한국어로 500자 내외로 작성해주세요: {keyword}"
         content = call_motif(prompt) or '내용 생성 실패'
     post = LegalPost(title=title, content=content, email=session.get('email', ''),
-                   author_name=session.get('real_name') or session.get('username', '이훈노무사'),
+                   author_name=session.get('email') or session.get('username', '이훈노무사'),
                    user_id=session.get('user_id'), password='', labor_approved=True)
     db.session.add(post)
     db.session.commit()
@@ -529,7 +529,7 @@ def api_legal_issue_comment(post_id):
     moderate_comment(content)
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc).strftime('%m/%d %H:%M')
-    name = session.get('real_name') or session.get('username', '익명')
+    name = session.get('email') or session.get('username', '익명')
     entry = f'[{name}] {content} ({now})'
     post.comments = (post.comments or '') + '\n' + entry
     db.session.commit()
@@ -708,7 +708,7 @@ def legal_post_edit(post_id):
                 current_app.logger.warning(f'legal edit attachment save failed: {_e}')
         db.session.commit()
         return jsonify({'status': 'success', 'file_path': post.file_path})
-    return jsonify({'id': post.id, 'user_id': post.user_id, 'title': post.title, 'content': post.content, 'author_name': post.author_name, 'status': post.status, 'file_path': post.file_path})
+    return jsonify({'id': post.id, 'user_id': post.user_id, 'title': post.title, 'content': post.content, 'author_name': display_author(post.user_id, post.author_name), 'status': post.status, 'file_path': post.file_path})
 
 
 @legal_bp.route('/legal/post/<int:post_id>/confirm', methods=['POST'])

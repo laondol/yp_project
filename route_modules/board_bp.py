@@ -4,7 +4,7 @@ from services.security import save_village_file
 from services.ai_service import call_ai_judge
 import base64, os
 from datetime import datetime, timezone
-from route_modules.common import author_email_for as _author_email, is_privileged_viewer, mask_name, mask_title, mask_post_item, is_ramp_post, masked_email
+from route_modules.common import author_email_for as _author_email, is_privileged_viewer, mask_name, mask_title, mask_post_item, is_ramp_post, masked_email, display_author
 
 board_bp = Blueprint('board', __name__)
 
@@ -83,7 +83,7 @@ def submit_post():
     if not title or not content:
         return jsonify({"status": "fail", "msg": "제목과 내용을 모두 입력해주세요."})
     user = User.query.get(session['user_id'])
-    post = Post(title=title, content=content, user_id=user.id, author_name=user.real_name or user.username)
+    post = Post(title=title, content=content, user_id=user.id, author_name=user.email or user.username)
     _apply_post_location(post)
     if 'file' in request.files:
         file = request.files['file']
@@ -264,7 +264,7 @@ def api_posts():
     items = []
     for p in posts.items:
         item = {
-            'id': p.id, 'title': p.title, 'author_name': p.author_name,
+            'id': p.id, 'title': p.title, 'author_name': display_author(p.user_id, p.author_name),
             'author_email': _author_email(p.user_id),
             'category': p.category, 'status': p.status,
             'ai_score': p.ai_score, 'total_score': p.total_score,
@@ -286,7 +286,7 @@ def api_board_post(post_id):
     if is_ramp_post(post) and not is_privileged_viewer(post.user_id, 'ramp'):
         return jsonify({
             'id': post.id, 'title': mask_title(post.title, keep=0.4), 'content': '',
-            'author_name': post.author_name, 'user_id': post.user_id,
+            'author_name': display_author(post.user_id, post.author_name), 'user_id': post.user_id,
             'author_email': _author_email(post.user_id), 'category': post.category, 'status': post.status,
             'ai_score': post.ai_score, 'ai_summary': '', 'ai_reason': post.ai_reason,
             'admin_score': post.admin_score, 'leader_score': post.leader_score, 'member_score': post.member_score,
@@ -302,7 +302,7 @@ def api_board_post(post_id):
     return jsonify({
         'post': {
             'id': post.id, 'title': post.title, 'content': post.content,
-            'author_name': post.author_name, 'user_id': post.user_id,
+            'author_name': display_author(post.user_id, post.author_name), 'user_id': post.user_id,
             'author_email': _author_email(post.user_id),
             'file_path': post.file_path, 'category': post.category, 'status': post.status,
             'latitude': post.latitude, 'longitude': post.longitude, 'address': post.address,
@@ -333,11 +333,11 @@ def api_board_search():
         ramp_hits = Post.query.filter(db.or_(Post.title.ilike(f'%{q}%'), Post.content.ilike(f'%{q}%'))).order_by(Post.created_at.desc()).limit(20).all()
         results['posts'] = []
         for p in ramp_hits:
-            item = {'id': p.id, 'title': p.title, 'content': (p.content or '')[:100], 'author_name': p.author_name, 'created_at': p.created_at.isoformat() if p.created_at else None}
+            item = {'id': p.id, 'title': p.title, 'content': (p.content or '')[:100], 'author_name': display_author(p.user_id, p.author_name), 'created_at': p.created_at.isoformat() if p.created_at else None}
             if is_ramp_post(p):
                 item = mask_post_item(item, author_uid=p.user_id, page_key='ramp')
             results['posts'].append(item)
-        results['shares'] = [{'id': s.id, 'title': s.title, 'description': (s.description or '')[:100], 'author_name': s.author_name, 'created_at': s.created_at.isoformat() if s.created_at else None} for s in ShareReport.query.filter(db.or_(ShareReport.title.ilike(f'%{q}%'), ShareReport.description.ilike(f'%{q}%'))).order_by(ShareReport.created_at.desc()).limit(20).all()]
+        results['shares'] = [{'id': s.id, 'title': s.title, 'description': (s.description or '')[:100], 'author_name': display_author(s.user_id, s.author_name), 'created_at': s.created_at.isoformat() if s.created_at else None} for s in ShareReport.query.filter(db.or_(ShareReport.title.ilike(f'%{q}%'), ShareReport.description.ilike(f'%{q}%'))).order_by(ShareReport.created_at.desc()).limit(20).all()]
         results['news'] = [{'id': n.id, 'title': n.title, 'summary': (n.summary or '')[:100], 'created_at': n.created_at.isoformat() if n.created_at else None} for n in NewsArticle.query.filter(db.or_(NewsArticle.title.ilike(f'%{q}%'), NewsArticle.summary.ilike(f'%{q}%')), db.or_(NewsArticle.world_admin_approved == True, NewsArticle.kr_yp_admin_approved == True)).order_by(NewsArticle.created_at.desc()).limit(20).all()]
         return jsonify(results)
     return jsonify(results)
@@ -348,7 +348,7 @@ def api_post_detail(post_id):
     if is_ramp_post(post) and not is_privileged_viewer(post.user_id, 'ramp'):
         return jsonify({
             'id': post.id, 'title': mask_title(post.title, keep=0.4), 'content': '',
-            'author_name': post.author_name, 'user_id': post.user_id,
+            'author_name': display_author(post.user_id, post.author_name), 'user_id': post.user_id,
             'author_email': _author_email(post.user_id), 'category': post.category, 'status': post.status,
             'ai_score': post.ai_score, 'ai_summary': '', 'ai_reason': post.ai_reason,
             'admin_score': post.admin_score, 'leader_score': post.leader_score, 'member_score': post.member_score,
@@ -369,7 +369,7 @@ def api_post_detail(post_id):
     comments = Comment.query.filter_by(post_id=post_id).order_by(Comment.created_at.asc()).all()
     return jsonify({
         'id': post.id, 'title': post.title, 'content': post.content,
-        'author_name': post.author_name, 'user_id': post.user_id,
+        'author_name': display_author(post.user_id, post.author_name), 'user_id': post.user_id,
         'author_email': _author_email(post.user_id),
         'category': post.category, 'status': post.status,
         'ai_score': post.ai_score, 'ai_summary': post.ai_summary, 'ai_reason': post.ai_reason,

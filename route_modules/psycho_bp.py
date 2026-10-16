@@ -1,7 +1,7 @@
 import os
 from flask import Blueprint, render_template, request, redirect, url_for, jsonify, session, current_app, send_file
 from werkzeug.security import generate_password_hash, check_password_hash
-from route_modules.common import has_page_access, is_privileged_viewer, mask_name, mask_title, mask_post_item, masked_email
+from route_modules.common import has_page_access, is_privileged_viewer, mask_name, mask_title, mask_post_item, masked_email, display_author
 from models import db, PsychoPost, PsychoAppointment, PsychoDoctorSchedule, PsychoGoogleCalendarConfig, TongBotSchedule, User, Message
 
 psycho_bp = Blueprint('psycho', __name__)
@@ -323,7 +323,7 @@ def api_psycho_posts():
     if not uid: return jsonify({'error': 'login'}), 401
     posts = PsychoPost.query.filter_by(user_id=uid).order_by(PsychoPost.created_at.desc()).limit(20).all()
     return jsonify([{
-        'id': p.id, 'title': p.title, 'author_name': p.author_name,
+        'id': p.id, 'title': p.title, 'author_name': display_author(p.user_id, p.author_name),
         'status': p.status, 'is_public': p.is_public,
         'answer': p.answer, 'fee': p.fee,
         'created_at': p.created_at.isoformat() if p.created_at else None,
@@ -336,7 +336,7 @@ def api_psycho_post(post_id):
     if not is_privileged_viewer(post.user_id, 'psycho'):
         return jsonify({
             'id': post.id, 'title': mask_title(post.title, keep=0.4), 'content': '',
-            'author_name': post.author_name, 'email': masked_email(post.email),
+            'author_name': display_author(post.user_id, post.author_name), 'email': masked_email(post.email),
             'is_public': post.is_public, 'answer': '', 'fee': post.fee,
             'travel_allowance': post.travel_allowance, 'ai_score': post.ai_score,
             'ai_reason': '',
@@ -433,7 +433,7 @@ def api_psycho_comment(post_id):
         return jsonify({'status': 'error', 'msg': '내용을 입력하세요.'})
     post = PsychoPost.query.get_or_404(post_id)
     comments = post.comments or ''
-    name = session.get('real_name') or session.get('username', '익명')
+    name = session.get('email') or session.get('username', '익명')
     from datetime import datetime, timezone
     comments += f'\n[{name}] {content} ({datetime.now(timezone.utc).strftime("%m/%d %H:%M")})'
     post.comments = comments

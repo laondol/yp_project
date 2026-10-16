@@ -1,6 +1,6 @@
 from flask import Blueprint, render_template, request, redirect, url_for, jsonify, session, current_app, send_file
 from models import db, User, Friend, FriendGroup, Message
-from route_modules.common import has_page_access
+from route_modules.common import has_page_access, view_email, masked_email
 
 friends_bp = Blueprint('friends', __name__)
 
@@ -31,8 +31,8 @@ def friends_list_json():
     for p in pending:
         req_user = User.query.get(p.requester_id)
         if req_user:
-            requests.append({"id": req_user.id, "name": req_user.real_name or req_user.username})
-    return jsonify({"friends": [{"id": f.id, "name": f.real_name or f.username, "town": f.town or '', "village": f.village or ''} for f in friends], "requests": requests})
+            requests.append({"id": req_user.id, "name": view_email(req_user.id, req_user.email) or req_user.username})
+    return jsonify({"friends": [{"id": f.id, "name": view_email(f.id, f.email) or f.username, "town": f.town or '', "village": f.village or ''} for f in friends], "requests": requests})
 
 @friends_bp.route('/friends/map')
 def friends_map():
@@ -58,11 +58,11 @@ def friend_request(other_id):
     requester.login_location_share = (request.form.get('share_login_location') == '1')
     msg = Message(
         sender_id=uid,
-        sender_name=requester.real_name or requester.username,
+        sender_name=view_email(requester.id, requester.email) or requester.username,
         sender_role=requester.role,
         receiver_id=other_id,
         subject='👋 벗 신청',
-        content=f'{requester.real_name or requester.username}님이 벗 신청을 보냈습니다. "내 벗 관리" 페이지에서 수락/거절할 수 있습니다.', is_notice=True
+        content=f'{masked_email(requester.email) or requester.username}님이 벗 신청을 보냈습니다. "내 벗 관리" 페이지에서 수락/거절할 수 있습니다.', is_notice=True
     )
     db.session.add(msg)
     db.session.commit()
@@ -78,11 +78,11 @@ def friend_accept(other_id):
     accepter = User.query.get(uid)
     msg = Message(
         sender_id=uid,
-        sender_name=accepter.real_name or accepter.username,
+        sender_name=view_email(accepter.id, accepter.email) or accepter.username,
         sender_role=accepter.role,
         receiver_id=other_id,
         subject='✅ 벗 신청 수락',
-        content=f'{accepter.real_name or accepter.username}님이 벗 신청을 수락했습니다. 이제 벗입니다!', is_notice=True
+        content=f'{masked_email(accepter.email) or accepter.username}님이 벗 신청을 수락했습니다. 이제 벗입니다!', is_notice=True
     )
     db.session.add(msg)
     from tongbot_routes import _rebuild_friend_cache
@@ -100,11 +100,11 @@ def friend_reject(other_id):
     rejecter = User.query.get(uid)
     msg = Message(
         sender_id=uid,
-        sender_name=rejecter.real_name or rejecter.username,
+        sender_name=view_email(rejecter.id, rejecter.email) or rejecter.username,
         sender_role=rejecter.role,
         receiver_id=other_id,
         subject='❌ 벗 신청 거절',
-        content=f'{rejecter.real_name or rejecter.username}님이 벗 신청을 거절했습니다.', is_notice=True
+        content=f'{masked_email(rejecter.email) or rejecter.username}님이 벗 신청을 거절했습니다.', is_notice=True
     )
     db.session.add(msg)
     db.session.delete(f)

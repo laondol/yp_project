@@ -307,7 +307,7 @@ export default function VillagePage() {
               <tbody>
                 {data.members.map(m => (
                   <tr key={m.id}>
-                    <td>{m.is_verified_resident ? (m.real_name || '-') : '***'}</td>
+                    <td>{m.is_verified_resident ? (m.email || (m as any).username || '-') : '***'}</td>
                     <td>{m.is_verified_resident ? m.email : '***'}</td>
                     <td>{m.town} {m.village}</td>
                     <td>

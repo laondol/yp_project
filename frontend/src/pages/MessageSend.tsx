@@ -216,7 +216,7 @@ export default function MessageSend() {
                 <div key={u.id} className="form-check">
                   <input className="form-check-input" type="checkbox" id={`rcv-${u.id}`}
                     checked={selectedIds.includes(u.id)} onChange={() => toggleId(u.id)} />
-                  <label className="form-check-label small" htmlFor={`rcv-${u.id}`}>{u.username}{u.real_name ? ` (${u.real_name})` : ''}</label>
+                  <label className="form-check-label small" htmlFor={`rcv-${u.id}`}>{u.username}</label>
                 </div>
               ))}
             </div>

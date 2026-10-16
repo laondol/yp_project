@@ -9,7 +9,7 @@ import { openPopup } from '../lib/popup'
 import { formatKST } from '../utils/format';
 
 interface ProfileUser {
-  id: number; username: string; real_name?: string; town?: string; village?: string;
+  id: number; username: string; email?: string; real_name?: string; town?: string; village?: string;
   social_provider?: string; points: number; role?: string; managed_pages?: string;
   is_neighbor?: boolean; location_share?: boolean; village_notify?: boolean;
   curr_address?: string;
@@ -159,7 +159,7 @@ export default function UserProfilePage() {
                   </div>
                   <div>
                     <div className="d-flex align-items-center gap-2">
-                      <span className="fw-bold small">{u.real_name || u.username}</span>
+                      <span className="fw-bold small">{u.email || u.username}</span>
                       {data.is_own && (
                         <button className="btn btn-sm btn-outline-success py-0 px-1"
                           style={{ fontSize: '0.7rem', lineHeight: 1.4 }}

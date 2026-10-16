@@ -10,6 +10,7 @@ export default function ShareReport({ yardEventId: propEventId, yardEventTitle: 
   const [lat, setLat] = useState('')
   const [lon, setLon] = useState('')
   const [mealNote, setMealNote] = useState('')
+  const [storeName, setStoreName] = useState('')
   const [nearbyPlaces, setNearbyPlaces] = useState<any[]>([])
   const [ssid, setSsid] = useState('')
   const [locationStatus, setLocationStatus] = useState('위치 수집 중... (브라우저 권한 허용 필요)')
@@ -447,6 +448,7 @@ const res = await fetch('/share-report/auto-save', { method: 'POST', body: fd, c
     }
     if (mealNote.trim()) fd.append('meal_note', mealNote.trim())
     if (ssid) fd.append('store_suggestion_id', ssid)
+    if (storeName.trim()) fd.append('store_name', storeName.trim())
     const c = canvasRef.current
     if (c) {
       const dataUrl = c.toDataURL('image/png')
@@ -609,6 +611,11 @@ const res = await fetch('/share-report/auto-save', { method: 'POST', body: fd, c
                 </div>
               </div>
             )}
+            <div className="mb-3">
+              <label className="form-label fw-bold small">가게/시설 이름 <span className="text-muted fw-normal">(선택 — 입력하면 시설 정보가 자동 구성됩니다)</span></label>
+              <input type="text" className="form-control" value={storeName} onChange={e => setStoreName(e.target.value)}
+                placeholder="예: 라온, 멸치국수, 양근리 카페" maxLength={50} />
+            </div>
             <div className="mb-3">
               <label className="form-label fw-bold small">경험 기록 (선택)</label>
               <input type="text" className="form-control" value={mealNote} onChange={e => setMealNote(e.target.value)}

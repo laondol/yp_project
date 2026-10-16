@@ -3,7 +3,7 @@ import os
 import re
 from flask import Blueprint, request, jsonify, session, current_app
 from models import db, YardPost, YardComment, YardOrg, YardSchedule, VillageEvent, User
-from route_modules.common import author_email_for
+from route_modules.common import author_email_for, view_email
 from datetime import datetime, timedelta
 
 yard_bp = Blueprint('yard_bp', __name__)
@@ -300,7 +300,7 @@ def api_yard_list():
         # 작성자 마스킹: author_name이 회원 본인 이름일 때만 마스킹 이메일 제공 (SNS 출처명은 유지)
         _pau = User.query.get(p.created_by) if p.created_by else None
         _pamail = ''
-        if _pau and (p.author_name or '') in ((_pau.username or ''), (_pau.real_name or ''), ''):
+        if _pau and (p.author_name or '') in ((_pau.email or ''), (_pau.username or ''), (_pau.real_name or ''), ''):
             _pamail = author_email_for(_pau.id)
         items.append({
             'id': f'p{p.id}', 'db_id': p.id,
@@ -342,7 +342,7 @@ def api_yard_list():
         author = ''
         if ev.created_by:
             u = User.query.get(ev.created_by)
-            author = (u.username or u.real_name or "익명") if u else ''
+            author = (view_email(u.id, u.email) or u.username or "익명") if u else ''
         ev_dt = ''
         ev_iso = ''
         dist_km = None

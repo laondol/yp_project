@@ -87,7 +87,7 @@ def api_admin_users_search():
     ).limit(20).all()
     from models import DIDDocument
     return jsonify([{
-        'id': u.id, 'username': u.username, 'real_name': u.real_name,
+        'id': u.id, 'username': u.username, 'real_name': u.real_name, 'email': u.email or '',
         'town': u.town, 'village': u.village,
         'is_verified_resident': u.is_verified_resident,
         'jin_verified_at': u.jin_verified_at.strftime('%Y-%m-%d') if getattr(u, 'jin_verified_at', None) else None,
@@ -102,7 +102,7 @@ def api_admin_user_by_email():
     if not email: return jsonify({'found': False})
     u = User.query.filter(db.func.lower(User.email) == email.lower()).first()
     if not u: return jsonify({'found': False})
-    return jsonify({'found': True, 'id': u.id, 'name': u.real_name or u.username, 'email': u.email})
+    return jsonify({'found': True, 'id': u.id, 'name': u.email or u.username, 'email': u.email})
 
 @admin_bp.route('/api/admin/stores')
 def api_admin_stores():

@@ -3,7 +3,7 @@ import json as _json
 from datetime import datetime, timezone
 from models import db, User, Message, Friend, ShareReport, Post, PointHistory, VillageWish, LegalPost, PsychoPost, ChatMessage, LegalAppointment, TongBot, TongBotDraft, TongBotSchedule, Note
 from werkzeug.security import generate_password_hash, check_password_hash
-from route_modules.common import has_page_access
+from route_modules.common import has_page_access, view_email
 from services.security import save_village_file
 from services.transit import haversine_km, geocode_address
 from services.geocode import gps_to_town_village
@@ -256,11 +256,11 @@ def api_user_profile(user_id):
             for r in recent:
                 u = User.query.get(r["id"])
                 if u:
-                    recent_friends.append({"id":u.id,"username":u.username,"name":u.real_name or u.username,"town":u.town or "","village":u.village or ""})
+                    recent_friends.append({"id":u.id,"username":u.username,"name":view_email(u.id, u.email) or u.username,"town":u.town or "","village":u.village or ""})
 
     return jsonify({
         'profile_user': {
-            'id': user.id, 'username': user.username, 'real_name': user.real_name,
+            'id': user.id, 'username': user.username, 'real_name': user.real_name, 'email': view_email(user.id, user.email),
             'town': user.town, 'village': user.village, 'social_provider': user.social_provider,
             'points': user.points, 'role': user.role, 'managed_pages': user.managed_pages,
             'is_neighbor': user.is_neighbor, 'location_share': user.location_share,
@@ -300,7 +300,7 @@ def api_user_profile(user_id):
         'curr_location': curr_location,
         'share_images': share_images,
         'recent_friends': recent_friends,
-        'profile_initial': (user.real_name or user.username)[0] if (user.real_name or user.username) else '?',
+        'profile_initial': (user.email or user.username)[0] if (user.email or user.username) else '?',
         'intro_page_enabled': bool(user.intro_page_enabled),
         'password_v2': bool(user.password_v2),
         'block_order_profile': _json.loads(user.block_order_profile) if user.block_order_profile else None,
@@ -530,7 +530,7 @@ def api_user_edit_profile_get():
         return jsonify({'error': 'user not found'}), 404
     return jsonify({
         'id': user.id,
-        'real_name': user.real_name or '',
+        'username': user.username or '',
         'email': user.email or '',
         'phone': user.phone or '',
         'home_address': user.curr_address or '',
@@ -552,7 +552,7 @@ def api_user_edit_profile_post():
     user = User.query.get(session['user_id'])
     if not user:
         return jsonify({'status': 'error', 'msg': '사용자를 찾을 수 없습니다.'}), 404
-    real_name = (request.form.get('real_name', '') or '').strip()
+    username = (request.form.get('username', '') or '').strip()
     email = (request.form.get('email', '') or '').strip()
     phone = (request.form.get('phone', '') or '').strip()
     home_address = (request.form.get('home_address', '') or '').strip()
@@ -562,7 +562,12 @@ def api_user_edit_profile_post():
     existing = User.query.filter(User.email == email, User.id != user.id).first()
     if existing:
         return jsonify({'status': 'error', 'msg': '이미 사용 중인 이메일입니다.'})
-    user.real_name = real_name[:50] if real_name else None
+    if username:
+        existing_name = User.query.filter(User.username == username, User.id != user.id).first()
+        if existing_name:
+            return jsonify({'status': 'error', 'msg': '이미 사용 중인 계정이름입니다.'})
+        user.username = username[:30]
+        session['username'] = user.username
     user.email = email[:100]
     user.phone = phone[:20] if phone else None
     if home_address != (user.curr_address or ''):

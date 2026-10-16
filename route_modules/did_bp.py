@@ -5,6 +5,7 @@ import json, base64, secrets
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.serialization import load_pem_private_key, Encoding, PrivateFormat, PublicFormat
+from route_modules.common import view_email
 
 did_bp = Blueprint('did', __name__, url_prefix='/api/did')
 
@@ -206,7 +207,7 @@ def pending_qr_sessions():
         result.append({
             'sessionId': s.session_id,
             'subjectUserId': s.subject_user_id,
-            'subjectName': subject.real_name or subject.username if subject else '알 수 없음',
+            'subjectName': (view_email(subject.id, subject.email) or subject.username) if subject else '알 수 없음',
             'subjectEmail': subject.email if subject else '',
             'hasDid': bool(doc),
             'createdAt': s.created_at.isoformat() if s.created_at else None,

@@ -6,12 +6,12 @@ from flask import Blueprint, render_template, request, redirect, url_for, jsonif
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import or_
 from werkzeug.utils import secure_filename
-from models import db, User, ShareReport, ShareComment, ShareVote, Message, Post, Comment, NewsArticle, VillagePage, RampApplication, PointHistory, Friend, VillageWish, LegalPost, ChatMessage, FriendGroup, LegalAppointment, TongBot, TongBotDraft, ConstructionNotice, GpsCalibration, StoreSuggestion, StoreMenu, StoreInfo, YardPost
+from models import db, User, ShareReport, ShareComment, ShareVote, Message, Post, Comment, NewsArticle, VillagePage, RampApplication, PointHistory, Friend, VillageWish, LegalPost, ChatMessage, FriendGroup, LegalAppointment, TongBot, TongBotDraft, ConstructionNotice, GpsCalibration, StoreSuggestion, StoreMenu, StoreInfo, StoreInfoVote, YardPost
 from services.security import save_village_file
 from services.ai_service import background_process_share, moderate_image
 from services.geocode import haversine, gps_to_town_village, gps_to_address, get_nearby_reports, is_in_yangpyeong, YANGPYEONG_BOUNDS, YANGPYEONG_VILLAGES
 from route_modules.construction_bp import _resolve_canonical_store_name
-from route_modules.common import author_email_for as _author_email
+from route_modules.common import author_email_for as _author_email, view_email, display_author
 import requests as _requests
 
 share_bp = Blueprint('share', __name__)
@@ -44,6 +44,38 @@ def _find_nearby_place(lat, lon, radius_km=0.15):
             best = ('store_suggestion', ss.id, ss.top_name, ss.phone, ss.address, ss.category or '음식점', d)
 
     return best
+
+
+def _link_store_by_name(store_name_input, lat, lon, town, village):
+    """회원이 입력한 가게명으로 StoreInfo 자동 생성/연결/이름 갱신.
+    - 150m 내 동일 이름 → 연결
+    - 30m 내 가장 가까운 시설(이름 달라도) → 회원 입력 이름으로 갱신 후 연결 (회원 기준)
+    - 그 외 → 새 StoreInfo 생성"""
+    if not store_name_input:
+        return None
+    nearest = None
+    nearest_d = 999
+    for si in StoreInfo.query.all():
+        if not (si.latitude and si.longitude):
+            continue
+        d = haversine(lat, lon, si.latitude, si.longitude)
+        if d <= 0.15 and si.name == store_name_input:
+            return si.id
+        if d < nearest_d:
+            nearest_d = d
+            nearest = si
+    # 30m 내 가장 가까운 시설이 있으면 회원 입력 이름으로 갱신 (회원이 적은 내용이 기준)
+    if nearest is not None and nearest_d <= 0.03:
+        if nearest.name != store_name_input:
+            nearest.name = store_name_input
+        return nearest.id
+    new_si = StoreInfo(
+        name=store_name_input, latitude=lat, longitude=lon,
+        town=town, village=village, category='음식점', created_at=datetime.now()
+    )
+    db.session.add(new_si)
+    db.session.flush()
+    return new_si.id
 
 
 def _move_report_files(report, target_sub):
@@ -290,6 +322,10 @@ def share_report():
         if near:
             ssid = near[1]  # StoreSuggestion.id (StoreInfo면 None)
 
+    # 가게명 직접 입력 시 StoreInfo 자동 생성/연결
+    store_name_input = request.form.get('store_name', '').strip()
+    _link_store_by_name(store_name_input, latitude, longitude, share_town, share_village)
+
     report = ShareReport(
         user_id=user.id if user else 0,
         author_name=user.username if user else '익명',
@@ -313,6 +349,7 @@ def share_report():
         ai_danger_alert=False,
         store_suggestion_id=ssid,
         meal_note=meal_note,
+        store_name=store_name_input or None,
         auto_sent=auto_sent
     )
     if video_path:
@@ -652,6 +689,14 @@ def share_report_confirm_auto(report_id):
             report.village = yp.village or ''
             report.address = yp.event_place or f"경기도 양평군 {yp.town} {yp.village}".strip()
 
+    # 가게명 직접 입력 시 StoreInfo 자동 생성/연결
+    if report.latitude and report.longitude:
+        _sn = request.form.get('store_name', '').strip()
+        if _sn:
+            report.store_name = _sn
+            _link_store_by_name(_sn, report.latitude, report.longitude,
+                                report.town or '', report.village or '')
+
     # 사진 EXIF에 행사 좌표/날짜 기입 (위치/날짜 없는 사진)
     if report.yard_event_id:
         _stamp_event_exif(report)
@@ -782,6 +827,8 @@ def share_report_edit(report_id):
     if not (is_author or is_leader or (is_share_mgr and is_anonymous_share)):
         return jsonify({"status": "error", "msg": "권한 없음"}), 403
     if request.method == 'POST':
+        uid = session.get('user_id')
+        _old_store_name = report.store_name or ''
         try:
             with open('/tmp/edit_dbg.log', 'a') as _f:
                 _f.write('EDIT req: replace_rotate=%r rotate_angle_keys=%r replace_image=%r\n' % (
@@ -800,13 +847,58 @@ def share_report_edit(report_id):
         sub = request.form.get('sub_category', '').strip()
         if sub:
             report.sub_category = sub
-        # 가게 연결 (store_suggestion_id)
+        # 가게 연결 (store_suggestion_id) — 카카오 검색 결과가 있을 때만 갱신, 없으면 store_name으로 처리
         ssid = request.form.get('store_suggestion_id', type=int)
-        if ssid:
+        if ssid and ssid != report.store_suggestion_id:
             report.store_suggestion_id = ssid
+            _ss = StoreSuggestion.query.get(ssid)
+            if _ss:
+                report.store_name = _ss.top_name or _ss.name
+                if _ss.lat and _ss.lon:
+                    _link_store_by_name(report.store_name, _ss.lat, _ss.lon,
+                                        report.town or '', report.village or '')
+            if uid:
+                u = User.query.get(uid)
+                if u:
+                    u.points = (u.points or 0) + 10
+                    db.session.add(PointHistory(
+                        user_id=uid, change_type='store_info',
+                        amount=10, balance_after=u.points,
+                        description=f'공유글 #{report.id} 가게 연결 수정 보상'
+                    ))
         # 경험 기록
         if 'meal_note' in request.form:
             report.meal_note = request.form.get('meal_note', '').strip() or None
+        # 가게명 직접 입력 시 StoreInfo 자동 생성/연결 + 공유글에 저장 (카카오 연결 없이도 동작)
+        _store_name_edit = request.form.get('store_name', '').strip()
+        if _store_name_edit:
+            report.store_name = _store_name_edit
+            # 카카오 연결이 없거나 가게명이 바뀌었으면 연결 해제 (가게명 기준으로 재연결)
+            if not ssid or _store_name_edit != (report.store_name or ''):
+                report.store_suggestion_id = None
+            if report.latitude and report.longitude:
+                _link_store_by_name(_store_name_edit, report.latitude, report.longitude,
+                                    report.town or '', report.village or '')
+        # 가게명 변경 시: 투표 전체 리셋 + 정확히 맞춘 down 투표자에게 10닢
+        _new_store_name = report.store_name or ''
+        if _new_store_name and _new_store_name != _old_store_name:
+            import re as _re
+            def _norm_sn(s): return _re.sub(r'[\s\-_.,·]+', '', (s or ''))[:20]
+            _new_n = _norm_sn(_new_store_name)
+            _down_votes = StoreInfoVote.query.filter_by(photo_id=report.id, vote_type='down').all()
+            _rewarded = set()
+            for _v in _down_votes:
+                if _v.comment and _norm_sn(_v.comment) == _new_n and _v.user_id and _v.user_id not in _rewarded:
+                    _rewarded.add(_v.user_id)
+                    _ru = User.query.get(_v.user_id)
+                    if _ru:
+                        _ru.points = (_ru.points or 0) + 10
+                        db.session.add(PointHistory(
+                            user_id=_v.user_id, change_type='store_info',
+                            amount=10, balance_after=_ru.points,
+                            description=f'공유글 #{report.id} 가게명 "{_new_store_name}" 정확 지적 보상'
+                        ))
+            StoreInfoVote.query.filter_by(photo_id=report.id).delete(synchronize_session=False)
         # 기존 사진 삭제 처리
         delete_imgs = request.form.getlist('delete_image')
         if delete_imgs:
@@ -1064,7 +1156,7 @@ def share_report_edit(report_id):
             _target = _User.query.filter(_func.lower(_User.email) == author_email.lower()).first()
             if _target:
                 report.user_id = _target.id
-                report.author_name = _target.real_name or _target.username
+                report.author_name = _target.email or _target.username
 
         # 작성자가 수정하면 다시 심사 중으로 변경
         if is_author and not is_leader and not is_share_mgr and report.status == 'approved':
@@ -1176,7 +1268,7 @@ def api_share_reports():
         "longitude": r.longitude or (yp.longitude if (r.yard_event_id and (yp := YardPost.query.get(r.yard_event_id)) and yp.longitude) else None),
         "town": r.town or '', "village": r.village or '',
         "address": r.address or (yp.event_place if (r.yard_event_id and (yp := YardPost.query.get(r.yard_event_id))) else '') or '',
-        "author_name": r.author_name,
+        "author_name": display_author(r.user_id, r.author_name),
         "author_email": _author_email(r.user_id),
         "ai_category": r.ai_category, "ai_summary": r.ai_summary,
         "ai_region_news": '', "ai_news_links": '',
@@ -1656,7 +1748,7 @@ def api_share_detail(report_id):
         "longitude": r.longitude or (yp_event.longitude if yp_event and yp_event.longitude else None),
         "town": r.town or '', "village": r.village or '',
         "address": r.address or (yp_event.event_place if yp_event else '') or '',
-        "author_name": r.author_name, "user_id": r.user_id,
+        "author_name": display_author(r.user_id, r.author_name), "user_id": r.user_id,
         "author_email": _author_email(r.user_id),
         "ai_category": r.ai_category, "ai_summary": r.ai_summary,
         "ai_confidence": r.ai_confidence, "ai_region_news": r.ai_region_news,
@@ -1671,6 +1763,7 @@ def api_share_detail(report_id):
         "store_suggestion_id": r.store_suggestion_id,
         "store_menus": store_menus_data,
         "store_info": store_info_data,
+        "store_name": getattr(r, 'store_name', '') or '',
         "meal_note": r.meal_note or '',
         "sub_category": r.sub_category or '',
         "my_role": session.get('role') or '',
@@ -1785,8 +1878,8 @@ def api_user_profile(user_id):
     is_own = (uid == user.id)
     is_admin = session.get('role') in ('admin','leader')
     result = {
-        "id": user.id, "username": user.username, "real_name": user.real_name or user.username,
-        "email": user.email, "phone": user.phone, "social_provider": user.social_provider or '',
+        "id": user.id, "username": user.username, "real_name": view_email(user.id, user.email) or user.username,
+        "email": view_email(user.id, user.email), "phone": user.phone, "social_provider": user.social_provider or '',
         "town": user.town or '', "village": user.village or '',
         "is_neighbor": user.is_neighbor or False,
         "role": user.role, "managed_pages": (user.managed_pages or '').split(','),
@@ -1898,7 +1991,7 @@ def api_user_profile(user_id):
             for r in recent:
                 u = User.query.get(r["id"])
                 if u:
-                    recent_friends.append({"id":u.id,"username":u.username,"name":u.real_name or u.username,"town":u.town or "","village":u.village or ""})
+                    recent_friends.append({"id":u.id,"username":u.username,"name":view_email(u.id, u.email) or u.username,"town":u.town or "","village":u.village or ""})
     result['recent_friends'] = recent_friends
     # Share images
     share_images = []

@@ -41,7 +41,7 @@ export default function PsychoSchedule() {
   const { user } = useAuth()
   useEffect(() => {
     if (user && user.id) {
-      if (!name) setName(user.real_name || user.username || '')
+      if (!name) setName(user.email || user.username || '')
       if (!email) setEmail(user.email || '')
     }
   }, [user])

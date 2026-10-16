@@ -34,7 +34,7 @@ export default function ServiceRampPage() {
 
   useEffect(() => {
     if (user && user.id) {
-      if (!vName) setVName(user.real_name || user.username || '')
+      if (!vName) setVName(user.email || user.username || '')
       if (!vEmail) setVEmail(user.email || '')
     }
   }, [user])
@@ -164,7 +164,7 @@ export default function ServiceRampPage() {
           )}
           <form method="POST" action="/service/ramp/apply" encType="multipart/form-data">
             <div className="mb-2">
-              <input type="text" name="name" className="form-control" placeholder="이름" required defaultValue={user?.real_name || ''} disabled={!status.open} />
+              <input type="text" name="name" className="form-control" placeholder="이름" required defaultValue={user?.email || ''} disabled={!status.open} />
             </div>
             <div className="mb-2">
               <input type="email" name="email" className="form-control" placeholder="이메일" required defaultValue={user?.email || ''} disabled={!status.open} />

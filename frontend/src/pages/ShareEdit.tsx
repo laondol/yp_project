@@ -23,6 +23,7 @@ export default function ShareEdit({ reportId: propId, onDone }: { reportId?: str
   const [storeSuggestionId, setStoreSuggestionId] = useState('')
   const [selectedStore, setSelectedStore] = useState('')
   const [mealNote, setMealNote] = useState('')
+  const [storeName, setStoreName] = useState('')
   const [menuText, setMenuText] = useState('')
   const [menuResult, setMenuResult] = useState('')
 
@@ -69,6 +70,7 @@ export default function ShareEdit({ reportId: propId, onDone }: { reportId?: str
       setDescription(d.description || '')
       setAiCategory(d.ai_category || '')
       setMealNote(d.meal_note || '')
+      setStoreName(d.store_name || '')
       setLat(d.latitude || '')
       setLon(d.longitude || '')
       const existing: Photo[] = []
@@ -187,6 +189,7 @@ export default function ShareEdit({ reportId: propId, onDone }: { reportId?: str
   function pickStore(p: any) {
     setStoreQuery(p.name || '')
     setSelectedStore(`${p.name} (${p.address || ''})`)
+    setStoreName(p.name || '')
     setStoreResults([])
     setStoreSuggestionId(String(p.suggestion_id || ''))
     fetch('/api/share/store-suggest', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ place_id: p.place_id, name: p.name, lat: p.lat, lon: p.lon, address: p.address, place_url: p.place_url, phone: p.phone }) })
@@ -259,6 +262,7 @@ export default function ShareEdit({ reportId: propId, onDone }: { reportId?: str
     fd.append('original_lon', originalLonRef.current)
     if (storeSuggestionId) fd.append('store_suggestion_id', storeSuggestionId)
     if (mealNote.trim()) fd.append('meal_note', mealNote.trim())
+    if (storeName.trim()) fd.append('store_name', storeName.trim())
     if (menuText.trim()) fd.append('menu_text', menuText)
     if (isMgr && authorEmail.trim()) fd.append('author_email', authorEmail.trim())
 
@@ -409,6 +413,12 @@ export default function ShareEdit({ reportId: propId, onDone }: { reportId?: str
                 </div>
               </div>
             )}
+
+            <div className="mb-3">
+              <label className="form-label fw-bold small">가게/시설 이름 <span className="text-muted fw-normal">(입력하면 시설 정보가 자동 구성됩니다)</span></label>
+              <input type="text" className="form-control" value={storeName} onChange={e => setStoreName(e.target.value)}
+                placeholder="예: 라온, 멸치국수" maxLength={50} />
+            </div>
 
             <div className="mb-3">
               <label className="form-label fw-bold small">경험 기록</label>

@@ -41,6 +41,29 @@ def author_email_for(uid):
     return masked_email(u.email)
 
 
+def view_email(target_uid, email):
+    """표시용 이메일: 본인은 전체, 타인은 masked_email(아이디 50% * + 도메인 숨김)."""
+    if not email:
+        return ''
+    email = str(email).strip()
+    if not email:
+        return ''
+    uid = session.get('user_id')
+    if uid and target_uid is not None and uid == target_uid:
+        return email
+    return masked_email(email)
+
+
+def display_author(uid, name):
+    """작성자 표시명: 값이 이메일이면 view_email 규칙(본인 전체/타인 50% 마스킹), 아니면 원래대로."""
+    if not name:
+        return name or ''
+    s = str(name)
+    if '@' not in s:
+        return s
+    return view_email(uid, s)
+
+
 def has_page_access(page):
     """특정 페이지 접근 권한 확인
     - leader: 모든 권한 (단 마을은 체크 필요)

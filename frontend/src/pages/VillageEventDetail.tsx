@@ -62,7 +62,7 @@ export default function VillageEventDetail() {
       else setError('이벤트를 찾을 수 없습니다.')
       try {
         const me = await fetch('/api/me', { credentials: 'include' }).then(r => r.json())
-        setName(me.real_name || me.username || '')
+        setName(me.email || me.username || '')
         setEmail(me.email || '')
       } catch {}
     } catch (e: unknown) {

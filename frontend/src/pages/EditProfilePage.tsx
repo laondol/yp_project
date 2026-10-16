@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 
 export default function EditProfilePage() {
   const navigate = useNavigate()
-  const [realName, setRealName] = useState('')
+  const [username, setUsername] = useState('')
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
   const [homeAddress, setHomeAddress] = useState('')
@@ -35,7 +35,7 @@ export default function EditProfilePage() {
       .then(r => r.json())
       .then(d => {
         if (d.error) { setError(d.error === 'login' ? '로그인이 필요합니다.' : d.error); return }
-        setRealName(d.real_name || '')
+        setUsername(d.username || '')
         setEmail(d.email || '')
         setPhone(d.phone || '')
         setHomeAddress(d.home_address || '')
@@ -54,7 +54,7 @@ export default function EditProfilePage() {
     setError(''); setLoading(true)
     try {
       const fd = new FormData()
-      fd.append('real_name', realName)
+      fd.append('username', username)
       fd.append('email', email)
       fd.append('phone', phone)
       fd.append('home_address', homeAddress)
@@ -182,8 +182,8 @@ export default function EditProfilePage() {
           <h4 className="fw-bold mb-4">회원정보 수정</h4>
           {error && <div className="alert alert-danger py-2 small">{error}</div>}
           <div className="mb-3">
-            <label className="form-label small fw-bold">이름 (실명)</label>
-            <input type="text" value={realName} onChange={e => setRealName(e.target.value)} className="form-control" placeholder="이름" />
+            <label className="form-label small fw-bold">계정이름</label>
+            <input type="text" value={username} onChange={e => setUsername(e.target.value)} className="form-control" placeholder="사이트에 표시되는 이름" maxLength={30} />
           </div>
           <div className="mb-3">
             <label className="form-label small fw-bold">이메일</label>

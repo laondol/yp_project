@@ -251,11 +251,14 @@ def register():
         if not verified_email:
             return "<script>alert('이메일 인증을 먼저 완료해 주세요.'); location.href='/register';</script>"
         password = request.form['password']
-        real_name = request.form['real_name']
         username = request.form.get('username','').strip()
-        # username이 비었으면 이메일 앞부분으로 자동 생성
+        # username이 비었으면 이메일 앞부분으로 자동 생성 (중복 시 랜덤 접미사)
         if not username and verified_email:
-            username = verified_email.split('@')[0][:20]
+            base = verified_email.split('@')[0][:20]
+            username = base
+            import random as _rnd
+            while User.query.filter_by(username=username).first():
+                username = f"{base}{_rnd.randint(100, 9999)}"
         # 이메일 인증만으로 가입 (이웃인증은 가입 후 회원정보에서 별도 진행)
         town = request.form.get('town', '')
         village = request.form.get('village', '')
@@ -267,7 +270,7 @@ def register():
         now = datetime.now(timezone.utc)
         new_user = User(
             username=username, password=hashed_pw,
-            real_name=real_name, email=verified_email,
+            email=verified_email,
             email_verified=True,
             town=town, village=village,
             reg_town=town, reg_village=village,
@@ -332,8 +335,8 @@ def register():
             print(f'[WARN] auto-friend error: {e}')
         
         from services.email_service import EmailService
-        EmailService.send(verified_email, f"[함께사는양평] 가입을 환영합니다, {real_name}님",
-            f"{real_name}님, 함께사는양평에 가입해 주셔서 감사합니다.\n\n지금 바로 다양한 서비스를 이용해 보세요.\n- 게시글 작성 및 공유\n- 법률/심리 상담\n- 경사로 설치 신청\n- 이웃과 소통\n\nhttps://unocum.kr")
+        EmailService.send(verified_email, f"[함께사는양평] 가입을 환영합니다, {username}님",
+            f"{username}님, 함께사는양평에 가입해 주셔서 감사합니다.\n\n지금 바로 다양한 서비스를 이용해 보세요.\n- 게시글 작성 및 공유\n- 법률/심리 상담\n- 경사로 설치 신청\n- 이웃과 소통\n\nhttps://unocum.kr")
         
         return "<script>alert('가입 신청 완료! 로그인을 진행하세요.'); location.href='/intro';</script>"
     return _serve_spa()
@@ -358,7 +361,7 @@ def login():
                 EmailService.send(
                     u.email or login_id,
                     '[함께사는양평] 로그인 알림',
-                    f"{u.real_name or u.username}님,\n\n함께사는양평에 로그인 하셨습니다. 확인차 연락 드립니다.\n로그인 시각: {login_time}\n\n본인이 아닌 로그인이라면 비밀번호를 변경해 주세요.\n문의: yp@unocum.kr",
+                    f"{u.email or u.username}님,\n\n함께사는양평에 로그인 하셨습니다. 확인차 연락 드립니다.\n로그인 시각: {login_time}\n\n본인이 아닌 로그인이라면 비밀번호를 변경해 주세요.\n문의: yp@unocum.kr",
                 )
             except Exception as e:
                 current_app.logger.warning(f'login alert email failed: {e}')
@@ -405,111 +408,12 @@ def logout():
 # --- [OAuth2 소셜 로그인] Google / Kakao / Naver ---
 @auth_bp.route('/oauth/login/<provider>')
 def oauth_login(provider):
-    if provider not in ('google', 'kakao', 'naver'):
-        return "<script>alert('지원하지 않는 로그인 방식입니다.'); history.back();</script>"
-    redirect_uri = url_for('oauth_callback', provider=provider, _external=True)
-    return oauth.create_client(provider).authorize_redirect(redirect_uri)
+    # 회원정책: SNS 가입·로그인 불가 — 이메일 인증만 허용
+    return "<script>alert('SNS 로그인은 지원하지 않습니다. 이메일로 로그인해 주세요.'); location.href='/login';</script>"
 
 @auth_bp.route('/oauth/callback/<provider>')
 def oauth_callback(provider):
-    if provider not in ('google', 'kakao', 'naver'):
-        return "<script>alert('지원하지 않는 로그인 방식입니다.'); history.back();</script>"
-    try:
-        token = oauth.create_client(provider).authorize_access_token()
-    except Exception as e:
-        return f"<script>alert('OAuth 인증 실패: {str(e)}'); history.back();</script>"
-    userinfo = oauth.create_client(provider).userinfo(token=token)
-    if not userinfo:
-        return "<script>alert('사용자 정보를 가져올 수 없습니다.'); history.back();</script>"
-
-    if provider == 'google':
-        social_id = userinfo.get('sub')
-        email = userinfo.get('email', '')
-        name = userinfo.get('name', email.split('@')[0] if email else 'google_user')
-    elif provider == 'kakao':
-        kakao_account = userinfo.get('kakao_account', {})
-        social_id = str(userinfo.get('id'))
-        email = kakao_account.get('email', '')
-        profile = kakao_account.get('profile', {})
-        name = profile.get('nickname', email.split('@')[0] if email else 'kakao_user')
-    elif provider == 'naver':
-        response = userinfo.get('response', {})
-        social_id = response.get('id')
-        email = response.get('email', '')
-        name = response.get('name', response.get('nickname', email.split('@')[0] if email else 'naver_user'))
-    else:
-        social_id = None
-
-    if not social_id:
-        return "<script>alert('고유 식별자를 받지 못했습니다.'); history.back();</script>"
-
-    if not email:
-        return "<script>alert('SNS 계정에 이메일이 연동되어 있지 않습니다. ' + ('카카오' if provider == 'kakao' else '네이버' if provider == 'naver' else 'Google') + ' 설정에서 이메일 제공을 활성화해 주세요.'); history.back();</script>"
-
-    uid = provider + '_' + str(social_id)
-    user = User.query.filter_by(social_id=uid).first()
-
-    if not user:
-        existing_email_user = None
-        if email:
-            existing_email_user = User.query.filter_by(email=email).first()
-        if existing_email_user:
-            existing_email_user.social_id = uid
-            existing_email_user.social_provider = provider
-            existing_email_user.social_email = email
-            existing_email_user.email_verified = True
-            db.session.commit()
-            user = existing_email_user
-        else:
-            base_username = name.replace(' ', '_')[:30]
-            username = base_username
-            counter = 1
-            while User.query.filter_by(username=username).first():
-                username = f"{base_username}{counter}"
-                counter += 1
-            hashed_pw = generate_password_hash(os.urandom(16).hex())
-            now = datetime.now(timezone.utc)
-            user = User(
-                username=username,
-                password=hashed_pw,
-                real_name=name,
-                email=email,
-                email_verified=True,
-                social_id=uid,
-                social_provider=provider,
-                social_email=email,
-                town='양평읍',
-                village='양근리',
-                reg_town='양평읍', reg_village='양근리',
-                curr_town='양평읍', curr_village='양근리',
-                location_updated_at=now,
-                points=1000
-            )
-            db.session.add(user)
-            db.session.flush()
-            user.last_payout = now
-            ph = PointHistory(user_id=user.id, change_type='signup', amount=1000,
-                             balance_after=1000, description='SNS 회원가입 지급')
-            db.session.add(ph)
-            db.session.commit()
-
-    session.update({'user_id': user.id, 'username': user.username, 'role': user.role, 'email': user.email or '', 'real_name': user.real_name or ''})
-    now = datetime.now(timezone.utc)
-    user.last_login = now
-    if user.last_payout and (now - user.last_payout).days >= 30:
-        add_points(user.id, 1000, 'monthly', '30일 주기 물맑은머니 지급')
-        if 'village' in (user.managed_pages or ''):
-            add_points(user.id, 10000, 'village_monthly', '마을지기 활동지원금')
-        user.last_payout = now
-    elif not user.last_payout:
-        user.last_payout = now
-    db.session.commit()
-    next_url = request.args.get('next') or url_for('news.world_news')
-    if not next_url.startswith('/'):
-        next_url = url_for('news.world_news')
-    if not request.args.get('next'):
-        next_url = f'/user/{user.id}' if user.intro_page_enabled else '/intro'
-    return redirect(next_url)
+    return "<script>alert('SNS 로그인은 지원하지 않습니다. 이메일로 로그인해 주세요.'); location.href='/login';</script>"
 
 # --- [이메일 인증] ---
 @auth_bp.route('/verify-email/send', methods=['POST'])
@@ -531,7 +435,7 @@ def verify_email_send():
     sent = EmailService.send(
         user.email,
         '[함께사는양평] 이메일 인증을 완료해 주세요',
-        f'{user.real_name or user.username}님,\n\n아래 링크를 클릭하면 이메일 인증이 완료됩니다:\n\n{verify_url}\n\n인증 후 게시글 작성, 투표 등 모든 기능을 이용하실 수 있습니다.\n\n감사합니다.\n함께사는양평 드림'
+        f'{user.email or user.username}님,\n\n아래 링크를 클릭하면 이메일 인증이 완료됩니다:\n\n{verify_url}\n\n인증 후 게시글 작성, 투표 등 모든 기능을 이용하실 수 있습니다.\n\n감사합니다.\n함께사는양평 드림'
     )
     if sent:
         return jsonify({'status': 'success', 'msg': '인증 이메일을 발송했습니다. 메일함을 확인해 주세요.'})
@@ -597,7 +501,7 @@ def api_login():
         EmailService.send(
             u.email or login_id,
             '[함께사는양평] 로그인 알림',
-            f"{u.real_name or u.username}님,\n\n함께사는양평에 로그인 하셨습니다. 확인차 연락 드립니다.\n로그인 시각: {login_time}\n\n본인이 아닌 로그인이라면 비밀번호를 변경해 주세요.\n문의: yp@unocum.kr",
+            f"{u.email or u.username}님,\n\n함께사는양평에 로그인 하셨습니다. 확인차 연락 드립니다.\n로그인 시각: {login_time}\n\n본인이 아닌 로그인이라면 비밀번호를 변경해 주세요.\n문의: yp@unocum.kr",
         )
     except Exception as e:
         current_app.logger.warning(f'login alert email failed: {e}')
@@ -706,12 +610,17 @@ def api_register():
         return jsonify({'status': 'error', 'msg': '이메일 인증을 먼저 완료해 주세요.'}), 400
     password_hash = data.get('password_hash', '')
     password = data.get('password', '')
-    real_name = data.get('real_name', '')
     username = data.get('username', '').strip()
     if username and User.query.filter_by(username=username).first():
-        return jsonify({'status': 'error', 'msg': '이미 사용 중인 별명입니다.'}), 400
+        return jsonify({'status': 'error', 'msg': '이미 사용 중인 계정이름입니다.'}), 400
     if not username and verified_email:
-        username = verified_email.split('@')[0][:20]
+        base = verified_email.split('@')[0][:20]
+        username = base
+        import random as _rnd
+        while username == base and User.query.filter_by(username=username).first():
+            username = f"{base}{_rnd.randint(100, 999)}"
+        while User.query.filter_by(username=username).first():
+            username = f"{base}{_rnd.randint(100, 9999)}"
     town = data.get('town', '')
     village = data.get('village', '')
     home_address = data.get('home_address', '')
@@ -723,7 +632,7 @@ def api_register():
     hashed_pw = generate_password_hash(password_hash) if password_hash else generate_password_hash(password)
     is_v2 = bool(password_hash)
     now = datetime.now(timezone.utc)
-    new_user = User(username=username, password=hashed_pw, real_name=real_name, email=verified_email, email_verified=True, town=town, village=village, reg_town=town, reg_village=village, curr_town=town, curr_village=village, curr_address=home_address[:200] if home_address else None, office_address=office_address[:200] if office_address else None, is_neighbor=False, location_updated_at=now, points=1000, password_v2=is_v2)
+    new_user = User(username=username, password=hashed_pw, email=verified_email, email_verified=True, town=town, village=village, reg_town=town, reg_village=village, curr_town=town, curr_village=village, curr_address=home_address[:200] if home_address else None, office_address=office_address[:200] if office_address else None, is_neighbor=False, location_updated_at=now, points=1000, password_v2=is_v2)
     profile_img = request.files.get('profile_img')
     if profile_img and profile_img.filename:
         import os

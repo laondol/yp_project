@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import type { ChatRoom, ChatMessage } from '../lib/types'
 import Loading from '../components/common/Loading'
 
-interface Friend { id: number; username: string; real_name?: string }
+interface Friend { id: number; username: string; email?: string; real_name?: string }
 
 function escapeHtml(text: string): string {
   const div = document.createElement('div')
@@ -246,7 +246,7 @@ export default function ChatPage() {
                           onChange={() => toggleFriend(f.id)}
                         />
                         <label className="form-check-label" htmlFor={`friend-${f.id}`}>
-                          {f.real_name || f.username}
+                          {f.email || f.username}
                         </label>
                       </div>
                     ))}

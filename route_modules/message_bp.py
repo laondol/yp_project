@@ -2,6 +2,7 @@ from flask import Blueprint, render_template, request, redirect, url_for, jsonif
 from models import db, Message, User, Friend, PointHistory, BlockedEmail, EmailRateLimit
 from datetime import datetime, timedelta
 import re
+from route_modules.common import view_email
 
 message_bp = Blueprint('message', __name__)
 
@@ -127,7 +128,7 @@ def _display_name(user, role=None, is_notice=False):
         return 'admin@unocum.kr'
     if not user:
         return '알수없음'
-    return user.email or user.username or '알수없음'
+    return view_email(user.id, user.email) or user.username or '알수없음'
 
 
 def _is_notice_root(root, uid, friend_ids):
@@ -155,7 +156,7 @@ def _msg_row_dict(m, uid, friend_ids):
         'id': m.id, 'subject': m.subject, 'content': m.content,
         'sender_id': m.sender_id, 'receiver_id': m.receiver_id,
         'sender_name': _display_name(sender, m.sender_role, m.is_notice),
-        'sender_username': sender.email if sender else None,
+        'sender_username': view_email(sender.id, sender.email) if sender else None,
         'sender_role': m.sender_role, 'letter_type': m.letter_type,
         'receiver_name': _display_name(receiver, receiver.role if receiver else None),
         'is_read': m.is_read, 'is_public': m.is_public,
@@ -210,7 +211,7 @@ def api_message_users():
     ).all()
     friend_ids += [f.requester_id for f in friends2]
     users = User.query.filter(User.id.in_(friend_ids)).all() if friend_ids else []
-    result = [{'id': u.id, 'username': u.email, 'real_name': u.real_name, 'town': u.town, 'village': u.village} for u in users]
+    result = [{'id': u.id, 'username': view_email(u.id, u.email) or u.username, 'real_name': '', 'town': u.town, 'village': u.village} for u in users]
     return jsonify(result)
 
 
@@ -229,7 +230,7 @@ def _sent_entry_dict(uid, rows):
         'is_read': any_read,
         'is_notice': any(r.is_notice for r in rows),
         'sender_name': _display_name(User.query.get(uid)),
-        'sender_username': (User.query.get(uid).email if User.query.get(uid) else None),
+        'sender_username': (view_email(uid, User.query.get(uid).email) if User.query.get(uid) else None),
         'sender_is_friend': True,
         'created_at': (max(r.created_at for r in rows) if any_read else latest.created_at).isoformat() if (latest.created_at) else None,
         'read_at': max((r.read_at for r in rows if r.read_at), default=None).isoformat() if any(r.read_at for r in rows) else None,
@@ -538,7 +539,7 @@ def api_message_thread(msg_id):
             'id': r.id, 'subject': r.subject, 'content': r.content,
             'sender_id': r.sender_id,
             'sender_name': _display_name(sender_user, r.sender_role, r.is_notice),
-            'sender_username': sender_user.email if sender_user else None,
+            'sender_username': view_email(sender_user.id, sender_user.email) if sender_user else None,
             'sender_role': r.sender_role,
             'sender_is_admin': bool(r.is_notice),
             'sender_is_friend': r.sender_id in friend_ids,
@@ -690,7 +691,7 @@ def api_message_send():
                     continue
                 msg = Message(
                     sender_id=uid,
-                    sender_name=session.get('real_name', session['username']),
+                    sender_name=session.get('email') or session['username'],
                     sender_role=session.get('role', 'user'),
                     receiver_id=receiver.id,
                     subject='' if reply_to_id else subject,  # 회신/답신은 제목 없음
@@ -713,7 +714,7 @@ def api_message_send():
     email_sent = False
     if has_external:
         from services.email_service import EmailService
-        sender_name = session.get('real_name', session.get('username', '함께사는양평'))
+        sender_name = session.get('email') or session.get('username', '함께사는양평')
         email_subject = subject or f'[함께사는양평] {sender_name}님의 편지'
         email_body = (
             f"보낸 사람: {sender_name}\n"
@@ -979,7 +980,7 @@ def send_message_global():
 
         msg = Message(
             sender_id=uid,
-            sender_name=session.get('real_name', session['username']),
+            sender_name=session.get('email') or session['username'],
             sender_role=session.get('role', 'user'),
             receiver_id=receiver.id,
             subject=subject,
@@ -1030,7 +1031,7 @@ def send_message_admin():
 
         msg = Message(
             sender_id=uid,
-            sender_name=session.get('real_name', session['username']),
+            sender_name=session.get('email') or session['username'],
             sender_role=session.get('role', 'user'),
             receiver_id=INTERNAL_ADMIN_ID,  # 내부 관리자 ID로 발송
             subject=subject,
@@ -1072,12 +1073,12 @@ def send_message_village_leader():
             return jsonify({'error': '공개편지 동의가 필요합니다.'}), 400
         if not agree_conduct:
             return jsonify({'error': '행동강령 동의가 필요합니다.'}), 400
-        if not _deduct_points(uid, LETTER_COST, f'편지 발송 → 마을지기({village_leader.real_name or village_leader.username})'):
+        if not _deduct_points(uid, LETTER_COST, f'편지 발송 → 마을지기({village_leader.email or village_leader.username})'):
             return jsonify({'error': '坭 차감에 실패했습니다.'}), 400
 
         msg = Message(
             sender_id=uid,
-            sender_name=session.get('real_name', session['username']),
+            sender_name=session.get('email') or session['username'],
             sender_role=session.get('role', 'user'),
             receiver_id=village_leader.id,
             subject=subject,
@@ -1228,7 +1229,7 @@ def friends_list():
     f2 = Friend.query.filter_by(receiver_id=uid, status='accepted').all()
     ids = set([f.receiver_id for f in f1] + [f.requester_id for f in f2])
     users = User.query.filter(User.id.in_(ids)).all() if ids else []
-    return jsonify({'friends': [{'id': u.id, 'name': u.real_name or u.username, 'town': u.town or '', 'village': u.village or ''} for u in users]})
+    return jsonify({'friends': [{'id': u.id, 'name': view_email(u.id, u.email) or u.username, 'town': u.town or '', 'village': u.village or ''} for u in users]})
 
 @message_bp.route('/message/admin/pending')
 def admin_pending_letters():

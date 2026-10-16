@@ -2,7 +2,7 @@ from flask import Blueprint, render_template, request, redirect, url_for, jsonif
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import or_
 from models import db, User, ShareReport, VillageWish, VillageBroadcast, ContentPermission, Post, Message, VillageCache, VillagePage, VillageEvent, VillageEventAttendee, VillageEventChat, VillageEventChatVote, VillageEventFile, StoreInfo, NewsArticle, VillagePlace, VillagePlaceCategory, VillagePlaceReport
-from route_modules.common import has_page_access
+from route_modules.common import has_page_access, view_email
 from services.geocode import haversine
 
 village_bp = Blueprint('village', __name__)
@@ -119,7 +119,7 @@ def village_message_all():
     count = 0
     for r in receivers:
         try:
-            msg = Message(sender_id=uid, sender_name=user.real_name or user.username,
+            msg = Message(sender_id=uid, sender_name=user.email or user.username,
                 receiver_id=r.id, subject=subject, content=content,
                 attachment=attachment_path, is_notice=True)
             db.session.add(msg)
@@ -176,7 +176,7 @@ def village_jin_verify(member_id):
     member.is_verified_resident = True
     member.jin_verified_at = datetime.now()
     db.session.commit()
-    return jsonify({"status":"success","msg":f"{member.real_name or member.username}님 진 인증 완료"})
+    return jsonify({"status":"success","msg":f"{view_email(member.id, member.email) or member.username}님 진 인증 완료"})
 
 @village_bp.route('/village/register-member', methods=['POST'])
 def village_register_member():
@@ -469,7 +469,7 @@ def village_event_chat(event_id):
         pass
     if blocked:
         return jsonify({"status":"blocked","msg":"AI가 부적절한 메시지로 판단했습니다."})
-    chat = VillageEventChat(event_id=event_id, user_id=uid, author=user.real_name or user.username, message=msg, msg_type=msg_type)
+    chat = VillageEventChat(event_id=event_id, user_id=uid, author=user.email or user.username, message=msg, msg_type=msg_type)
     db.session.add(chat)
     db.session.commit()
     return jsonify({"status":"success"})
@@ -490,12 +490,12 @@ def village_event_chats(event_id):
         votes = VillageEventChatVote.query.filter(VillageEventChatVote.chat_id.in_([c.id for c in chats]), VillageEventChatVote.user_id == uid).all()
         my_votes = {v.chat_id: v.vote for v in votes}
     answerer_ids = {c.answered_by for c in chats if c.answered_by}
-    answerers = {u.id: (u.real_name or u.username) for u in User.query.filter(User.id.in_(answerer_ids or [0])).all()}
+    answerers = {u.id: (view_email(u.id, u.email) or u.username) for u in User.query.filter(User.id.in_(answerer_ids or [0])).all()}
     ev = VillageEvent.query.get_or_404(event_id)
     can_answer = has_page_access('village') or _is_presenter(event_id, uid)
     return jsonify({
         'chats': [{
-            'id': c.id, 'author': c.author, 'message': c.message, 'msg_type': c.msg_type or '',
+            'id': c.id, 'author': (view_email(c.user_id, c.author) if c.author and '@' in c.author else c.author), 'message': c.message, 'msg_type': c.msg_type or '',
             'like_count': c.like_count or 0, 'dislike_count': c.dislike_count or 0,
             'my_vote': my_votes.get(c.id, ''),
             'answer': c.answer, 'answerer': answerers.get(c.answered_by, ''),
@@ -658,7 +658,7 @@ def village_event_message(event_id):
     count = 0
     for r in receivers:
         if r.id == uid: continue
-        msg = Message(sender_id=uid, sender_name=user.real_name or user.username,
+        msg = Message(sender_id=uid, sender_name=user.email or user.username,
             receiver_id=r.id, subject=subject, content=msg_content, is_notice=True)
         db.session.add(msg)
         count += 1
@@ -714,7 +714,8 @@ def api_village_dashboard():
         "village_ris": village_ris,
         "member_count": member_count,
         "members": [{
-            "id": m.id, "real_name": m.real_name or '-', "email": m.email,
+            "id": m.id, "real_name": m.real_name or '-', "email": view_email(m.id, m.email),
+            "username": m.username or '',
             "town": m.town or '', "village": m.village or '',
             "is_verified_resident": m.is_verified_resident,
             "jin_verified_at": m.jin_verified_at.isoformat() if m.jin_verified_at else None,
@@ -765,7 +766,7 @@ def api_village_feed():
                 "id": bc.id,
                 "subject": bc.subject,
                 "content": bc.content,
-                "sender_name": sender.real_name or sender.username if sender else '',
+                "sender_name": view_email(sender.id, sender.email) or sender.username if sender else '',
                 "attachment": bc.attachment,
                 "created_at": bc.created_at.isoformat() if bc.created_at else None,
             })
@@ -837,7 +838,7 @@ def content_permissions_pending():
         result.append({
             "id": cp.id, "share_id": cp.share_id, "post_id": cp.post_id,
             "share_title": share.title if share else '',
-            "requester_name": requester.real_name or requester.username if requester else '',
+            "requester_name": view_email(requester.id, requester.email) or requester.username if requester else '',
             "message": cp.message, "status": cp.status,
             "created_at": cp.created_at.isoformat() if cp.created_at else None,
         })
@@ -1187,9 +1188,9 @@ def _place_public(p):
         "description": p.description, "story": p.story, "open_hr": p.open_hr,
         "tel": p.tel, "website": p.website, "media": media, "tags": p.tags,
         "status": p.status, "submitted_by": p.submitted_by,
-        "submitted_name": (sub.real_name or sub.username) if sub else '',
+        "submitted_name": (view_email(sub.id, sub.email) or sub.username) if sub else '',
         "approved_by": p.approved_by,
-        "approved_name": (appr.real_name or appr.username) if appr else '',
+        "approved_name": (view_email(appr.id, appr.email) or appr.username) if appr else '',
         "created_at": p.created_at.isoformat() if p.created_at else None,
         "updated_at": p.updated_at.isoformat() if p.updated_at else None,
     }
@@ -1436,7 +1437,7 @@ def village_event_file_upload(event_id):
     user = User.query.get(uid)
     f = VillageEventFile(
         event_id=event_id, uploader_id=uid,
-        uploader_name=(user.real_name or user.username) if user else '',
+        uploader_name=(view_email(user.id, user.email) or user.username) if user else '',
         filename=file.filename, file_path=url_path,
         file_size=request.content_length or 0,
     )

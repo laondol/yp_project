@@ -49,7 +49,7 @@ export default function LegalSchedule() {
   const { user: me } = useAuth()
   useEffect(() => {
     if (me && me.id) {
-      if (!name) setName(me.real_name || (me as any).username || '')
+      if (!name) setName(me.email || (me as any).username || '')
       if (!email) setEmail(me.email || '')
     }
   }, [me])

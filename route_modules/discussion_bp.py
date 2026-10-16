@@ -6,6 +6,7 @@ from models import (
 )
 from datetime import datetime, timedelta
 import json
+from route_modules.common import view_email
 
 discussion_bp = Blueprint('discussion', __name__)
 
@@ -135,14 +136,14 @@ def api_get_proposal(proposal_id):
         if u:
             thread_participants.append({
                 'id': u.id,
-                'name': u.real_name or u.username,
+                'name': view_email(u.id, u.email) or u.username,
             })
 
     return jsonify({
         'id': p.id,
         'thread_root_id': p.thread_root_id,
         'thread_subject': thread_root.subject if thread_root else '',
-        'proposed_by': proposer.real_name or proposer.username if proposer else '',
+        'proposed_by': (view_email(proposer.id, proposer.email) or proposer.username) if proposer else '',
         'required_agree_count': p.required_agree_count,
         'status': p.status,
         'voting_end_at': p.voting_end_at.isoformat() if p.voting_end_at else None,
@@ -346,7 +347,7 @@ def api_list_rooms():
             'id': r.id,
             'topic': r.topic,
             'status': r.status,
-            'created_by': creator.real_name or creator.username if creator else '',
+            'created_by': (view_email(creator.id, creator.email) or creator.username) if creator else '',
             'end_at': r.end_at.isoformat() if r.end_at else None,
             'message_count': msg_count,
             'participant_count': part_count,
@@ -378,7 +379,7 @@ def api_get_room(room_id):
         u = User.query.get(p.user_id)
         participants.append({
             'id': u.id if u else 0,
-            'name': u.real_name or u.username if u else '',
+            'name': (view_email(u.id, u.email) or u.username) if u else '',
             'role': p.role,
             'joined_at': p.joined_at.isoformat() if p.joined_at else None,
         })
@@ -392,7 +393,7 @@ def api_get_room(room_id):
             letter_info = {
                 'id': root.id,
                 'subject': root.subject,
-                'sender': sender.real_name or sender.username if sender else '',
+                'sender': (view_email(sender.id, sender.email) or sender.username) if sender else '',
                 'created_at': root.created_at.isoformat() if root.created_at else None,
             }
 
@@ -406,7 +407,7 @@ def api_get_room(room_id):
         'summary_confirmed': room.summary_confirmed,
         'letter_root_id': room.letter_root_id,
         'letter_info': letter_info,
-        'creator': creator.real_name or creator.username if creator else '',
+        'creator': (view_email(creator.id, creator.email) or creator.username) if creator else '',
         'participants': participants,
         'created_at': room.created_at.isoformat() if room.created_at else None,
     })
@@ -496,7 +497,7 @@ def api_list_messages(room_id):
         result.append({
             'id': m.id,
             'user_id': m.user_id,
-            'user_name': user.real_name or user.username if user else '',
+            'user_name': (view_email(user.id, user.email) or user.username) if user else '',
             'content': m.content,
             'content_type': m.content_type,
             'reply_to_id': m.reply_to_id,
@@ -553,7 +554,7 @@ def api_send_message(room_id):
         'message': {
             'id': msg.id,
             'user_id': uid,
-            'user_name': user.real_name or user.username if user else '',
+            'user_name': (view_email(user.id, user.email) or user.username) if user else '',
             'content': msg.content,
             'content_type': msg.content_type,
             'reply_to_id': msg.reply_to_id,
@@ -658,7 +659,7 @@ def api_generate_summary(room_id):
     chat_log = []
     for m in msgs:
         user = User.query.get(m.user_id)
-        name = user.real_name or user.username if user else '알수없음'
+        name = (view_email(user.id, user.email) or user.username) if user else '알수없음'
         chat_log.append(f'{name}: {m.content[:200]}')
 
     prompt = f'''다음은 "{room.topic}" 주제로 진행된 토론 내용입니다.
@@ -721,7 +722,7 @@ def api_confirm_summary(room_id):
         if p.user_id != uid:  # 개설자 제외
             msg = Message(
                 sender_id=uid,
-                sender_name=session.get('real_name', session['username']),
+                sender_name=session.get('email') or session['username'],
                 sender_role=session.get('role', 'user'),
                 receiver_id=p.user_id,
                 subject=f'[토론 요약] {room.topic}',

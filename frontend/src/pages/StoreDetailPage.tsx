@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom'
 import Loading from '../components/common/Loading'
+import AuthorName from '../components/AuthorName'
+import { useAuth } from '../contexts/AuthContext'
 
 interface Comment { user: string; text: string; date: string }
 interface PhotoVote {
@@ -16,6 +18,7 @@ interface StoreData {
   ai_profile?: string | null; lat?: number; lng?: number
   business_hours?: string | null; reservation_url?: string | null
   detail_info?: string | null; last_share_at?: string | null
+  member_basic?: { titles: string[]; summary: string; content_count: number; last_share_at?: string | null } | null
   can_edit?: boolean
   manager?: ManagerInfo | null
   gallery: PhotoVote[]
@@ -25,6 +28,7 @@ interface StoreData {
 }
 
 export default function StoreDetailPage() {
+  const { user } = useAuth()
   const { storeName } = useParams<{ storeName: string }>()
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
@@ -186,6 +190,27 @@ export default function StoreDetailPage() {
             <a href={data.store_link} target="_blank" rel="noopener noreferrer"
               className="small text-decoration-none" style={{ color: '#198754' }}>🔗 가게 보기</a>
           )}
+          {/* 회원 공유 기반 기본정보 (StoreInfo 없이 위치로 묶인 경우) */}
+          {!data.store_info_id && data.member_basic && (
+            <div className="mt-2 p-2 rounded small" style={{ background: '#fff8e6', border: '1px solid #ffe69c' }}>
+              <div className="fw-bold mb-1" style={{ color: '#997404' }}>📋 회원 공유 기반 정보 ({data.member_basic.content_count}건)</div>
+              {data.member_basic.titles.length > 0 && (
+                <div className="mb-1">
+                  {data.member_basic.titles.map((t, i) => (
+                    <div key={i}>· {t}</div>
+                  ))}
+                </div>
+              )}
+              {data.member_basic.summary && (
+                <div className="text-muted">{data.member_basic.summary}</div>
+              )}
+              {!data.store_info_id && (
+                <div className="text-muted mt-1" style={{ fontSize: '0.75rem' }}>
+                  아직 시설 정보가 등록되지 않은 위치입니다. 첫 가게명 입력 또는 시설 책임자 지정으로 시설이 구성됩니다.
+                </div>
+              )}
+            </div>
+          )}
           {/* AI 통합 프로필 */}
           {data.ai_profile && (
             <div className="mt-2 p-2 rounded small" style={{ background: '#f0f9f4', border: '1px solid #d4edda' }}>
@@ -232,7 +257,11 @@ export default function StoreDetailPage() {
                     {g.meal_note && <div className="small text-success">✅ {g.meal_note}</div>}
                     {g.description && <div className="small text-muted text-truncate">{g.description}</div>}
                     <div className="d-flex justify-content-between small text-muted mt-1">
-                      <span>{g.author}</span>
+                      {(g as any).author_email ? (
+                        (g as any).user_id === user?.id
+                          ? <span style={{ fontStyle: 'normal' }}>{(g as any).author_email}</span>
+                          : <AuthorName name={g.author} email={(g as any).author_email} userId={(g as any).user_id} />
+                      ) : <span>{g.author}</span>}
                       <span>{g.created_at}</span>
                     </div>
                     <div className="d-flex gap-1 mt-1">

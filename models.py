@@ -12,7 +12,7 @@ class User(db.Model):
     # 이웃 자치 데이터
     real_name = db.Column(db.String(50))
     phone = db.Column(db.String(20))
-    email = db.Column(db.String(100))                    # 이메일 (인증용)
+    email = db.Column(db.String(100), unique=True)       # 이메일 (고유 ID)
     email_verified = db.Column(db.Boolean, default=False)
     town = db.Column(db.String(50))                      # 읍/면 (현재)
     village = db.Column(db.String(50))                   # 리 (현재)
@@ -394,6 +394,7 @@ class ShareReport(db.Model):
     store_suggestion_id = db.Column(db.Integer, db.ForeignKey('store_suggestion.id'), nullable=True)
     sub_category = db.Column(db.String(50), default='')
     meal_note = db.Column(db.Text)                           # 경험 기록 (음식/활동/경험)
+    store_name = db.Column(db.String(100))                   # 회원이 입력한 시설/가게명 (기본 정보)
     promotion_allowed = db.Column(db.Boolean, default=False)
     auto_sent = db.Column(db.Boolean, default=False)        # True=자동 발송(접수 버튼 미사용), False=수동 접수
     rejected_at = db.Column(db.DateTime)                    # 반려 시각 (30일 후 로컬 보관 이동 기준)
