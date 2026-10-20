@@ -135,11 +135,9 @@ def moderate_report(report):
             report.status = 'pending_person'
             report.ai_opinion = 'AI: 인물 포함으로 보류(작성자 동의 필요)'
             print(f"[WORKER] #{report.id} person → pending_person (hold)")
-            _notify_person(report)
         else:
             report.status = 'flagged'
             report.ai_opinion = f'AI: 이미지 문제({image_cat})로 보류'
-            _notify_hold(report, image_reason or f'이미지 문제({image_cat})')
             print(f"[WORKER] #{report.id} {image_cat} → flagged (hold)")
         return 'hold'
 
@@ -151,7 +149,6 @@ def moderate_report(report):
         report.moderation_reason = '본문에 개인정보 추정 문구 포함'
         report.status = 'pending'
         report.ai_opinion = 'AI: 본문에 개인정보 추정 문구가 있어 보류'
-        _notify_hold(report, '본문에 개인정보 추정 문구 포함')
         print(f"[WORKER] #{report.id} sensitive text → pending (hold)")
         return 'hold'
 
@@ -187,7 +184,6 @@ def moderate_report(report):
     report.moderation_reason = 'AI 검토 후 보류(관리자/책임자 확인 권장)'
     report.status = 'pending'
     report.ai_opinion = f'AI: 카테고리 "{category}"는 확인이 필요하여 보류'
-    _notify_hold(report, 'AI 검토 후 보류(관리자/책임자 확인 권장)')
     print(f"[WORKER] #{report.id} held ({category}) → pending (hold)")
     return 'hold'
 
