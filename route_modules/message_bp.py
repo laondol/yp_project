@@ -123,7 +123,7 @@ def _batch_rows(rows, key):
 
 
 def _display_name(user, role=None, is_notice=False):
-    """탭/스레드 표시 아이디: 공지(시스템·관리메뉴 발신)는 admin@unocum.kr, 그 외 로그인 이메일"""
+    """탭/스레드 표시 아이디: 공지는 발신자 관계없이 admin@unocum.kr, 그 외 로그인 이메일(마스킹)"""
     if is_notice:
         return 'admin@unocum.kr'
     if not user:

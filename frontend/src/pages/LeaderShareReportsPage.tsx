@@ -78,7 +78,7 @@ export default function LeaderShareReportsPage() {
 
   if (authLoading || loading) return <Loading />
   if (error) return <ErrorMessage message={error} onRetry={load} />
-  if (!user || (user.role !== 'admin' && user.role !== 'leader' && !user.share_mod_approved)) {
+  if (!user || (user.role !== 'admin' && user.role !== 'leader' && !(user.managed_pages || []).includes('admin_share'))) {
     return <ErrorMessage message="접근 권한이 없습니다." />
   }
 

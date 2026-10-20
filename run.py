@@ -175,10 +175,6 @@ def create_app():
                     with db.engine.connect() as _conn:
                         _conn.execute(_sa_text('ALTER TABLE share_report ADD COLUMN rejected_at TIMESTAMP'))
                         _conn.commit()
-            if 'user' in _tbls and 'share_mod_approved' not in [c['name'] for c in _inspector.get_columns('user')]:
-                with db.engine.connect() as _conn:
-                    _conn.execute(_sa_text('ALTER TABLE "user" ADD COLUMN share_mod_approved BOOLEAN DEFAULT FALSE'))
-                    _conn.commit()
             if 'post' in _tbls:
                 _pcols = [c['name'] for c in _inspector.get_columns('post')]
                 if 'latitude' not in _pcols:

@@ -53,7 +53,7 @@ const truncate = (text: string | null | undefined, max: number) => {
 
 function DetailModal({ r, onClose }: { r: ShareReport; onClose: () => void }) {
   const { user } = useAuth()
-  const isMgr = !!user && (user.role === 'admin' || user.role === 'leader' || !!(user as any).share_mod_approved)
+  const isMgr = !!user && (user.role === 'admin' || user.role === 'leader' || (user.managed_pages || []).includes('admin_share'))
   const allImages: string[] = []
   if (r.image_path) allImages.push(r.image_path)
   if (r.extra_images) {

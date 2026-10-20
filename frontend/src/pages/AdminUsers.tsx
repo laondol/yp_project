@@ -15,7 +15,6 @@ interface AdminUser {
   is_verified_resident: boolean
   jin_verified_at?: string | null
   verified_method?: string | null
-  share_mod_approved?: boolean
   has_did: boolean
   has_vc: boolean
   managed_pages: string

@@ -261,11 +261,13 @@ function ThreadView({ data, myId, onRead, onRefresh, onReply }: {
               return (
                 <div key={m.id} className="px-3 py-2" style={{ borderTop: '1px solid #f0f0f0' }}>
                   <div className="d-flex justify-content-between align-items-center mb-1">
-                    <UserIdLabel
-                      name={m.sender_name} userId={m.sender_id}
-                      isFriend={m.sender_is_friend || m.sender_id === myId || data.friend_ids.includes(m.sender_id)}
-                      myId={myId} unread={unread} admin={m.sender_is_admin}
-                    />
+                    {m.sender_is_admin ? <span /> : (
+                      <UserIdLabel
+                        name={m.sender_name} userId={m.sender_id}
+                        isFriend={m.sender_is_friend || m.sender_id === myId || data.friend_ids.includes(m.sender_id)}
+                        myId={myId} unread={unread} admin={m.sender_is_admin}
+                      />
+                    )}
                     <small className="text-muted">{m.created_at ? formatKST(m.created_at) : ''}</small>
                   </div>
                   <div className="letter-body small" style={{ overflowWrap: 'anywhere', lineHeight: 1.75 }}
@@ -601,7 +603,7 @@ export default function MessageInbox() {
               <div className="card-body p-3">
                 <div className="d-flex justify-content-between align-items-start">
                   <div className="d-flex align-items-center gap-2 flex-grow-1" style={{ minWidth: 0 }}>
-                    {!isSent && (
+                    {!isSent && !m.is_notice && (
                       <UserIdLabel
                         name={m.sender_name} userId={m.sender_id}
                         isFriend={m.sender_is_friend} myId={myId}

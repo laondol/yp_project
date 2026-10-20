@@ -70,7 +70,6 @@ def api_admin_users():
         'is_verified_resident': u.is_verified_resident,
         'jin_verified_at': u.jin_verified_at.strftime('%Y-%m-%d') if getattr(u, 'jin_verified_at', None) else None,
         'verified_method': _vm(u),
-        'share_mod_approved': bool(getattr(u, 'share_mod_approved', False)),
         'managed_pages': u.managed_pages,
         'has_did': DIDDocument.query.filter_by(user_id=u.id).first() is not None,
         'has_vc': VerifiableCredential.query.filter_by(subject_user_id=u.id, revoked=False).first() is not None,
@@ -132,7 +131,7 @@ def api_admin_alerts():
 def api_admin_share_reports():
     me = User.query.get(session.get('user_id')) if session.get('user_id') else None
     role = session.get('role') or (me.role if me else '')
-    is_mgr = role in ('admin', 'leader') or bool(me and me.share_mod_approved)
+    is_mgr = role in ('admin', 'leader') or bool(me and 'admin_share' in (me.managed_pages or '').split(','))
     if not is_mgr: return jsonify({'error': '권한 없음'}), 403
     from models import ShareReport
     from sqlalchemy import case as sa_case
@@ -499,10 +498,6 @@ def admin_page_managers():
         action = request.form.get('action','toggle')
         user = User.query.get(uid)
         if user:
-            if page == '__share_mod__':
-                user.share_mod_approved = not user.share_mod_approved
-                db.session.commit()
-                return jsonify({'status': 'success', 'share_mod_approved': user.share_mod_approved})
             pages = (user.managed_pages or '').split(',')
             had_village = 'village' in pages
             if page == 'village' and page not in pages and not user.is_verified_resident:
@@ -578,7 +573,6 @@ def api_admin_page_managers():
             'is_verified_resident': u.is_verified_resident,
             'jin_verified_at': u.jin_verified_at.strftime('%Y-%m-%d') if getattr(u, 'jin_verified_at', None) else None,
             'verified_method': 'jin' if getattr(u, 'jin_verified_at', None) else ('neighbor' if u.is_verified_resident else None),
-            'share_mod_approved': bool(getattr(u, 'share_mod_approved', False)),
             'managed_pages': u.managed_pages or '',
         } for u in admins],
         'all_pages': all_pages,

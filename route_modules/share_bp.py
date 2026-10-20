@@ -131,7 +131,8 @@ def _send_auto_confirm_notice(report):
             subject='공유 자동 접수 확인 요청',
             content='회원님의 공유글(#{0})이 10초 자동 접수되어 보관 중입니다.\n'
                     '내용 확인 후 "심사받기" 버튼으로 확인해 주세요. 확인 전에는 공개되지 않습니다.\n'
-                    '링크: https://yp.ddabong.com/share/detail/' + str(report.id)
+                    '링크: https://yp.ddabong.com/share/detail/' + str(report.id),
+            is_notice=True
         ))
         db.session.commit()
     except Exception:
@@ -196,12 +197,13 @@ def _send_auto_saved_notice(report, created_new=False):
 
 
 def _share_mgr():
-    """공유마당 운영자 판정: 책임자(leader) 전체, 또는 공유마당 권한(share_mod_approved)이 있는 관리자/마을지기"""
+    """공유마당 운영자 판정: 관리자/책임자 자동, 그 외는 페이지목록의 '공유(관리)'(admin_share) 권한 보유자"""
     u = User.query.get(session.get('user_id')) if session.get('user_id') else None
     role = session.get('role') or (u.role if u else '')
-    if role == 'leader':
+    if role in ('admin', 'leader'):
         return True
-    return bool(u and u.share_mod_approved)
+    pages = (u.managed_pages or '').split(',') if u else []
+    return 'admin_share' in pages
 
 
 def _serve_react_share():
@@ -1789,7 +1791,6 @@ def api_me():
                 "curr_town": user.curr_town or '', "curr_village": user.curr_village or '',
                 "login_village": user.login_village or '',
 "managed_pages": (user.managed_pages or '').split(','),
-                "share_mod_approved": bool(getattr(user, 'share_mod_approved', False)),
                 "office_latitude": user.office_latitude,
                 "office_longitude": user.office_longitude,
                 "office_address": user.office_address or '',

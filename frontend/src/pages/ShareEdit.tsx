@@ -37,7 +37,7 @@ export default function ShareEdit({ reportId: propId, onDone }: { reportId?: str
   const [me, setMe] = useState<any>(null)
   const [authorEmail, setAuthorEmail] = useState('')
   const [emailCheck, setEmailCheck] = useState<{ found: boolean; name?: string; email?: string } | null>(null)
-  const isMgr = !!me && (me.role === 'admin' || me.role === 'leader' || !!me.share_mod_approved)
+  const isMgr = !!me && (me.role === 'admin' || me.role === 'leader' || (me.managed_pages || []).includes('admin_share'))
 
   // 메뉴 목록
   const [storeMenus, setStoreMenus] = useState<any[]>([])
