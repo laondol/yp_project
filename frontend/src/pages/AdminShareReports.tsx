@@ -34,12 +34,12 @@ interface ShareReport {
   updated_at: string
 }
 
-type StatusFilter = 'all' | 'pending' | 'approved' | 'rejected' | 'draft'
+type StatusFilter = 'all' | 'pending' | 'approved' | 'rejected'
 
 const statusBadge = (s: ShareReport['status']) => {
   if (s === 'pending') return <span className="badge bg-warning text-dark">승인대기</span>
   if (s === 'approved') return <span className="badge bg-success">승인완료</span>
-  if (s === 'draft') return <span className="badge bg-secondary">자동보관</span>
+  if (s === 'draft') return <span className="badge bg-warning text-dark">승인대기</span>
   if (s === 'pending_review') return <span className="badge bg-info text-dark">영상대기</span>
   if (s === 'pending_person') return <span className="badge bg-warning text-dark">인물확인</span>
   if (s === 'flagged') return <span className="badge bg-danger">차단</span>
@@ -91,7 +91,6 @@ function DetailModal({ r, onClose }: { r: ShareReport; onClose: () => void }) {
           {/* 상태/메타 */}
           <div className="d-flex flex-wrap gap-1 mb-3">
             {statusBadge(r.status)}
-            {r.auto_sent && <span className="badge bg-warning text-dark">자동보관</span>}
             {r.ai_danger_alert && <span className="badge bg-danger">⚠️ 위험</span>}
             {r.video_path && <span className="badge bg-info text-dark">🎬 동영상</span>}
             {r.drawing_path && <span className="badge bg-secondary">✏️ 그리기</span>}
@@ -119,7 +118,7 @@ function DetailModal({ r, onClose }: { r: ShareReport; onClose: () => void }) {
             </div>
           )}
 
-          {r.moderation_reason && (
+          {r.moderation_reason && (r.status === 'rejected' || r.status === 'flagged') && (
             <div className="small text-danger mb-3">🚫 반려 사유: {r.moderation_reason}</div>
           )}
 
@@ -178,7 +177,7 @@ export default function AdminShareReports() {
   const [reports, setReports] = useState<ShareReport[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [filter, setFilter] = useState<StatusFilter>('draft')
+  const [filter, setFilter] = useState<StatusFilter>('pending')
   const [search, setSearch] = useState('')
   const [busyId, setBusyId] = useState<number | null>(null)
   const [msg, setMsg] = useState<{ type: 'success' | 'danger'; text: string } | null>(null)
@@ -229,30 +228,11 @@ export default function AdminShareReports() {
     }
   }
 
-  const notify = async (id: number) => {
-    setBusyId(id)
-    setMsg(null)
-    try {
-      const res = await fetch(`/share-report/notify/${id}`, { method: 'POST' })
-      const data = await res.json()
-      if (data.status === 'success') {
-        flash('success', data.msg || `#${id} 작성자에게 안내 쪽지 발송`)
-      } else {
-        flash('danger', data.msg || '쪽지 발송 실패')
-      }
-    } catch {
-      flash('danger', '서버 연결 실패')
-    } finally {
-      setBusyId(null)
-    }
-  }
-
   const counts = useMemo(() => ({
     all: reports.length,
     pending: reports.filter(r => r.status === 'pending').length,
     approved: reports.filter(r => r.status === 'approved').length,
     rejected: reports.filter(r => r.status === 'rejected').length,
-    draft: reports.filter(r => r.status === 'draft').length,
   }), [reports])
 
   const filtered = useMemo(() => {
@@ -271,7 +251,6 @@ export default function AdminShareReports() {
     { key: 'pending', label: '승인대기' },
     { key: 'approved', label: '승인완료' },
     { key: 'rejected', label: '반려' },
-    { key: 'draft', label: '자동보관' },
   ]
 
   if (loading) return (
@@ -327,7 +306,6 @@ export default function AdminShareReports() {
                         </h6>
                         <div className="d-flex gap-1 flex-shrink-0">
                           {statusBadge(r.status)}
-                          {r.auto_sent && <span className="badge bg-warning text-dark" title="10초 자동 발송 - 작성자 확인 대기">📬 자동</span>}
                           {r.ai_danger_alert && <span className="badge bg-danger" title="AI 위험 신호">⚠️</span>}
                         </div>
                       </div>
@@ -375,7 +353,7 @@ export default function AdminShareReports() {
                         </div>
                       )}
 
-                      {r.moderation_reason && (
+                      {r.moderation_reason && (r.status === 'rejected' || r.status === 'flagged') && (
                         <div className="small text-danger mb-2">🚫 반려 사유: {truncate(r.moderation_reason, 60)}</div>
                       )}
 
@@ -395,11 +373,6 @@ export default function AdminShareReports() {
                       <div className="d-flex gap-1 mt-2">
                         <button className="btn btn-sm btn-outline-success flex-fill" onClick={() => setDetail(r)}>
                           👁 상세보기
-                        </button>
-                        <button className="btn btn-sm btn-outline-primary flex-fill" disabled={busyId === r.id}
-                          onClick={() => notify(r.id)}
-                          title="작성자에게 자동보관 안내 쪽지 보내기">
-                          {busyId === r.id ? '처리 중...' : '📨 쪽지'}
                         </button>
                         {r.status !== 'approved' && (
                           <button className="btn btn-sm btn-success flex-fill" disabled={busyId === r.id}

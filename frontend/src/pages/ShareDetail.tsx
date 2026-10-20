@@ -98,14 +98,6 @@ export default function ShareDetail() {
 
   if (!r) return <div className="text-center py-5"><div className="spinner-border" /></div>
 
-  const confirmAuto = () => {
-    if (!confirm('이 공유를 정식 심사받기 하시겠습니까? 확인 후 AI 검증이 시작됩니다.')) return
-    fetch(`/share-report/confirm-auto/${r!.id}`, { method: 'POST' })
-      .then(res => res.json())
-      .then(d => { alert(d.msg || '완료'); if (d.status === 'success') window.location.reload() })
-      .catch(() => alert('서버 오류'))
-  }
-
   const extraImages = r.extra_images ? r.extra_images.split(',').filter(Boolean) : []
   const catColor: Record<string, string> = { '사건': 'danger', '풍경': 'success', '맛집': 'warning' }
   const isAuthor = myId === r.user_id
@@ -134,20 +126,9 @@ export default function ShareDetail() {
 
       {isBlocked && isAuthor && (
         <div className="alert alert-warning small mb-3">
-          {r.auto_sent ? (
-            <>
-              📬 <strong>10초 자동 발송</strong>되어 비공개 보관 중인 콘텐츠입니다. 내용을 확인하신 후 아래 버튼을 눌러야 정식 심사가 진행됩니다. 확인 전에는 절대 공개되지 않습니다.
-              <div className="mt-2">
-                <button type="button" className="btn btn-sm btn-success fw-bold" onClick={confirmAuto}>내용 확인 후 심사받기</button>
-              </div>
-            </>
-          ) : (
-            <>
-              ⏳ <strong>검토 중</strong>인 콘텐츠입니다. 작성자 본인에게만 표시되며, 검열 완료 후 모든 회원에게 공개됩니다.
-              {r.moderation_at && (
-                <> 30일 동안 수정·보완되지 않으면 관리자에게 보류 상태로 유지됩니다. (보류일: {formatKST(r.moderation_at, { year: 'numeric', month: '2-digit', day: '2-digit' })})</>
-              )}
-            </>
+          ⏳ <strong>검토 중</strong>인 콘텐츠입니다. 작성자 본인에게만 표시되며, 검열 완료 후 모든 회원에게 공개됩니다.
+          {r.moderation_at && (
+            <> 30일 동안 수정·보완되지 않으면 관리자에게 보류 상태로 유지됩니다. (보류일: {formatKST(r.moderation_at, { year: 'numeric', month: '2-digit', day: '2-digit' })})</>
           )}
         </div>
       )}
@@ -235,7 +216,7 @@ export default function ShareDetail() {
             <div className="mt-3 d-flex gap-2">
               <a href={`/share/edit/${r.id}`} className="btn btn-sm btn-outline-primary">✏️ 수정</a>
               <button onClick={() => {
-                if (!confirm('정말 삭제하시겠습니까?')) return
+                if (!confirm('삭제한 글은 복원할 수 없습니다. 정말 삭제하시겠습니까?')) return
                 fetch(`/share-report/delete/${r.id}`, { method: 'POST' })
                   .then(r => r.json()).then(d => {
                     if (d.status === 'success') { alert('삭제되었습니다.'); window.location.href = '/share' }

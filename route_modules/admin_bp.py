@@ -136,7 +136,6 @@ def api_admin_share_reports():
     from models import ShareReport
     from sqlalchemy import case as sa_case
     order_prio = sa_case(
-        (ShareReport.status == 'draft', 0),
         (ShareReport.status == 'pending', 1),
         (ShareReport.status == 'pending_review', 2),
         (ShareReport.status == 'pending_person', 3),

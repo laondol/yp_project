@@ -20,14 +20,13 @@ interface ShareReport {
   ai_confidence: number
   ai_danger_alert: boolean
   status: 'pending' | 'approved' | 'rejected' | 'draft' | 'flagged' | 'pending_review' | 'pending_person'
-  auto_sent?: boolean
   created_at: string
 }
 
 const statusBadge = (s: ShareReport['status']) => {
   if (s === 'pending') return <span className="badge bg-warning text-dark">승인대기</span>
   if (s === 'approved') return <span className="badge bg-success">승인완료</span>
-  if (s === 'draft') return <span className="badge bg-secondary">자동보관</span>
+  if (s === 'draft') return <span className="badge bg-warning text-dark">승인대기</span>
   if (s === 'pending_review') return <span className="badge bg-info text-dark">영상대기</span>
   if (s === 'pending_person') return <span className="badge bg-warning text-dark">인물확인</span>
   if (s === 'flagged') return <span className="badge bg-danger">차단</span>

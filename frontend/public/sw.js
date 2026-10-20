@@ -59,46 +59,23 @@ async function syncQueue() {
   items.sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')))
   for (const it of items) {
     try {
-      let rid = it.reportId || null
-      if (it.files && it.files.length > 0) {
-        const fd = new FormData()
-        if (rid) fd.append('report_id', String(rid))
-        for (const f of it.files) {
-          const bf = new File([f.blob], f.name || `offline_${Date.now()}`, { type: f.blob && f.blob.type || 'application/octet-stream' })
-          fd.append(f.kind === 'video' ? 'video' : 'image', bf)
-        }
-        const res = await fetch('/share-report/auto-save', { method: 'POST', body: fd, credentials: 'include' })
-        const data = await res.json()
-        if (data.status !== 'success') throw new Error(data.msg || '자동보관 실패')
-        rid = data.report_id
-        it.reportId = rid
-        it.files = []
-        await dbPut(db, it)
+      // 구버전(자동보관 2단계) 큐: 이미 서버에 보관된 건은 승격 스크립트가 처리하므로 중복 접수 방지
+      if (it.reportId && (!it.files || it.files.length === 0)) { await dbDelete(db, it.key); continue }
+      const fd = new FormData()
+      fd.append('title', it.title || '')
+      fd.append('description', it.description || '')
+      if (it.yardEventId) fd.append('yard_event_id', it.yardEventId)
+      if (it.yardEventCategory) fd.append('yard_event_category', it.yardEventCategory)
+      if (it.lat && it.lon) { fd.append('latitude', it.lat); fd.append('longitude', it.lon) }
+      if (it.drawing && it.drawing.length > 2000) fd.append('drawing_data', it.drawing)
+      for (const f of (it.files || [])) {
+        const bf = new File([f.blob], f.name || `offline_${Date.now()}`, { type: f.blob && f.blob.type || 'application/octet-stream' })
+        fd.append(f.kind === 'video' ? 'video' : 'image', bf)
       }
-      if (rid) {
-        const fd = new FormData()
-        fd.append('title', it.title || '')
-        fd.append('description', it.description || '')
-        if (it.yardEventId) fd.append('yard_event_id', it.yardEventId)
-        if (it.yardEventCategory) fd.append('yard_event_category', it.yardEventCategory)
-        if (it.lat && it.lon) { fd.append('latitude', it.lat); fd.append('longitude', it.lon) }
-        if (it.drawing && it.drawing.length > 2000) fd.append('drawing_data', it.drawing)
-        const res2 = await fetch(`/share-report/confirm-auto/${rid}`, { method: 'POST', body: fd, credentials: 'include' })
-        const d2 = await res2.json()
-        if (d2.status !== 'success') throw new Error(d2.msg || '접수 실패')
-        await dbDelete(db, it.key)
-      } else {
-        const fd = new FormData()
-        fd.append('title', it.title || '')
-        fd.append('description', it.description || '')
-        if (it.yardEventId) fd.append('yard_event_id', it.yardEventId)
-        if (it.yardEventCategory) fd.append('yard_event_category', it.yardEventCategory)
-        if (it.lat && it.lon) { fd.append('latitude', it.lat); fd.append('longitude', it.lon) }
-        const res3 = await fetch('/share-report', { method: 'POST', body: fd, credentials: 'include' })
-        const d3 = await res3.json()
-        if (d3.status !== 'success') throw new Error(d3.msg || '접수 실패')
-        await dbDelete(db, it.key)
-      }
+      const res = await fetch('/share-report', { method: 'POST', body: fd, credentials: 'include' })
+      const data = await res.json()
+      if (data.status !== 'success') throw new Error(data.msg || '접수 실패')
+      await dbDelete(db, it.key)
     } catch (e) {
       const msg = String((e && e.message) || e || '')
       it.attempts = (it.attempts || 0) + 1

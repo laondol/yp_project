@@ -363,7 +363,7 @@ export default function YardPage() {
 
   const deleteSharePost = async () => {
     if (!detailData) return
-    if (!confirm('정말 삭제하시겠습니까?')) return
+    if (!confirm('삭제한 글은 복원할 수 없습니다. 정말 삭제하시겠습니까?')) return
     try {
       const res = await fetch(`/share-report/delete/${detailData.id}`, { method: 'POST' })
       const d = await res.json()

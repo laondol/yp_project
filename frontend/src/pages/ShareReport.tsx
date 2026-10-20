@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import LeafletMap from '../components/LeafletMap'
 import ContentEditor, { type ContentEditorHandle } from '../components/contentEditor/ContentEditor'
 import { offlineQueue, MAX_OFFLINE_FILES, MAX_QUEUE_FILES, type OfflineFile, type OfflineItem } from '../utils/offlineQueue'
+import { shareCompose } from '../utils/shareCompose'
 import { useAuth } from '../contexts/AuthContext'
 
 export default function ShareReport({ yardEventId: propEventId, yardEventTitle: propEventTitle, yardEventCategory: propEventCategory, onBack }: { yardEventId?: string | null; yardEventTitle?: string; yardEventCategory?: string; onBack?: () => void } = {}) {
@@ -24,8 +25,8 @@ export default function ShareReport({ yardEventId: propEventId, yardEventTitle: 
   // 카메라로 찍은 사진 여러 장 누적 (연속 촬영 지원)
   const [cameraFiles, setCameraFiles] = useState<File[]>([])
   const [cameraPreviews, setCameraPreviews] = useState<string[]>([])
-  // 카메라 사진별 서버 저장 경로 (auto-save 성공 시 채워짐)
-  const [cameraPaths, setCameraPaths] = useState<string[]>([])
+  // 직접 그리기 결과 (캔버스를 닫아도 유지)
+  const [drawingData, setDrawingData] = useState<string | null>(null)
   const [videoPreview, setVideoPreview] = useState<string | null>(null)
   const [canvasVisible, setCanvasVisible] = useState(false)
   const [videoFile, setVideoFile] = useState<File | null>(null)
@@ -44,8 +45,9 @@ export default function ShareReport({ yardEventId: propEventId, yardEventTitle: 
   const videoInputRef = useRef<HTMLInputElement>(null)
   const videoFileInputRef = useRef<HTMLInputElement>(null)
   const drawingRef = useRef(false)
-  const reportIdRef = useRef<number | null>(null)
-  const saveQueueRef = useRef<Promise<unknown>>(Promise.resolve())
+  const drawingDataRef = useRef<string | null>(null)
+  const composeReadyRef = useRef(false)
+  const restoredPosRef = useRef<{ lat: string; lon: string } | null>(null)
 
   const [searchParams] = useSearchParams()
   const yardEventId = propEventId != null ? propEventId : searchParams.get('yard_event')
@@ -65,6 +67,78 @@ export default function ShareReport({ yardEventId: propEventId, yardEventTitle: 
     getLocation()
     checkCamera()
   }, [])
+
+  // ── 작성 중 내용 브라우저 임시저장 복원 (새로고침/이탈 대비) ──
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      const saved = await shareCompose.load()
+      if (cancelled || !saved) { composeReadyRef.current = true; return }
+      const f = saved.fields
+      if (f) {
+        setTitle(f.title || '')
+        if (f.description) setDescription(f.description)
+        setMealNote(f.mealNote || '')
+        setStoreName(f.storeName || '')
+        setSsid(f.ssid || '')
+        if (f.lat && f.lon) {
+          setLat(f.lat); setLon(f.lon)
+          restoredPosRef.current = { lat: f.lat, lon: f.lon }
+        }
+      }
+      const fl = saved.files
+      if (fl) {
+        if (fl.drawing) { setDrawingData(fl.drawing); drawingDataRef.current = fl.drawing }
+        if (fl.images?.length) {
+          setCameraFiles(fl.images)
+          setCameraPreviews(fl.images.map(file => URL.createObjectURL(file)))
+        }
+        if (fl.video) {
+          setVideoFile(fl.video)
+          setVideoPreview(URL.createObjectURL(fl.video))
+        }
+      }
+      if ((f && (f.title || f.description)) || fl?.images?.length || fl?.video || fl?.drawing) setHasContent(true)
+      composeReadyRef.current = true
+    })()
+    return () => { cancelled = true }
+  }, [])
+
+  useEffect(() => { drawingDataRef.current = drawingData }, [drawingData])
+
+  useEffect(() => {
+    if (!composeReadyRef.current) return
+    const t = setTimeout(() => {
+      shareCompose.saveFields({
+        title, description: editorRef.current?.getContent() || description,
+        mealNote, storeName, ssid, lat, lon,
+      })
+    }, 600)
+    return () => clearTimeout(t)
+  }, [title, description, mealNote, storeName, ssid, lat, lon])
+
+  useEffect(() => {
+    if (!composeReadyRef.current) return
+    shareCompose.saveFiles({ images: cameraFiles, video: videoFile || videoFileUpload, drawing: drawingData })
+  }, [cameraFiles, videoFile, videoFileUpload, drawingData])
+
+  useEffect(() => {
+    const save = () => {
+      if (!composeReadyRef.current) return
+      shareCompose.saveFields({
+        title, description: editorRef.current?.getContent() || description,
+        mealNote, storeName, ssid, lat, lon,
+      })
+      shareCompose.saveFiles({ images: cameraFiles, video: videoFile || videoFileUpload, drawing: drawingDataRef.current })
+    }
+    const onHide = () => { if (document.visibilityState === 'hidden') save() }
+    window.addEventListener('pagehide', save)
+    document.addEventListener('visibilitychange', onHide)
+    return () => {
+      window.removeEventListener('pagehide', save)
+      document.removeEventListener('visibilitychange', onHide)
+    }
+  }, [title, description, mealNote, storeName, ssid, lat, lon, cameraFiles, videoFile, videoFileUpload])
 
   // ── 오프라인 큐: 대기 건수 갱신 + 재연결 시 자동 전송 ──
   async function refreshQueueCount() {
@@ -86,48 +160,21 @@ export default function ShareReport({ yardEventId: propEventId, yardEventTitle: 
       const items = await offlineQueue.all()
       for (const it of items) {
         try {
-          let rid = it.reportId
-          if (it.files.length > 0) {
-            const fd = new FormData()
-            if (rid) fd.append('report_id', String(rid))
-            for (const f of it.files) {
-              const bf = new File([f.blob], f.name || `offline_${Date.now()}`, { type: f.blob.type || 'application/octet-stream' })
-              if (f.kind === 'video') fd.append('video', bf)
-              else fd.append('image', bf)
-            }
-            const res = await fetch('/share-report/auto-save', { method: 'POST', body: fd })
-            const data = await res.json()
-            if (data.status !== 'success') throw new Error(data.msg || '자동보관 실패')
-            rid = data.report_id
-            it.reportId = rid
-            it.files = []
-            await offlineQueue.put(it)
+          const fd = new FormData()
+          fd.append('title', it.title)
+          fd.append('description', it.description)
+          if (it.yardEventId) fd.append('yard_event_id', it.yardEventId)
+          if (it.yardEventCategory) fd.append('yard_event_category', it.yardEventCategory)
+          if (it.lat && it.lon) { fd.append('latitude', it.lat); fd.append('longitude', it.lon) }
+          if (it.drawing && it.drawing.length > 2000) fd.append('drawing_data', it.drawing)
+          for (const f of it.files) {
+            const bf = new File([f.blob], f.name || `offline_${Date.now()}`, { type: f.blob.type || 'application/octet-stream' })
+            fd.append(f.kind === 'video' ? 'video' : 'image', bf)
           }
-          if (rid) {
-            const fd = new FormData()
-            fd.append('title', it.title)
-            fd.append('description', it.description)
-            if (it.yardEventId) fd.append('yard_event_id', it.yardEventId)
-            if (it.yardEventCategory) fd.append('yard_event_category', it.yardEventCategory)
-            if (it.lat && it.lon) { fd.append('latitude', it.lat); fd.append('longitude', it.lon) }
-            if (it.drawing && it.drawing.length > 2000) fd.append('drawing_data', it.drawing)
-            const res2 = await fetch(`/share-report/confirm-auto/${rid}`, { method: 'POST', body: fd })
-            const d2 = await res2.json()
-            if (d2.status !== 'success') throw new Error(d2.msg || '접수 실패')
-            await offlineQueue.remove(it.key)
-          } else {
-            // 파일도 draft도 없는 텍스트 전용 건
-            const fd = new FormData()
-            fd.append('title', it.title)
-            fd.append('description', it.description)
-            if (it.yardEventId) fd.append('yard_event_id', it.yardEventId)
-            if (it.yardEventCategory) fd.append('yard_event_category', it.yardEventCategory)
-            if (it.lat && it.lon) { fd.append('latitude', it.lat); fd.append('longitude', it.lon) }
-            const res3 = await fetch('/share-report', { method: 'POST', body: fd })
-            const d3 = await res3.json()
-            if (d3.status !== 'success') throw new Error(d3.msg || '접수 실패')
-            await offlineQueue.remove(it.key)
-          }
+          const res = await fetch('/share-report', { method: 'POST', body: fd })
+          const data = await res.json()
+          if (data.status !== 'success') throw new Error(data.msg || '접수 실패')
+          await offlineQueue.remove(it.key)
         } catch (e: any) {
           const msg = String(e?.message || e || '')
           it.attempts = (it.attempts || 0) + 1
@@ -159,6 +206,24 @@ export default function ShareReport({ yardEventId: propEventId, yardEventTitle: 
     if (canvasVisible) setTimeout(initCanvas, 100)
   }, [canvasVisible])
 
+  function loadPlaceInfo(lt: string, ln: string) {
+    setLocationStatus('주소 변환 중...')
+    // 근처 장소 로드 (자동 매칭 참고용)
+    fetch(`/share/nearby-places?lat=${lt}&lon=${ln}&max_km=1`)
+      .then(r => r.json()).then(d => setNearbyPlaces(d.places || [])).catch(() => {})
+    fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lt}&lon=${ln}&accept-language=ko`)
+      .then(r => r.json())
+      .then(data => {
+        const addr = data.display_name || ''
+        const parts = addr.split(',').map((s: string) => s.trim())
+        const short = parts.slice(0, 5).join(', ')
+        setAddressDetail(short || addr)
+      })
+      .catch(() => {
+        setAddressDetail('위치 수집 완료')
+      })
+  }
+
   function getLocation() {
     if (!navigator.geolocation) {
       setLocationStatus('이 브라우저는 위치정보를 지원하지 않아 접수할 수 없습니다.')
@@ -168,23 +233,13 @@ export default function ShareReport({ yardEventId: propEventId, yardEventTitle: 
       pos => {
         const lt = pos.coords.latitude.toFixed(7)
         const ln = pos.coords.longitude.toFixed(7)
+        if (restoredPosRef.current) {
+          loadPlaceInfo(restoredPosRef.current.lat, restoredPosRef.current.lon)
+          return
+        }
         setLat(lt)
         setLon(ln)
-        setLocationStatus('주소 변환 중...')
-        // 근처 장소 로드 (자동 매칭 참고용)
-        fetch(`/share/nearby-places?lat=${lt}&lon=${ln}&max_km=1`)
-          .then(r => r.json()).then(d => setNearbyPlaces(d.places || [])).catch(() => {})
-        fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lt}&lon=${ln}&accept-language=ko`)
-          .then(r => r.json())
-          .then(data => {
-            const addr = data.display_name || ''
-            const parts = addr.split(',').map((s: string) => s.trim())
-            const short = parts.slice(0, 5).join(', ')
-            setAddressDetail(short || addr)
-          })
-          .catch(() => {
-            setAddressDetail('위치 수집 완료')
-          })
+        loadPlaceInfo(lt, ln)
       },
       err => {
         setLocationStatus('위치 수집 실패로 접수할 수 없습니다. 위치 권한을 허용한 뒤 새로고침해 주세요. (' + err.message + ')')
@@ -203,25 +258,6 @@ export default function ShareReport({ yardEventId: propEventId, yardEventTitle: 
       .catch(() => setCameraReady(false))
   }
 
-  // 자동보관: 촬영된 파일을 즉시 서버(draft)로 전송
-  // 연속 촬영 시에도 같은 report_id로 누적되도록 순차(직렬) 실행한다.
-  async function autoSave(files: File[]) {
-    const task = saveQueueRef.current.then(async () => {
-      const fd = new FormData()
-      if (reportIdRef.current) fd.append('report_id', String(reportIdRef.current))
-      for (const f of files) fd.append('image', f)
-      const res = await fetch('/share-report/auto-save', { method: 'POST', body: fd })
-      const data = await res.json()
-      if (data.status === 'success') {
-        reportIdRef.current = data.report_id
-        return data.added_paths as string[]
-      }
-      return null
-    }).catch(() => null)
-    saveQueueRef.current = task.catch(() => undefined)
-    return task
-  }
-
   function onCameraCapture(e: React.ChangeEvent<HTMLInputElement>) {
     const files = e.target.files
     if (!files?.length) return
@@ -230,37 +266,13 @@ export default function ShareReport({ yardEventId: propEventId, yardEventTitle: 
     setCameraPreviews(prev => [...prev, ...arr.map(f => URL.createObjectURL(f))])
     setHasContent(true)
     e.target.value = ''
-    if (!navigator.onLine) return // 오프라인: 기기에만 보관, 연결 시 자동 전송
-    // 즉시 자동보관. 실패 시 해당 사진은 제거 안내
-    autoSave(arr).then(paths => {
-      if (!paths || paths.length === 0) {
-        alert('자동보관에 실패했습니다. 네트워크 확인 후 다시 촬영해 주세요.')
-        setCameraFiles(prev => prev.slice(0, prev.length - arr.length))
-        setCameraPreviews(prev => prev.slice(0, prev.length - arr.length))
-      } else {
-        setCameraPaths(prev => [...prev, ...paths])
-      }
-    })
   }
 
-  async function removeCameraPhoto(i: number) {
-    const path = cameraPaths[i]
-    if (path && reportIdRef.current) {
-      try {
-        await fetch(`/share-report/auto-save/remove/${reportIdRef.current}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ path })
-        })
-      } catch { /* 무시 */ }
-    }
+  function removeCameraPhoto(i: number) {
     setCameraFiles(prev => prev.filter((_, idx) => idx !== i))
     setCameraPreviews(prev => prev.filter((_, idx) => idx !== i))
-    setCameraPaths(prev => prev.filter((_, idx) => idx !== i))
-    const remaining = cameraFiles
-      .filter((_, idx) => idx !== i)
-    setHasContent(remaining.length > 0 || videoFile !== null || videoFileUpload !== null || previews.length > 0)
+    const remaining = cameraFiles.filter((_, idx) => idx !== i)
+    setHasContent(remaining.length > 0 || videoFile !== null || videoFileUpload !== null || previews.length > 0 || drawingDataRef.current !== null)
   }
 
   function onVideoCapture(e: React.ChangeEvent<HTMLInputElement>) {
@@ -271,15 +283,6 @@ export default function ShareReport({ yardEventId: propEventId, yardEventTitle: 
     setVideoPreview(URL.createObjectURL(file))
     setHasContent(true)
     e.target.value = ''
-    // 동영상 즉시 자동보관
-    saveQueueRef.current = saveQueueRef.current.then(async () => {
-      const fd = new FormData()
-      if (reportIdRef.current) fd.append('report_id', String(reportIdRef.current))
-      fd.append('video', file)
-      const res = await fetch('/share-report/auto-save', { method: 'POST', body: fd })
-      const data = await res.json()
-      if (data.status === 'success') reportIdRef.current = data.report_id
-    }).catch(() => {})
   }
 
   function onVideoFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -289,13 +292,6 @@ export default function ShareReport({ yardEventId: propEventId, yardEventTitle: 
     setVideoFileUpload(file)
     setVideoUploadPreview(URL.createObjectURL(file))
     setHasContent(true)
-    const fd = new FormData()
-    if (reportIdRef.current) fd.append('report_id', String(reportIdRef.current))
-    fd.append('video', file)
-    fetch('/share-report/auto-save', { method: 'POST', body: fd })
-      .then(r => r.json())
-      .then(data => { if (data.status === 'success') reportIdRef.current = data.report_id })
-      .catch(() => {})
   }
 
   function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -314,16 +310,6 @@ export default function ShareReport({ yardEventId: propEventId, yardEventTitle: 
     }
     setPreviews(urls)
     setCameraFiles(prev => [...prev, ...arr])
-    if (!navigator.onLine) { e.target.value = ''; return } // 오프라인: 기기에만 보관
-    autoSave(arr).then(paths => {
-      if (!paths || paths.length === 0) {
-        alert('자동보관에 실패했습니다. 네트워크 확인 후 다시 시도해 주세요.')
-        setCameraFiles(prev => prev.slice(0, prev.length - arr.length))
-        setPreviews([])
-      } else {
-        setCameraPaths(prev => [...prev, ...paths])
-      }
-    })
     e.target.value = ''
   }
 
@@ -335,6 +321,11 @@ export default function ShareReport({ yardEventId: propEventId, yardEventTitle: 
     c.height = 300
     const ctx = c.getContext('2d')
     if (!ctx) return
+    if (drawingDataRef.current) {
+      const img = new Image()
+      img.onload = () => { ctx.drawImage(img, 0, 0, c.width, c.height) }
+      img.src = drawingDataRef.current
+    }
 
     function getPos(e: any) { const r = c!.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top } }
 
@@ -356,14 +347,8 @@ export default function ShareReport({ yardEventId: propEventId, yardEventTitle: 
       if (!c2) return
       const dataUrl = c2.toDataURL('image/png')
       if (dataUrl.length <= 2000) return
-      saveQueueRef.current = saveQueueRef.current.then(async () => {
-        const fd = new FormData()
-        if (reportIdRef.current) fd.append('report_id', String(reportIdRef.current))
-        fd.append('drawing_data', dataUrl)
-const res = await fetch('/share-report/auto-save', { method: 'POST', body: fd, credentials: 'include' })
-        const data = await res.json()
-        if (data.status === 'success') reportIdRef.current = data.report_id
-      }).catch(() => {})
+      setDrawingData(dataUrl)
+      drawingDataRef.current = dataUrl
     }
 
     c.addEventListener('mousedown', onStart)
@@ -379,15 +364,17 @@ const res = await fetch('/share-report/auto-save', { method: 'POST', body: fd, c
     const c = canvasRef.current
     if (!c) return
     c.getContext('2d')?.clearRect(0, 0, c.width, c.height)
+    setDrawingData(null)
+    drawingDataRef.current = null
   }
 
   function resetForm() {
     setTitle(''); setDescription('')
-    setCameraFiles([]); setCameraPreviews([]); setCameraPaths([])
+    setCameraFiles([]); setCameraPreviews([])
     setPreviews([])
     setVideoFile(null); setVideoPreview(null); setVideoFileUpload(null); setVideoUploadPreview(null)
     setHasContent(false); setSubmitting(false)
-    reportIdRef.current = null
+    setDrawingData(null); drawingDataRef.current = null
     clearCanvas()
   }
 
@@ -412,10 +399,10 @@ const res = await fetch('/share-report/auto-save', { method: 'POST', body: fd, c
         return
       }
       const c0 = canvasRef.current
-      const drawing = c0 ? c0.toDataURL('image/png') : null
+      const drawing = drawingDataRef.current || (c0 ? c0.toDataURL('image/png') : null)
       const item: OfflineItem = {
         key: offlineQueue.newKey(),
-        reportId: reportIdRef.current,
+        reportId: null,
         files,
         drawing: drawing && drawing.length > 2000 ? drawing : null,
         title, description: descHtml, lat, lon,
@@ -425,17 +412,25 @@ const res = await fetch('/share-report/auto-save', { method: 'POST', body: fd, c
         attempts: 0,
       }
       try { await offlineQueue.put(item) } catch { alert('기기 저장에 실패했습니다. 저장 공간을 확인해 주세요.'); return }
+      composeReadyRef.current = false
+      await shareCompose.clear()
       await refreshQueueCount()
       registerSync() // 연결 복구 시 SW가 자동 전송 (앱 종료 상태 포함, Android)
       const waiting = await offlineQueue.count()
       alert(`오프라인 상태여서 이 기기에 저장했습니다 (대기 ${waiting}건).\n인터넷에 연결되면 자동으로 전송되어 심사가 시작됩니다.`)
       if (onBack) { onBack(); return }
       resetForm()
+      composeReadyRef.current = true
       return
     }
-    // 사진 촬영 중(서버 저장 미완료)이면 대기 안내
-    if (cameraFiles.length > 0 && !reportIdRef.current) {
-      alert('사진이 서버에 저장 중입니다. 잠시 후 다시 시도해 주세요.')
+    if (!lat || !lon) {
+      alert('위치 정보가 없습니다. 위치 허용 후 새로고침해 주세요.')
+      return
+    }
+    const video = videoFile || videoFileUpload
+    const totalBytes = cameraFiles.reduce((n, f) => n + f.size, 0) + (video?.size || 0)
+    if (totalBytes > 45 * 1024 * 1024) {
+      alert('첨부 용량이 45MB를 넘습니다. 사진/동영상 수를 줄여 주세요. (원본 그대로 전송)')
       return
     }
     setSubmitting(true)
@@ -445,32 +440,22 @@ const res = await fetch('/share-report/auto-save', { method: 'POST', body: fd, c
     fd.append('description', descHtml)
     if (yardEventId) fd.append('yard_event_id', yardEventId)
     if (propEventCategory) fd.append('yard_event_category', propEventCategory)
-    if (lat && lon) {
-      fd.append('latitude', lat)
-      fd.append('longitude', lon)
-    }
+    fd.append('latitude', lat)
+    fd.append('longitude', lon)
     if (mealNote.trim()) fd.append('meal_note', mealNote.trim())
     if (ssid) fd.append('store_suggestion_id', ssid)
     if (storeName.trim()) fd.append('store_name', storeName.trim())
-    const c = canvasRef.current
-    if (c) {
-      const dataUrl = c.toDataURL('image/png')
-      if (dataUrl.length > 2000) fd.append('drawing_data', dataUrl)
-    }
+    const drawData = drawingDataRef.current || (canvasRef.current ? canvasRef.current.toDataURL('image/png') : null)
+    if (drawData && drawData.length > 2000) fd.append('drawing_data', drawData)
+    for (const f of cameraFiles) fd.append('image', f)
+    if (video) fd.append('video', video)
 
     try {
-      let res
-      if (reportIdRef.current) {
-        res = await fetch(`/share-report/confirm-auto/${reportIdRef.current}`, { method: 'POST', body: fd })
-      } else {
-        if (!lat || !lon) {
-          alert('위치 정보가 없습니다. 위치 허용 후 새로고침해 주세요.')
-          setSubmitting(false); return
-        }
-        res = await fetch('/share-report', { method: 'POST', body: fd })
-      }
+      const res = await fetch('/share-report', { method: 'POST', body: fd })
       const data = await res.json()
       if (data.status === 'success') {
+        composeReadyRef.current = false
+        await shareCompose.clear()
         alert(data.msg)
         if (onBack) { onBack(); return }
         window.location.href = '/share'
@@ -494,7 +479,7 @@ const res = await fetch('/share-report/auto-save', { method: 'POST', body: fd, c
     <div className="container-fluid px-3 py-3" style={{ maxWidth: '100%' }}>
       {!onBack && <h4 className="fw-bold mb-3 text-center">공유하기</h4>}
       <div className="alert alert-info py-2 small" style={{ borderRadius: 10 }}>
-        사진을 촬영하면 즉시 서버에 자동보관됩니다. 내용 확인 후 <b>공유 접수하기</b> 버튼을 누르면 심사가 시작됩니다.
+        촬영·선택한 사진과 내용은 아래 버튼을 누르면 바로 AI 심사가 시작됩니다. (얼굴·번호판 등 개인정보가 포함되면 관리자 확인 후 게시됩니다.)
       </div>
       {!online && (
         <div className="alert alert-warning py-2 small mb-2" style={{ borderRadius: 10 }}>
@@ -547,7 +532,7 @@ const res = await fetch('/share-report/auto-save', { method: 'POST', body: fd, c
               {videoPreview && (
                 <div className="mt-2 text-center">
                   <video src={videoPreview} controls className="w-100 rounded" style={{ maxHeight: 300 }} />
-                  <button type="button" className="btn btn-sm btn-outline-danger mt-1" onClick={() => { setVideoPreview(null); setVideoFile(null); setHasContent(cameraFiles.length > 0 || videoFileUpload !== null || previews.length > 0) }}>삭제</button>
+                  <button type="button" className="btn btn-sm btn-outline-danger mt-1" onClick={() => { setVideoPreview(null); setVideoFile(null); setHasContent(cameraFiles.length > 0 || videoFileUpload !== null || previews.length > 0 || drawingDataRef.current !== null) }}>삭제</button>
                 </div>
               )}
             </div>
@@ -557,7 +542,7 @@ const res = await fetch('/share-report/auto-save', { method: 'POST', body: fd, c
               {videoUploadPreview && (
                 <div className="mt-2 text-center">
                   <video src={videoUploadPreview} controls className="w-100 rounded" style={{ maxHeight: 300 }} />
-                  <button type="button" className="btn btn-sm btn-outline-danger mt-1" onClick={() => { setVideoUploadPreview(null); setVideoFileUpload(null); setHasContent(cameraFiles.length > 0 || videoFile !== null || previews.length > 0) }}>삭제</button>
+                  <button type="button" className="btn btn-sm btn-outline-danger mt-1" onClick={() => { setVideoUploadPreview(null); setVideoFileUpload(null); setHasContent(cameraFiles.length > 0 || videoFile !== null || previews.length > 0 || drawingDataRef.current !== null) }}>삭제</button>
                 </div>
               )}
             </div>

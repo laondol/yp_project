@@ -109,6 +109,17 @@ export default function ShareList() {
       }).catch(e => alert('오류: ' + e))
   }
 
+  const deleteReport = (id: number) => {
+    if (!confirm('삭제한 글은 복원할 수 없습니다. 정말 삭제하시겠습니까?')) return
+    fetch(`/share-report/delete/${id}`, { method: 'POST' })
+      .then(r => r.json()).then(d => {
+        if (d.status === 'success') {
+          setItems(prev => prev.filter(item => item.id !== id))
+          alert('삭제되었습니다. 삭제한 글은 복원할 수 없습니다.')
+        } else alert(d.msg || '오류')
+      }).catch(e => alert('오류: ' + e))
+  }
+
   const loadNearby = () => {
     if (!navigator.geolocation) return alert('GPS를 지원하지 않습니다')
     setNearbyLoading(true)
@@ -318,10 +329,7 @@ export default function ShareList() {
                     <span className="badge bg-light text-dark">{r.ai_category}</span>
                     <span className="badge bg-light text-dark">{r.address || `${r.town} ${r.village}`}</span>
                     {r.status !== 'approved' && myId === r.user_id && (
-                      <span className="badge bg-warning text-dark">{r.status === 'pending_person' ? '보류(인물)' : r.status === 'flagged' ? '차단됨' : r.status === 'draft' ? '자동보관' : '심사중'}</span>
-                    )}
-                    {(r.auto_sent && myId === r.user_id) && (
-                      <span className="badge bg-warning text-dark">자동발송·확인필요</span>
+                      <span className="badge bg-warning text-dark">{r.status === 'pending_person' ? '보류(인물)' : r.status === 'flagged' ? '차단됨' : '심사중'}</span>
                     )}
                   </div>
                   <h6 className="fw-bold mb-2">{r.title}</h6>
@@ -359,7 +367,12 @@ export default function ShareList() {
                   <div className="d-flex justify-content-between align-items-center mt-2">
                     <a href={`/share/detail/${r.id}`} className="text-decoration-none small text-primary">자세히 보기 →</a>
                     {myId !== null && myId === r.user_id && (
-                      <a href={`/share/edit/${r.id}`} className="text-decoration-none small text-primary">✏️ 수정</a>
+                      <div className="d-flex align-items-center gap-2">
+                        <a href={`/share/edit/${r.id}`} className="text-decoration-none small text-primary">✏️ 수정</a>
+                        {rid !== null && (
+                          <button type="button" className="btn btn-sm btn-link text-danger p-0 small text-decoration-none" onClick={() => deleteReport(rid)}>🗑️ 삭제</button>
+                        )}
+                      </div>
                     )}
                   </div>
 
