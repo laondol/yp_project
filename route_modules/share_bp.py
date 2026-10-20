@@ -121,10 +121,9 @@ def _send_auto_confirm_notice(report):
     if not report.user_id or report.user_id == 0:
         return
     from models import Message as _Msg
-    admin_user = User.query.filter(User.role == 'admin').first()
     try:
         db.session.add(_Msg(
-            sender_id=admin_user.id if admin_user else 0,
+            sender_id=None,
             sender_name='함께사는양평',
             sender_role='admin',
             receiver_id=report.user_id,
@@ -176,11 +175,10 @@ def _send_auto_saved_notice(report, created_new=False):
         ).count()
         if existing:
             return False  # 이미 알린 경우 중복 발송하지 않음
-    admin_user = User.query.filter(User.role == 'admin').first()
     site = current_app.config.get('SITE_URL', 'https://yp.ddabong.com')
     try:
         db.session.add(Message(
-            sender_id=admin_user.id if admin_user else 0,
+            sender_id=None,
             sender_name='함께사는양평',
             sender_role='admin',
             receiver_id=report.user_id,
@@ -194,6 +192,30 @@ def _send_auto_saved_notice(report, created_new=False):
         return True
     except Exception:
         return False
+
+
+def _notify_share_submitted(report):
+    """공유 접수 시 eou@kakao.com에 편지 발송 (시스템 발신)"""
+    try:
+        notify_user = User.query.filter(User.email == 'eou@kakao.com').first()
+        if not notify_user:
+            return
+        author = '비회원' if (not report.user_id or report.user_id == 0) else (report.author_name or '회원')
+        status_label = '보류(관리자 확인 필요)' if author == '비회원' else '심사 대기'
+        db.session.add(Message(
+            sender_id=None, sender_name='함께사는양평', sender_role='admin',
+            receiver_id=notify_user.id,
+            subject=f'공유 접수 #{report.id} ({author})',
+            content=f'새 공유글이 접수되었습니다.\n'
+                    f'작성자: {author}\n'
+                    f'제목: {report.title or "제목 없음"}\n'
+                    f'상태: {status_label}\n'
+                    f'확인: 관리자 페이지 > 공유마당 관리 > 상세보기에서 확인하세요.',
+            is_notice=True
+        ))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
 
 
 def _share_mgr():
@@ -384,6 +406,7 @@ def share_report():
     threading.Thread(target=background_process_share,
         args=(app_obj, report.id, title, description, latitude, longitude, image_path, drawing_path, uid)).start()
 
+    _notify_share_submitted(report)
     return jsonify({"status": "success", "msg": "공유가 접수되었습니다.", "report_id": report.id})
 
 @share_bp.route('/share-report/auto-save', methods=['POST'])
@@ -639,12 +662,12 @@ def share_report_notify(report_id):
 @share_bp.route('/share-report/confirm-auto/<int:report_id>', methods=['POST'])
 def share_report_confirm_auto(report_id):
     report = ShareReport.query.get_or_404(report_id)
-    uid = session.get('user_id')
-    if not uid:
-        return jsonify({"status": "error", "msg": "로그인이 필요합니다."}), 401
-    is_admin = session.get('role') in ('admin', 'leader')
-    if report.user_id != uid and not is_admin:
-        return jsonify({"status": "error", "msg": "작성자 본인만 확인할 수 있습니다."}), 403
+    uid = session.get('user_id') or 0
+    # 비회원(user_id=0) draft도 접수 허용 — 로그인한 경우 본인/관리자만
+    if uid and report.user_id not in (uid, 0):
+        is_admin = session.get('role') in ('admin', 'leader')
+        if not is_admin:
+            return jsonify({"status": "error", "msg": "작성자 본인만 확인할 수 있습니다."}), 403
     if not report.auto_sent:
         return jsonify({"status": "error", "msg": "이미 심사 대기 상태입니다."})
 
@@ -721,6 +744,7 @@ def share_report_confirm_auto(report_id):
         args=(app_obj, report.id, report.title, report.description,
               report.latitude, report.longitude, report.image_path, report.drawing_path,
               report.user_id or 0)).start()
+    _notify_share_submitted(report)
     return jsonify({"status": "success", "msg": "심사가 시작되었습니다.", "report_id": report.id})
 
 @share_bp.route('/admin/share-reports')
@@ -1491,9 +1515,8 @@ def share_report_toggle(report_id, action):
         # 작성자(회원)에게 보류 통보
         try:
             if report.user_id and report.user_id != 0:
-                admin_user = User.query.filter(User.role == 'admin').first()
                 db.session.add(Message(
-                    sender_id=admin_user.id if admin_user else 0,
+                    sender_id=None,
                     sender_name='함께사는양평',
                     sender_role='admin',
                     receiver_id=report.user_id,

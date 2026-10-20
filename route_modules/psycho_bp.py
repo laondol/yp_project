@@ -6,6 +6,10 @@ from models import db, PsychoPost, PsychoAppointment, PsychoDoctorSchedule, Psyc
 
 psycho_bp = Blueprint('psycho', __name__)
 
+def _system_sender_id():
+    """시스템 발송용 sender_id — 실제 회원 계정을 발신자로 사용하지 않음"""
+    return None
+
 def _serve_spa():
     import os
     from flask import current_app, send_file

@@ -203,11 +203,10 @@ def _resolve_canonical(report):
 def _notify_person(report):
     try:
         uploader = User.query.get(report.user_id)
-        admin_user = User.query.filter(User.role == 'admin').first()
-        if uploader and admin_user:
+        if uploader:
             accept_url = f"{app.config.get('SITE_URL', 'https://test.unocum.kr')}/share-report/accept-person/{report.id}"
             msg = Message(
-                sender_id=admin_user.id, sender_name=admin_user.username, sender_role='admin',
+                sender_id=None, sender_name='함께사는양평', sender_role='admin',
                 receiver_id=uploader.id,
                 subject='공유 이미지에 인물이 포함되어 있습니다',
                 content=f'{uploader.real_name or uploader.username}님, 올리신 공유글(#{report.id})에 인물 사진이 포함되어 있습니다.\n\n게시를 원하시면 아래 링크에서 책임 동의를 완료해 주세요.\n{accept_url}\n\n동의하지 않으시면 게시가 보류됩니다.',
@@ -219,13 +218,12 @@ def _notify_person(report):
 
 
 def _notify_hold(report, reason):
-    """보류 시 작성자에게 통보(쪽지)"""
+    """보류 시 작성자에게 통보"""
     try:
         uploader = User.query.get(report.user_id)
-        admin_user = User.query.filter(User.role == 'admin').first()
-        if uploader and admin_user:
+        if uploader:
             msg = Message(
-                sender_id=admin_user.id, sender_name=admin_user.username, sender_role='admin',
+                sender_id=None, sender_name='함께사는양평', sender_role='admin',
                 receiver_id=uploader.id,
                 subject=f'공유글 #{report.id}이(가) 검토 보류되었습니다',
                 content=f'{uploader.real_name or uploader.username}님, 올리신 공유글(#{report.id})이 검토 결과 보류되었습니다.\n사유: {reason}\n\n작성자 본인에게만 표시되며, 관리자/책임자가 확인하면 게시가 진행됩니다. 마이페이지에서 수정할 수도 있습니다.',
@@ -251,12 +249,9 @@ def moderate_pending_letters():
                 if reason:
                     msg.moderation_status = 'rejected'
                     msg.ripjc_reason = reason
-                    ai_admin = User.query.filter(User.username == 'ai_admin').first()
-                    if not ai_admin:
-                        ai_admin = User.query.filter(User.role == 'admin').first()
                     reject_msg = Message(
-                        sender_id=ai_admin.id if ai_admin else 0,
-                        sender_name='AI 관리자',
+                        sender_id=None,
+                        sender_name='함께사는양평',
                         sender_role='admin',
                         receiver_id=msg.sender_id,
                         subject=f'편지 발송 반려: {msg.subject}',

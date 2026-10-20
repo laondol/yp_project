@@ -3,8 +3,11 @@ import { useSearchParams } from 'react-router-dom'
 import LeafletMap from '../components/LeafletMap'
 import ContentEditor, { type ContentEditorHandle } from '../components/contentEditor/ContentEditor'
 import { offlineQueue, MAX_OFFLINE_FILES, MAX_QUEUE_FILES, type OfflineFile, type OfflineItem } from '../utils/offlineQueue'
+import { useAuth } from '../contexts/AuthContext'
 
 export default function ShareReport({ yardEventId: propEventId, yardEventTitle: propEventTitle, yardEventCategory: propEventCategory, onBack }: { yardEventId?: string | null; yardEventTitle?: string; yardEventCategory?: string; onBack?: () => void } = {}) {
+  const { user } = useAuth()
+  const isGuest = !user || !user.id
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [lat, setLat] = useState('')
@@ -497,6 +500,11 @@ const res = await fetch('/share-report/auto-save', { method: 'POST', body: fd, c
         <div className="alert alert-warning py-2 small mb-2" style={{ borderRadius: 10 }}>
           📴 <b>오프라인</b> — 작성 내용은 이 기기에 저장되며, 인터넷에 연결되면 자동 전송됩니다.<br />
           (동영상 저장 제한 · 사진 1회 최대 {MAX_OFFLINE_FILES}장 / 대기 총 {MAX_QUEUE_FILES}장)
+        </div>
+      )}
+      {isGuest && (
+        <div className="alert alert-secondary py-2 small mb-2" style={{ borderRadius: 10 }}>
+          ⚠️ 비회원이 공유하기로 함께사는양평에 보내는 콘텐츠는 그 저작권은 함께사는양평으로 이양한 것입니다.
         </div>
       )}
       {queueCount > 0 && (

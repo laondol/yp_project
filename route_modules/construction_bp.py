@@ -1985,9 +1985,8 @@ def store_manager_verify(store_info_id):
         try:
             mu = User.query.get(si.manager_user_id)
             if mu:
-                admin_user = User.query.filter(User.role == 'admin').first()
                 db.session.add(Message(
-                    sender_id=admin_user.id if admin_user else 0,
+                    sender_id=None,
                     sender_name='함께사는양평', sender_role='admin',
                     receiver_id=mu.id,
                     subject=f'[{si.name}] 시설 책임자 인증 완료',

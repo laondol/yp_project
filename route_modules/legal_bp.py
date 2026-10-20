@@ -540,8 +540,8 @@ def api_legal_issue_comment(post_id):
 
 
 def _system_sender_id():
-    su = User.query.filter(User.role.in_(['admin', 'leader'])).first() or User.query.first()
-    return su.id if su else 1
+    """시스템 발송용 sender_id — 실제 회원 계정을 발신자로 사용하지 않음"""
+    return None
 
 def _delete_upload(rel_path):
     if not rel_path:

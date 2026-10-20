@@ -8,7 +8,6 @@ message_bp = Blueprint('message', __name__)
 
 LETTER_COST = 10  # 편지 1通당 닢 10 차감
 INTERNAL_ADMIN_ID = 1  # 전체관리자 수신용 내부 ID (운영 db의 admin1)
-INTERNAL_AI_ADMIN_ID = 9  # AI관리자 발송용 내부 ID (herb2727)
 
 EMAIL_REGEX = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
 EMAIL_RATE_LIMIT_PER_MIN = 5  # 분당 최대 발송 건수
@@ -24,10 +23,6 @@ def _get_balance(uid):
 def _get_internal_admin():
     """전체관리자용 내부 계정 반환"""
     return User.query.get(INTERNAL_ADMIN_ID)
-
-def _get_ai_admin():
-    """AI관리자 발송용 내부 계정 반환"""
-    return User.query.get(INTERNAL_AI_ADMIN_ID)
 
 def _get_village_leader(user_town, user_village):
     """해당 읍/면/리의 마을지기 반환"""
@@ -1299,12 +1294,11 @@ def admin_reject_pending(msg_id):
     if msg.letter_type != 'pending':
         return jsonify({'error': '잘못된 요청'}), 400
     
-    ai_admin = _get_ai_admin()
     reason = request.form.get('reason', '내용 검토 결과 부적절함')
     
-    # 발송자에게 반려 통보 (AI관리자 명의)
+    # 발송자에게 반려 통보 (시스템 발신)
     reject_msg = Message(
-        sender_id=INTERNAL_AI_ADMIN_ID,
+        sender_id=None,
         sender_name='함께사는양평',
         sender_role='admin',
         receiver_id=msg.sender_id,
