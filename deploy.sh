@@ -27,6 +27,11 @@ fi
 echo "[3/6] Restarting services..."
 docker compose -f $COMPOSE_FILE up -d
 
+# 3-1. moderation_worker는 up -d로 재시작되지 않으므로 명시적 재시작 필수
+# (Python 프로세스는 기동 시 코드를 메모리에 로드하므로 재시작 없이는 새 코드 미적용)
+echo "[3-1] Restarting moderation_worker..."
+docker compose -f $COMPOSE_FILE restart moderation_worker
+
 # 4. DB Migration (Flask-Migrate)
 echo "[4/6] Running database migration..."
 docker exec -e FLASK_APP=run.py $FLASK_CONTAINER flask db upgrade || {
