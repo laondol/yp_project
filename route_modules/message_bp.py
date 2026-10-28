@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, request, redirect, url_for, jsonify, session, current_app, send_file
+from flask import Blueprint, render_template, request, redirect, url_for, jsonify, session, current_app, send_file, Response, stream_with_context
 from models import db, Message, User, Friend, PointHistory, BlockedEmail, EmailRateLimit
 from datetime import datetime, timedelta
 import re
@@ -800,6 +800,7 @@ def _ftp_connect(cfg):
         ftp.login(cfg['user'], cfg['pass'])
         if cfg['use_tls']:
             ftp.prot_p()
+        ftp.set_pasv(True)
         rdir = cfg['remote_dir']
         if rdir and rdir not in ('/', ''):
             parts = [p for p in rdir.split('/') if p]
@@ -867,6 +868,69 @@ def _ftp_retrieve(filename):
         except Exception:
             pass
 
+
+def _ftp_size(filename):
+    """FTP 파일 존재/크기 확인. 없으면 None, 크기 조회 불가면 -1."""
+    cfg = _ftp_config()
+    if not cfg or not cfg['host']:
+        return None
+    ftp = _ftp_connect(cfg)
+    if not ftp:
+        return None
+    try:
+        try:
+            ftp.voidcmd('TYPE I')
+            size = ftp.size(filename)
+            if size is not None:
+                return int(size)
+        except Exception:
+            pass
+        try:
+            if _os.path.basename(filename) in ftp.nlst():
+                return -1
+        except Exception:
+            pass
+        return None
+    finally:
+        try:
+            ftp.quit()
+        except Exception:
+            pass
+
+
+def _ftp_stream(filename):
+    """FTP 파일을 청크로 스트리밍한다 (대용량 파일 메모리 적재 방지)."""
+    cfg = _ftp_config()
+    if not cfg or not cfg['host']:
+        return
+    ftp = _ftp_connect(cfg)
+    if not ftp:
+        return
+    conn = None
+    try:
+        ftp.voidcmd('TYPE I')
+        conn = ftp.transfercmd('RETR ' + filename)
+        while True:
+            chunk = conn.recv(64 * 1024)
+            if not chunk:
+                break
+            yield chunk
+        conn.close()
+        conn = None
+        ftp.voidresp()
+    except Exception as e:
+        current_app.logger.warning('FTP 스트리밍 실패: %s', e)
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        try:
+            ftp.quit()
+        except Exception:
+            pass
+
 @message_bp.route('/api/message/upload-image', methods=['POST'])
 def api_message_upload_image():
     uid = session.get('user_id')
@@ -884,58 +948,108 @@ def api_message_upload_image():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+def _attachment_headers(resp):
+    resp.headers['X-Content-Type-Options'] = 'nosniff'
+    resp.headers['Content-Security-Policy'] = "sandbox"
+    resp.headers['Cache-Control'] = 'private, no-store'
+    return resp
+
+
 @message_bp.route('/api/upload/file', methods=['POST'])
 def api_upload_file():
-    """일반 파일 첨부 업로드 (확장자/용량 제한 없음). 편지·게시글 공용."""
+    """일반 파일 첨부 업로드. 웹루트 밖에 저장하고 용량을 제한한다."""
     uid = session.get('user_id')
     if not uid: return jsonify({'error': 'login'}), 401
     file = request.files.get('file')
     if not file: return jsonify({'error': '파일 없음'}), 400
+
+    max_mb = int(current_app.config.get('MAX_ATTACHMENT_MB', 50))
+    max_bytes = max_mb * 1024 * 1024
+    if request.content_length and request.content_length > max_bytes:
+        return jsonify({'error': f'첨부파일은 {max_mb}MB까지 가능합니다.'}), 413
+
     original = file.filename or 'file'
-    clean = secure_filename(original)
-    if not clean:
-        clean = 'file'
     ext = original.rsplit('.', 1)[1].lower() if '.' in original else ''
+    ext = re.sub(r'[^a-z0-9]', '', ext)[:12]
     safe_name = uuid.uuid4().hex + ('.' + ext if ext else '')
-    upload_dir = _os.path.join(current_app.config['UPLOAD_FOLDER'], 'general_files')
+    upload_dir = current_app.config.get('ATTACHMENT_FOLDER') or _os.path.join(
+        current_app.config['UPLOAD_FOLDER'], '..', '..', 'private_uploads', 'general_files'
+    )
+    upload_dir = _os.path.abspath(upload_dir)
     _os.makedirs(upload_dir, exist_ok=True)
     save_path = _os.path.join(upload_dir, safe_name)
     try:
         file.seek(0)
         file.save(save_path)
         size = _os.path.getsize(save_path)
+        if size > max_bytes:
+            _os.remove(save_path)
+            return jsonify({'error': f'첨부파일은 {max_mb}MB까지 가능합니다.'}), 413
         # FTP 저장소가 활성화되면 원격에도 업로드 (실패해도 로컬 복사본 유지)
+        remote_ok = False
         if current_app.config.get('FTP_ENABLED'):
             try:
                 with open(save_path, 'rb') as f:
-                    _ftp_store(safe_name, f)
+                    remote_ok = _ftp_store(safe_name, f)
             except Exception as e:
                 current_app.logger.warning('FTP 백업 업로드 실패(로컬 유지): %s', e)
+        nas_only_mb = int(current_app.config.get('NAS_ONLY_ATTACHMENT_MB', 10))
+        nas_only = remote_ok and size >= nas_only_mb * 1024 * 1024
+        if nas_only:
+            try:
+                _os.remove(save_path)
+            except Exception as e:
+                current_app.logger.warning('NAS 전용 파일 로컬 삭제 실패: %s', e)
         url = '/files/' + safe_name
-        return jsonify({'url': url, 'name': original, 'size': size})
+        return jsonify({
+            'url': url,
+            'name': original,
+            'size': size,
+            'storage': 'nas' if nas_only else 'local',
+        })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
 @message_bp.route('/files/<path:filename>')
 def serve_general_file(filename):
-    """업로드된 일반 파일을 항상 첨부 다운로드로 제공 (인라인 렌더링 차단 → 저장형 XSS 방지).
-       FTP 저장소가 활성화되면 FTP에서 우선 조회하고, 없으면 로컬 폴백."""
+    """업로드 파일은 항상 첨부 다운로드로만 제공한다."""
     if '..' in filename or filename.startswith('/') or filename.startswith('\\'):
         return jsonify({'error': 'invalid'}), 400
     if current_app.config.get('FTP_ENABLED'):
-        data = _ftp_retrieve(filename)
-        if data is not None:
-            resp = send_file(data, as_attachment=True)
-            resp.headers['Content-Disposition'] = 'attachment; filename="%s"' % filename
-            resp.headers['X-Content-Type-Options'] = 'nosniff'
-            return resp
-    upload_dir = _os.path.join(current_app.config['UPLOAD_FOLDER'], 'general_files')
-    full = _os.path.join(upload_dir, filename)
-    if not _os.path.isfile(full):
-        return jsonify({'error': 'not found'}), 404
-    resp = send_file(full, as_attachment=True, download_name=filename)
-    resp.headers['X-Content-Type-Options'] = 'nosniff'
-    return resp
+        remote_size = _ftp_size(filename)
+        if remote_size is not None:
+            resp = Response(
+                stream_with_context(_ftp_stream(filename)),
+                mimetype='application/octet-stream',
+            )
+            resp.headers['Content-Disposition'] = (
+                'attachment; filename="%s"' % _os.path.basename(filename)
+            )
+            if remote_size > 0:
+                resp.headers['Content-Length'] = str(remote_size)
+            return _attachment_headers(resp)
+
+    candidates = []
+    attachment_dir = current_app.config.get('ATTACHMENT_FOLDER')
+    if attachment_dir:
+        candidates.append(attachment_dir)
+    # 기존 static 업로드 파일은 /files/ 경유로만 계속 제공
+    candidates.append(_os.path.join(current_app.config['UPLOAD_FOLDER'], 'general_files'))
+    for base in candidates:
+        base = _os.path.abspath(base)
+        full = _os.path.abspath(_os.path.join(base, filename))
+        if not full.startswith(base + _os.sep):
+            continue
+        if _os.path.isfile(full):
+            resp = send_file(
+                full,
+                as_attachment=True,
+                download_name=_os.path.basename(filename),
+                mimetype='application/octet-stream',
+            )
+            return _attachment_headers(resp)
+    return jsonify({'error': 'not found'}), 404
 
 @message_bp.route('/message/send/global', methods=['GET', 'POST'])
 def send_message_global():

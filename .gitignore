@@ -76,3 +76,6 @@ server_local/
 
 # data exports (로컬 전용, 커밋 금지)
 yard_posts_export.json
+
+# private attachment storage
+private_uploads/

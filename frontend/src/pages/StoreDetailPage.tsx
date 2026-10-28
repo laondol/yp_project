@@ -243,14 +243,14 @@ export default function StoreDetailPage() {
       {/* 콘텐츠 썸네일 (시간순) */}
       {data.gallery.length > 0 ? (
         <>
-          <div className="fw-bold small mb-2 text-muted">📸 회원 콘텐츠 ({data.gallery.length}건 · 최신순)</div>
+          <div className="fw-bold small mb-2 text-muted">📸 회원 콘텐츠 ({data.gallery.length}건 · 좋아요순)</div>
           <div className="row g-2 mb-4">
             {data.gallery.map((g) => (
               <div key={g.id + g.image} className="col-6 col-md-4 col-lg-3">
                 <div className="card border-0 shadow-sm h-100" style={{ borderRadius: 12, cursor: 'pointer' }}
                   onClick={() => setSelPhoto(g)}>
                   <img src={g.image} className="card-img-top"
-                    style={{ height: 140, objectFit: 'cover', borderRadius: '12px 12px 0 0' }}
+                    style={{ height: 140, objectFit: 'contain', backgroundColor: '#f8f9fa', borderRadius: '12px 12px 0 0' }}
                     alt={g.title} loading="lazy" />
                   <div className="card-body p-2">
                     <div className="small fw-bold text-truncate">{g.title || '제목 없음'}</div>

@@ -80,9 +80,30 @@ def construction_heritage():
     from services.tour_api import get_nearby_attractions
     from services.transit import haversine_km
     items = get_nearby_attractions(lat, lng, radius=HERITAGE_RADIUS_M)
-    if not items:
+    # TourAPI가 키/할당량/네트워크 문제로 실패하면 공식 장소만 남는다.
+    # 이때도 지역 유산 fallback을 합쳐 추천이 3곳으로 줄어들지 않게 한다.
+    if not items or all(x.get('source') == 'official' for x in items):
         from services.local_sources import get_nearby_heritage
-        items = get_nearby_heritage(lat, lng, max_km=HERITAGE_RADIUS_M / 1000)
+        local_items = get_nearby_heritage(lat, lng, max_km=HERITAGE_RADIUS_M / 1000)
+        seen_names = {_place_key(x.get('name')) for x in items}
+        seen_coords = [
+            (x.get('lat'), x.get('lng')) for x in items
+            if x.get('lat') and x.get('lng')
+        ]
+        for item in local_items:
+            name_key = _place_key(item.get('name'))
+            if name_key and name_key in seen_names:
+                continue
+            if item.get('lat') and item.get('lng') and any(
+                haversine_km(item['lat'], item['lng'], slat, slng) < 0.05
+                for slat, slng in seen_coords
+            ):
+                continue
+            items.append(dict(item))
+            if name_key:
+                seen_names.add(name_key)
+            if item.get('lat') and item.get('lng'):
+                seen_coords.append((item['lat'], item['lng']))
     items = [dict(x) for x in items]
 
     home_lat = home_lng = None

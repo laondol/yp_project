@@ -3,7 +3,7 @@ import os
 import re
 from flask import Blueprint, request, jsonify, session, current_app
 from models import db, YardPost, YardComment, YardOrg, YardSchedule, VillageEvent, User
-from route_modules.common import author_email_for, view_email
+from route_modules.common import author_email_for, view_email, has_page_access
 from datetime import datetime, timedelta
 
 yard_bp = Blueprint('yard_bp', __name__)
@@ -399,7 +399,11 @@ def api_yard_list():
 
 
 def _require_admin():
-    return session.get('role') in ['admin', 'leader']
+    if session.get('role') in ('admin', 'leader'):
+        return True
+    if session.get('user_id'):
+        return has_page_access('yard')
+    return False
 
 
 @yard_bp.route('/api/yard', methods=['POST'])

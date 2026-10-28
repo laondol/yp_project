@@ -41,7 +41,13 @@ def resolve(p):
     p = p.strip()
     p = re.sub(r'^https?://[^/]+', '', p)  # 도메인 제거
     if p.startswith('/files/'):
-        return os.path.join(current_app.config['UPLOAD_FOLDER'], 'general_files', os.path.basename(p))
+        name = os.path.basename(p)
+        private_dir = current_app.config.get('ATTACHMENT_FOLDER')
+        if private_dir:
+            private_path = os.path.join(private_dir, name)
+            if os.path.isfile(private_path):
+                return private_path
+        return os.path.join(current_app.config['UPLOAD_FOLDER'], 'general_files', name)
     if p.startswith('/static/'):
         return os.path.join(current_app.root_path, p.lstrip('/'))
     return None
@@ -120,20 +126,25 @@ def main():
     app = create_app()
     with app.app_context():
         keep, keep_basenames = collect_keep()
-        base = os.path.abspath(current_app.config['UPLOAD_FOLDER'])
-        if not os.path.isdir(base):
-            print('UPLOAD_FOLDER 없음:', base)
+        bases = [os.path.abspath(current_app.config['UPLOAD_FOLDER'])]
+        attachment_dir = current_app.config.get('ATTACHMENT_FOLDER')
+        if attachment_dir:
+            bases.append(os.path.abspath(attachment_dir))
+        bases = [b for b in bases if os.path.isdir(b)]
+        if not bases:
+            print('UPLOAD_FOLDER 없음:', bases)
             return
 
         orphan = []
         kept_on_disk = 0
-        for root, _dirs, files in os.walk(base):
-            for f in files:
-                fp = os.path.abspath(os.path.join(root, f))
-                if fp in keep or os.path.basename(fp) in keep_basenames:
-                    kept_on_disk += 1
-                else:
-                    orphan.append(fp)
+        for base in bases:
+            for root, _dirs, files in os.walk(base):
+                for f in files:
+                    fp = os.path.abspath(os.path.join(root, f))
+                    if fp in keep or os.path.basename(fp) in keep_basenames:
+                        kept_on_disk += 1
+                    else:
+                        orphan.append(fp)
 
         print(f'[정보] 보존 참조 수={len(keep)} 디스크 파일 중 보존={kept_on_disk} 고아={len(orphan)}')
         print(f'[모드] {"실제삭제" if args.delete else "DRY-RUN(삭제 안 함)"}')

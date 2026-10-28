@@ -401,6 +401,34 @@ def ftp_backup(local_path, sub_dir):
             pass
 
 
+def ftp_file_size(filename, sub_dir=''):
+    """NAS의 파일 크기 확인. 없거나 확인 불가면 None."""
+    cfg = _ftp_config()
+    if not cfg:
+        return None
+    ftp = _ftp_connect(cfg)
+    if not ftp:
+        return None
+    try:
+        if sub_dir:
+            parts = [p for p in sub_dir.split('/') if p]
+            for p in parts:
+                try:
+                    ftp.cwd(p)
+                except ftplib.error_perm:
+                    return None
+        ftp.voidcmd('TYPE I')
+        size = ftp.size(filename)
+        return int(size) if size is not None else None
+    except Exception:
+        return None
+    finally:
+        try:
+            ftp.quit()
+        except Exception:
+            pass
+
+
 def ftp_retrieve_file(sub_dir, filename):
     """
     ipDiskFTP에서 파일 가져오기 (서버 로컬에 없을 때 사용).

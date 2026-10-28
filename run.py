@@ -1,7 +1,7 @@
 import os
 from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'))
-from flask import Flask, send_file, send_from_directory
+from flask import Flask, send_file, send_from_directory, request
 from flask_migrate import Migrate
 from config import Config
 from models import db, User
@@ -436,6 +436,12 @@ def create_app():
     return app
 
 app = create_app()
+
+@app.before_request
+def block_legacy_attachment_paths():
+    # 일반 첨부파일은 /files/ 다운로드 라우트로만 제공한다.
+    if request.path.startswith('/static/uploads/general_files'):
+        return 'Not Found', 404
 
 @app.route('/robots.txt')
 def robots_txt():

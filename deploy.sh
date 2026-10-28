@@ -27,10 +27,10 @@ fi
 echo "[3/6] Restarting services..."
 docker compose -f $COMPOSE_FILE up -d
 
-# 3-1. moderation_worker는 up -d로 재시작되지 않으므로 명시적 재시작 필수
-# (Python 프로세스는 기동 시 코드를 메모리에 로드하므로 재시작 없이는 새 코드 미적용)
-echo "[3-1] Restarting moderation_worker..."
+# 3-1. Python 프로세스는 기동 시 코드를 메모리에 로드하므로 명시적 재시작 필수
+echo "[3-1] Restarting workers..."
 docker compose -f $COMPOSE_FILE restart moderation_worker
+docker compose -f $COMPOSE_FILE restart scheduler
 
 # 4. DB Migration (Flask-Migrate)
 echo "[4/6] Running database migration..."
@@ -39,13 +39,19 @@ docker exec -e FLASK_APP=run.py $FLASK_CONTAINER flask db upgrade || {
     echo "  !! Continuing with deployment..."
 }
 
-# 5. Copy frontend dist if built locally
-echo "[5/6] Checking frontend..."
+# 5. Build frontend on the server when the toolchain is available
+echo "[5/6] Preparing frontend..."
+if command -v npm >/dev/null 2>&1 && [ -d "frontend/node_modules" ]; then
+    echo "  -> Building frontend..."
+    (cd frontend && npm run build)
+else
+    echo "  -> npm/node_modules unavailable; using existing frontend/dist."
+fi
 if [ -d "frontend/dist" ]; then
     docker cp frontend/dist/. $FLASK_CONTAINER:/yp_project/frontend/dist/
     echo "  -> Frontend dist copied."
 else
-    echo "  -> No local frontend/dist found, skipping."
+    echo "  -> No frontend/dist found, skipping."
 fi
 
 # 6. Restart flask one more time to pick up any DB changes

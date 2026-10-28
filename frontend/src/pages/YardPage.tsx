@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { formatKST } from '../utils/format'
 import ShareReport from './ShareReport'
@@ -59,6 +59,11 @@ export default function YardPage() {
   })
   const [me, setMe] = useState<{ id: number } | null>(null)
   const myId = me?.id ?? (authUser as any)?.id ?? null
+  const lastPosRef = useRef<{ lat: number; lng: number } | null>(null)
+  const canEditYard = !!authUser && (
+    authUser.role === 'admin' || authUser.role === 'leader' ||
+    (authUser.managed_pages || []).includes('yard')
+  )
 
   // 댓글 모달
   const [commentPost, setCommentPost] = useState<YardItem | null>(null)
@@ -190,12 +195,31 @@ export default function YardPage() {
     fetch('/api/me').then(r => r.json()).then(d => { if (d.id) setMe({ id: d.id }) }).catch(() => {})
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
-        pos => { load(pos.coords.latitude, pos.coords.longitude) },
+        pos => {
+          lastPosRef.current = { lat: pos.coords.latitude, lng: pos.coords.longitude }
+          load(pos.coords.latitude, pos.coords.longitude)
+        },
         () => {},
         { enableHighAccuracy: true, timeout: 10000 }
       )
     }
   }, [])
+
+  // 독립 편집창 저장 시 목록 갱신
+  useEffect(() => {
+    const onMsg = (e: MessageEvent) => {
+      if (e.data === 'yard-updated') {
+        const p = lastPosRef.current
+        load(p?.lat, p?.lng)
+      }
+    }
+    window.addEventListener('message', onMsg)
+    return () => window.removeEventListener('message', onMsg)
+  }, [])
+
+  const openYardEdit = (it: YardItem) => {
+    window.open(`/yard/edit?popup=1&id=${it.db_id}`, 'yardEdit', 'width=620,height=900')
+  }
 
   const filtered = items.filter(i => {
     if (tab === 'bid') return (i.category === 'bid' || i.category === 'notice') && !i.is_past
@@ -636,6 +660,11 @@ export default function YardPage() {
                       {it.kind === 'post' && (
                         <button className="btn btn-sm btn-outline-secondary py-0" onClick={() => (isPast || it.event_started) ? openReviewModal(it) : openComments(it)}>
                           {(isPast || it.event_started) ? '⭐ 후기' : '💬 댓글'}
+                        </button>
+                      )}
+                      {it.kind === 'post' && canEditYard && (
+                        <button className="btn btn-sm btn-outline-primary py-0" onClick={() => openYardEdit(it)}>
+                          ✏️ 수정
                         </button>
                       )}
                     </div>

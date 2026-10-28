@@ -332,8 +332,14 @@ def _resolve_user_file(p):
         return None
     p = p.strip()
     if p.startswith('/files/'):
+        name = os.path.basename(p)
+        private_dir = current_app.config.get('ATTACHMENT_FOLDER')
+        if private_dir:
+            private_path = os.path.join(private_dir, name)
+            if os.path.isfile(private_path):
+                return private_path
         return os.path.join(
-            current_app.config['UPLOAD_FOLDER'], 'general_files', os.path.basename(p))
+            current_app.config['UPLOAD_FOLDER'], 'general_files', name)
     if p.startswith('/static/'):
         return os.path.join(current_app.root_path, p.lstrip('/'))
     return None
@@ -343,9 +349,12 @@ def _safe_delete_user_file(path):
     if not path:
         return False
     try:
-        base = os.path.abspath(current_app.config['UPLOAD_FOLDER'])
+        bases = [os.path.abspath(current_app.config['UPLOAD_FOLDER'])]
+        attachment_dir = current_app.config.get('ATTACHMENT_FOLDER')
+        if attachment_dir:
+            bases.append(os.path.abspath(attachment_dir))
         abs_path = os.path.abspath(path)
-        if abs_path != base and not abs_path.startswith(base + os.sep):
+        if not any(abs_path == base or abs_path.startswith(base + os.sep) for base in bases):
             current_app.logger.warning('[USER-DELETE] 차단된 경로: %s', path)
             return False
         if os.path.isfile(abs_path):

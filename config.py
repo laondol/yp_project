@@ -18,7 +18,14 @@ class Config:
     SESSION_COOKIE_SAMESITE = 'Lax'
     SESSION_COOKIE_SECURE = os.getenv('SESSION_COOKIE_SECURE', 'false').lower() == 'true'
     UPLOAD_FOLDER = os.path.join(BASE_DIR, 'static', 'uploads')
-    MAX_CONTENT_LENGTH = None  # 일반 파일 첨부 요청: 당분간 용량 제한 없음 (None=무제한, 0은 오히려 0바이트로 실패)
+    ATTACHMENT_FOLDER = os.getenv(
+        'ATTACHMENT_FOLDER',
+        os.path.join(BASE_DIR, 'private_uploads', 'general_files'),
+    )
+    MAX_ATTACHMENT_MB = int(os.getenv('MAX_ATTACHMENT_MB', '50'))
+    NAS_ONLY_ATTACHMENT_MB = int(os.getenv('NAS_ONLY_ATTACHMENT_MB', '10'))
+    LOCAL_ATTACHMENT_RETENTION_DAYS = int(os.getenv('LOCAL_ATTACHMENT_RETENTION_DAYS', '30'))
+    MAX_CONTENT_LENGTH = None  # 전역 제한 없음. /api/upload/file은 MAX_ATTACHMENT_MB로 제한
     JUSO_API_KEY = os.getenv('JUSO_API_KEY', '')
     DATA_GO_KR_API_KEY = os.getenv('DATA_GO_KR_API_KEY', '')
     TOUR_API_KEY = os.getenv('TOUR_API_KEY', '')

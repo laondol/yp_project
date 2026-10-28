@@ -273,6 +273,20 @@ def run_proposal_review_scheduler(app):
         time.sleep(86400)
 
 
+def run_attachment_archive_scheduler(app):
+    """매일 큰 파일/오래된 파일의 로컬 사본을 NAS-only로 전환"""
+    time.sleep(180)
+    while True:
+        try:
+            with app.app_context():
+                from services.attachment_storage import archive_local_attachments
+                stats = archive_local_attachments()
+                print(f"[ATTACHMENT-ARCHIVE] {stats}")
+        except Exception as e:
+            print(f"[ATTACHMENT-ARCHIVE] error: {e}")
+        time.sleep(86400)
+
+
 def run_startup_tasks(app):
     for attempt in range(10):
         try:
@@ -457,6 +471,7 @@ def main():
     threading.Thread(target=run_labor_news_scheduler, args=(app,), daemon=True).start()
     threading.Thread(target=run_kr_yp_news_scheduler, args=(app,), daemon=True).start()
     threading.Thread(target=run_world_news_scheduler, args=(app,), daemon=True).start()
+    threading.Thread(target=run_attachment_archive_scheduler, args=(app,), daemon=True).start()
 
     print("[SCHEDULER] All schedulers started. Keeping alive...")
     while True:
