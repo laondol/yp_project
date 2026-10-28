@@ -36,6 +36,7 @@ import MessageSend from './pages/MessageSend'
 import DiscussionListPage from './pages/DiscussionListPage'
 import DiscussionRoomPage from './pages/DiscussionRoomPage'
 import ConstructionPage from './pages/ConstructionPage'
+import HeritageDetailPage from './pages/HeritageDetailPage'
 import SchedulePage from './pages/SchedulePage'
 import AdminDashboard from './pages/AdminDashboard'
 import AdminUsers from './pages/AdminUsers'
@@ -268,6 +269,7 @@ export default function App() {
             <Route path="/discussion/:id" element={<ProtectedRoute><DiscussionRoomPage /></ProtectedRoute>} />
             <Route path="/message/admin/pending" element={<ProtectedRoute><AdminPendingLetters /></ProtectedRoute>} />
             <Route path="/construction" element={<ConstructionPage />} />
+            <Route path="/construction/place/:placeKey" element={<HeritageDetailPage />} />
             <Route path="/construction/store/:storeName" element={<StoreDetailPage />} />
             <Route path="/schedule" element={<ProtectedRoute><SchedulePage /></ProtectedRoute>} />
             <Route path="/memo" element={<ProtectedRoute><MemoPage /></ProtectedRoute>} />

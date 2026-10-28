@@ -109,7 +109,7 @@ def get_quick_links(town=None, village=None):
     ]
     return links
 
-def get_nearby_heritage(lat, lng, max_km=5):
+def get_nearby_heritage(lat, lng, max_km=6):
     import xml.etree.ElementTree as ET
     from math import radians, sin, cos, sqrt, atan2
     def _dist(lat1, lng1, lat2, lng2):
@@ -119,9 +119,21 @@ def get_nearby_heritage(lat, lng, max_km=5):
         a = sin(dlat/2)**2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlng/2)**2
         return R * 2 * atan2(sqrt(a), sqrt(1-a))
     try:
-        r = requests.get("https://www.cha.go.kr/cha/SearchKindOpenapiList.do?pageUnit=1000&ccbaCtcd=31", timeout=15)
-        root = ET.fromstring(r.content)
-        items = root.findall(".//item")
+        items = []
+        for page in range(1, 4):
+            r = requests.get(
+                "https://www.khs.go.kr/cha/SearchKindOpenapiList.do",
+                params={"pageUnit": 1000, "pageIndex": page, "ccbaCtcd": 31},
+                timeout=15,
+            )
+            root = ET.fromstring(r.content)
+            batch = root.findall(".//item")
+            if not batch:
+                break
+            items.extend(batch)
+            total = int(root.findtext(".//totalCnt") or 0)
+            if total and len(items) >= total:
+                break
         nearby = []
         for item in items:
             try:

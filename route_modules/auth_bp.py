@@ -1,4 +1,5 @@
 import os
+import threading
 from datetime import datetime, timezone, timedelta, timezone
 from flask import Blueprint, render_template, request, redirect, url_for, jsonify, session, current_app, send_file
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -16,6 +17,24 @@ def _kst(utc_dt):
     return utc_dt.astimezone(KST).strftime('%Y-%m-%d %H:%M')
 
 auth_bp = Blueprint('auth', __name__)
+
+
+def _send_login_alert_async(email, username, login_time):
+    app = current_app._get_current_object()
+
+    def _send():
+        with app.app_context():
+            try:
+                from services.email_service import EmailService
+                EmailService.send(
+                    email,
+                    '[함께사는양평] 로그인 알림',
+                    f"{email or username}님,\n\n함께사는양평에 로그인 하셨습니다. 확인차 연락 드립니다.\n로그인 시각: {login_time}\n\n본인이 아닌 로그인이라면 비밀번호를 변경해 주세요.\n문의: yp@unocum.kr",
+                )
+            except Exception as exc:
+                app.logger.warning(f'login alert email failed: {exc}')
+
+    threading.Thread(target=_send, daemon=True, name='login-alert-email').start()
 
 
 def _reset_token_expired(expiry):
@@ -354,17 +373,8 @@ def login():
             session.update({'user_id': u.id, 'username': u.username, 'role': u.role, 'email': u.email or '', 'real_name': u.real_name or '', 'managed_pages': u.managed_pages or ''})
             now = datetime.now(timezone.utc)
             u.last_login = now
-            # 로그인 알림 이메일 발송
-            try:
-                from services.email_service import EmailService
-                login_time = _kst(now)
-                EmailService.send(
-                    u.email or login_id,
-                    '[함께사는양평] 로그인 알림',
-                    f"{u.email or u.username}님,\n\n함께사는양평에 로그인 하셨습니다. 확인차 연락 드립니다.\n로그인 시각: {login_time}\n\n본인이 아닌 로그인이라면 비밀번호를 변경해 주세요.\n문의: yp@unocum.kr",
-                )
-            except Exception as e:
-                current_app.logger.warning(f'login alert email failed: {e}')
+            # 로그인 응답을 막지 않도록 알림 메일은 백그라운드에서 발송
+            _send_login_alert_async(u.email or login_id, u.username, _kst(now))
             # 로그인 위치 기록 (GPS from form)
             lat = request.form.get('lat', type=float)
             lon = request.form.get('lon', type=float)
@@ -494,17 +504,8 @@ def api_login():
     session.update({'user_id': u.id, 'username': u.username, 'role': u.role, 'email': u.email or '', 'real_name': u.real_name or '', 'managed_pages': u.managed_pages or ''})
     u.last_login = datetime.now(timezone.utc)
     db.session.commit()
-    # 로그인 알림 이메일 발송
-    try:
-        from services.email_service import EmailService
-        login_time = _kst(u.last_login)
-        EmailService.send(
-            u.email or login_id,
-            '[함께사는양평] 로그인 알림',
-            f"{u.email or u.username}님,\n\n함께사는양평에 로그인 하셨습니다. 확인차 연락 드립니다.\n로그인 시각: {login_time}\n\n본인이 아닌 로그인이라면 비밀번호를 변경해 주세요.\n문의: yp@unocum.kr",
-        )
-    except Exception as e:
-        current_app.logger.warning(f'login alert email failed: {e}')
+    # 로그인 응답을 막지 않도록 알림 메일은 백그라운드에서 발송
+    _send_login_alert_async(u.email or login_id, u.username, _kst(u.last_login))
     # 읽지 않은 편지 수: 탭(벗으로부터/공지/보관함)에서 보이는 편지만 (본인이 자신에게 보낸 제외, 무발신 시스템 공지 포함)
     _unread = Message.query.filter(
         Message.receiver_id == u.id, Message.is_read == False,

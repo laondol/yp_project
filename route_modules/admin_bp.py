@@ -417,6 +417,8 @@ def admin_delete_user(user_id):
     from sqlalchemy import text
     uid = user_id
     fk_deletes = [
+        ("DELETE FROM bike_ride WHERE user_id = :id", uid),
+        ("DELETE FROM store_vote WHERE user_id = :id", uid),
         ("DELETE FROM point_history WHERE user_id = :id", uid),
         ("DELETE FROM post_vote WHERE user_id = :id", uid),
         ("DELETE FROM comment WHERE user_id = :id", uid),
@@ -553,7 +555,7 @@ def api_admin_page_managers():
     village_groups = [{'label': myeon, 'pages': {vi_k(myeon, r): r for r in ris}} for myeon, ris in TOWNS]
     all_pages = [
         {'title': '소개', 'pages': {'intro':'사업소개', 'operation':'운영계획', 'terms':'회원약관', 'charter':'정관'}},
-        {'title': '소식', 'pages': {'kr_news':'대한민국과양평', 'world_news':'세계와양평', 'share':'공유마당', 'construction':'위치기반안내', 'heritage':'국가유산', 'scenery':'풍경', 'home':'집으로', 'building':'건축공사'}},
+        {'title': '소식', 'pages': {'kr_news':'대한민국과양평', 'world_news':'세계와양평', 'share':'공유마당', 'construction':'위치기반안내', 'heritage':'가볼만한 곳', 'scenery':'풍경', 'home':'집으로', 'building':'건축공사'}},
         {'title': '하는일', 'groups': [
             {'label': '⚖️ 이훈노무사 노동법률상담실', 'pages': {'legal':'법률상담', 'legal_issues':'노동이슈', 'legal_visit':'방문상담'}},
             {'label': '🫂 숨상담심리연구소', 'pages': {'psycho':'심리상담', 'psycho_board':'심리상담게시판', 'psycho_visit':'방문상담게시판'}},

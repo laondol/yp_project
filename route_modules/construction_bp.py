@@ -1,8 +1,9 @@
 from flask import Blueprint, render_template, request, redirect, url_for, jsonify, session, current_app, send_file
 from datetime import datetime, timezone, timedelta
+import json
 from urllib.parse import quote
 from sqlalchemy import or_
-from models import db, ConstructionNotice, StoreInfo, VillageAlert, HeritageStamp, User, Message, ShareReport, VillageCache, PublicFacility, FacilityReport, StoreSuggestion, StoreMenu, StoreNameVote, StoreInfoVote, StoreInfoReview
+from models import db, ConstructionNotice, StoreInfo, VillageAlert, HeritageStamp, User, Message, ShareReport, VillageCache, PublicFacility, FacilityReport, StoreSuggestion, StoreMenu, StoreNameVote, StoreInfoVote, StoreInfoReview, StoreVote, BikeRide, YardPost
 from services.construction import sync_construction_notices, sync_traffic_incidents, sync_congestion_info, sync_building_permits
 from services.transit import haversine_km
 from config import Config
@@ -11,6 +12,35 @@ from route_modules.common import view_email, display_author
 construction_bp = Blueprint('construction', __name__)
 
 _ADDR_BACKFILL_RUNNING = False
+HERITAGE_RADIUS_M = 6000
+HERITAGE_MAX_BIKE_MINUTES = 30
+
+
+def _place_key(value):
+    return ''.join(ch for ch in str(value or '').lower() if ch.isalnum())
+
+
+def _event_matches_place(event, place):
+    event_place = _place_key(event.event_place)
+    place_name = _place_key(place.get('name'))
+    if len(event_place) >= 2 and len(place_name) >= 2:
+        if event_place in place_name or place_name in event_place:
+            return True
+    if event.latitude and event.longitude and place.get('lat') and place.get('lng'):
+        return haversine_km(event.latitude, event.longitude, place['lat'], place['lng']) <= 0.3
+    return False
+
+
+def _current_place_events():
+    now = datetime.now()
+    events = []
+    for event in YardPost.query.filter_by(is_active=True, is_approved=True, category='event').all():
+        if event.event_end and event.event_end < now:
+            continue
+        if not event.event_end and event.event_date and event.event_date < now - timedelta(days=30):
+            continue
+        events.append(event)
+    return events
 
 def _serve_spa():
     import os
@@ -27,21 +57,37 @@ def construction():
 def compass():
     return _serve_spa()
 
+
+@construction_bp.route('/construction/place/<path:place_key>')
+def construction_place(place_key):
+    return _serve_spa()
+
 @construction_bp.route('/construction/heritage')
 def construction_heritage():
     lat = request.args.get('lat', type=float)
     lng = request.args.get('lng', type=float)
+    uid = session.get('user_id')
+    user = User.query.get(uid) if uid else None
+    if not lat or not lng:
+        if user and user.curr_town and user.curr_village:
+            from services.transit import lookup_village_coords
+            hc = lookup_village_coords(user.curr_town, user.curr_village)
+            if hc:
+                lat, lng = hc
     if not lat or not lng:
         return jsonify([])
-    from services.local_sources import get_nearby_heritage
+
+    from services.tour_api import get_nearby_attractions
     from services.transit import haversine_km
-    items = get_nearby_heritage(lat, lng, max_km=5)
-    uid = session.get('user_id')
+    items = get_nearby_attractions(lat, lng, radius=HERITAGE_RADIUS_M)
+    if not items:
+        from services.local_sources import get_nearby_heritage
+        items = get_nearby_heritage(lat, lng, max_km=HERITAGE_RADIUS_M / 1000)
+    items = [dict(x) for x in items]
+
     home_lat = home_lng = None
-    home_label = ''
     stamped_names = set()
     if uid:
-        user = User.query.get(uid)
         if user and user.curr_town and user.curr_village:
             from services.transit import lookup_village_coords
             hc = lookup_village_coords(user.curr_town, user.curr_village)
@@ -49,15 +95,97 @@ def construction_heritage():
                 home_lat, home_lng = hc
         stamps = HeritageStamp.query.filter_by(user_id=uid).all()
         stamped_names = {s.heritage_name for s in stamps}
-    for h in items:
+    from services.bike_route import analyze_bike_route
+    from concurrent.futures import ThreadPoolExecutor
+    def _bike_analysis(item):
+        return analyze_bike_route(lat, lng, item.get('lat'), item.get('lng'))
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        analyses = list(pool.map(_bike_analysis, items))
+    for h, bike in zip(items, analyses):
+        h['origin_lat'] = lat
+        h['origin_lng'] = lng
         h['stamped'] = h['name'] in stamped_names
+        if bike:
+            h['bike_minutes'] = bike.get('duration_min')
+            h['bike_road_pct'] = bike.get('bike_road_pct')
+            h['max_grade_deg'] = bike.get('max_grade_deg')
+            h['bike_friendly'] = bike.get('bike_friendly')
+            h['bike_friendly_label'] = bike.get('bike_friendly_label')
+        else:
+            h['bike_minutes'] = max(1, int(round(float(h.get('dist') or 0) / 15 * 60)))
         if home_lat and home_lng:
             d_home = round(haversine_km(h['lat'], h['lng'], home_lat, home_lng), 1)
             h['dist_from_home'] = d_home
             h['near_home'] = d_home <= 5
         else:
             h['near_home'] = False
+    items = [h for h in items if (h.get('bike_minutes') or 999) <= HERITAGE_MAX_BIKE_MINUTES]
+    place_events = _current_place_events()
+    for h in items:
+        matched = [p for p in place_events if _event_matches_place(p, h)]
+        matched.sort(key=lambda p: p.event_date or datetime.max)
+        h['events'] = [
+            {
+                'id': p.id,
+                'title': p.title,
+                'event_date': p.event_date.isoformat() if p.event_date else '',
+                'event_date_display': p.event_date.strftime('%m/%d %H:%M') if p.event_date else (p.repeat_text or ''),
+                'event_place': p.event_place or '',
+            }
+            for p in matched
+        ]
     return jsonify(items)
+
+
+@construction_bp.route('/construction/heritage/detail')
+def construction_heritage_detail():
+    from services.tour_api import get_place_detail, find_official_place
+    from services.bike_route import analyze_bike_route
+
+    content_id = (request.args.get('content_id') or '').strip()
+    content_type_id = (request.args.get('content_type_id') or '').strip()
+    name = (request.args.get('name') or '').strip()
+    official = find_official_place(content_id, name)
+    fallback = dict(official) if official else {}
+    if not fallback:
+        fallback = {
+            'name': name,
+            'lat': request.args.get('lat', type=float),
+            'lng': request.args.get('lng', type=float),
+        }
+    detail = get_place_detail(
+        content_id or fallback.get('content_id', ''),
+        content_type_id or fallback.get('content_type_id', ''),
+        fallback,
+    )
+    if not detail.get('name'):
+        return jsonify({'error': '장소 정보를 찾을 수 없습니다.'}), 404
+
+    from_lat = request.args.get('from_lat', type=float)
+    from_lng = request.args.get('from_lng', type=float)
+    uid = session.get('user_id')
+    user = User.query.get(uid) if uid else None
+    if (not from_lat or not from_lng) and user and user.curr_town and user.curr_village:
+        from services.transit import lookup_village_coords
+        home = lookup_village_coords(user.curr_town, user.curr_village)
+        if home:
+            from_lat, from_lng = home
+
+    dest_lat = detail.get('lat')
+    dest_lng = detail.get('lng')
+    bike = None
+    if from_lat and from_lng and dest_lat and dest_lng:
+        bike = analyze_bike_route(from_lat, from_lng, dest_lat, dest_lng)
+    detail['bike'] = bike
+    detail['origin_lat'] = from_lat
+    detail['origin_lng'] = from_lng
+    detail['stamped'] = False
+    if uid:
+        detail['stamped'] = HeritageStamp.query.filter_by(
+            user_id=uid, heritage_name=detail['name']
+        ).first() is not None
+    return jsonify(detail)
+
 
 @construction_bp.route('/construction/heritage/stamp', methods=['POST'])
 def heritage_stamp():
@@ -79,11 +207,212 @@ def heritage_stamp():
             return jsonify({"success": False, "error": f"현장에서만 찍을 수 있어요! 약 {round(dist*1000)}m 떨어져 있습니다. 가까이 가서 다시 시도해 주세요.", "distance_m": round(dist*1000)})
     existing = HeritageStamp.query.filter_by(user_id=uid, heritage_name=name).first()
     if existing:
-        return jsonify({"success": False, "error": "이미 방문 완료한 국가유산입니다."})
+        return jsonify({"success": False, "error": "이미 방문 완료한 장소입니다."})
     stamp = HeritageStamp(user_id=uid, heritage_name=name, heritage_lat=lat, heritage_lng=lng)
     db.session.add(stamp)
     db.session.commit()
     return jsonify({"success": True, "message": "⭐ 스탬프가 찍혔습니다!"})
+
+@construction_bp.route('/construction/bike-detail')
+def construction_bike_detail():
+    from services.tour_api import get_place_hours
+    from services.bike_route import analyze_bike_route
+    from_lat = request.args.get('from_lat', type=float)
+    from_lng = request.args.get('from_lng', type=float)
+    to_lat = request.args.get('to_lat', type=float)
+    to_lng = request.args.get('to_lng', type=float)
+    content_id = (request.args.get('content_id') or '').strip()
+    content_type_id = (request.args.get('content_type_id') or '').strip()
+    hours = get_place_hours(content_id, content_type_id) if content_id and content_type_id else {
+        'opening_hours': '', 'closed_days': '', 'tel': '',
+    }
+    bike = analyze_bike_route(from_lat, from_lng, to_lat, to_lng) if from_lat and from_lng and to_lat and to_lng else None
+    return jsonify({
+        'opening_hours': hours.get('opening_hours', ''),
+        'closed_days': hours.get('closed_days', ''),
+        'tel': hours.get('tel', ''),
+        'bike': bike,
+    })
+
+
+def _bike_ride_dict(ride):
+    return {
+        'id': ride.id,
+        'ride_type': ride.ride_type,
+        'place_name': ride.place_name or '',
+        'place_lat': ride.place_lat,
+        'place_lng': ride.place_lng,
+        'distance_m': ride.distance_m,
+        'duration_sec': ride.duration_sec,
+        'avg_speed_kmh': ride.avg_speed_kmh,
+        'bike_road_pct': ride.bike_road_pct,
+        'dedicated_pct': ride.dedicated_pct,
+        'lane_pct': ride.lane_pct,
+        'shared_pct': ride.shared_pct,
+        'max_grade_pct': ride.max_grade_pct,
+        'max_grade_deg': ride.max_grade_deg,
+        'max_grade_length_m': ride.max_grade_length_m,
+        'ascent_m': ride.ascent_m,
+        'descent_m': ride.descent_m,
+        'bike_friendly': ride.bike_friendly,
+        'memo': ride.memo or '',
+        'has_track': bool(ride.track_json),
+        'started_at': ride.started_at.isoformat() if ride.started_at else None,
+        'ended_at': ride.ended_at.isoformat() if ride.ended_at else None,
+        'created_at': ride.created_at.isoformat() if ride.created_at else None,
+    }
+
+
+@construction_bp.route('/construction/bike-rides', methods=['GET'])
+def bike_rides():
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({'error': '로그인이 필요합니다.'}), 401
+    rows = BikeRide.query.filter_by(user_id=uid).order_by(BikeRide.created_at.desc()).limit(30).all()
+    return jsonify({'rides': [_bike_ride_dict(x) for x in rows]})
+
+
+@construction_bp.route('/construction/bike-rides', methods=['POST'])
+def bike_ride_save():
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({'error': '로그인이 필요합니다.'}), 401
+    data = request.get_json(silent=True) or {}
+    bike = data.get('bike') if isinstance(data.get('bike'), dict) else data
+
+    def number(key):
+        try:
+            value = bike.get(key)
+            if value in (None, '') and isinstance(data, dict):
+                value = data.get(key)
+            return float(value or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    distance_m = number('distance_m')
+    if distance_m <= 0:
+        return jsonify({'error': '코스 분석 정보가 없습니다.'}), 400
+    duration_sec = int(number('duration_sec') or number('duration_min') * 60)
+    if duration_sec <= 0:
+        duration_sec = max(60, int(distance_m / 1000 / 15 * 3600))
+    memo = str(data.get('memo') or '').strip()[:1000]
+    now = datetime.now()
+    ride = BikeRide(
+        user_id=uid,
+        ride_type='course',
+        place_name=str(data.get('place_name') or bike.get('place_name') or '')[:200],
+        place_lat=number('place_lat'),
+        place_lng=number('place_lng'),
+        origin_lat=number('origin_lat'),
+        origin_lng=number('origin_lng'),
+        distance_m=distance_m,
+        duration_sec=duration_sec,
+        avg_speed_kmh=number('avg_speed_kmh'),
+        bike_road_pct=number('bike_road_pct'),
+        dedicated_pct=number('dedicated_pct'),
+        lane_pct=number('lane_pct'),
+        shared_pct=number('shared_pct'),
+        max_grade_pct=number('max_grade_pct'),
+        max_grade_deg=number('max_grade_deg'),
+        max_grade_length_m=number('max_grade_length_m'),
+        max_grade_at_m=number('max_grade_at_m'),
+        ascent_m=number('ascent_m'),
+        descent_m=number('descent_m'),
+        bike_friendly=str(bike.get('bike_friendly_label') or bike.get('bike_friendly') or '')[:20],
+        memo=memo,
+        started_at=now,
+        ended_at=now,
+    )
+    db.session.add(ride)
+    db.session.commit()
+    return jsonify({'ok': True, 'ride': _bike_ride_dict(ride)})
+
+
+@construction_bp.route('/construction/bike-rides/gps', methods=['POST'])
+def bike_ride_gps_save():
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({'error': '로그인이 필요합니다.'}), 401
+    data = request.get_json(silent=True) or {}
+    raw_points = data.get('points')
+    if not isinstance(raw_points, list) or not raw_points:
+        return jsonify({'error': '주행 좌표가 없습니다.'}), 400
+    if len(raw_points) > 20000:
+        return jsonify({'error': '주행 좌표가 너무 많습니다.'}), 400
+
+    points = []
+    distance_m = 0.0
+    prev = None
+    from services.transit import haversine_km
+    for point in raw_points:
+        if not isinstance(point, dict):
+            continue
+        try:
+            lat = float(point.get('lat'))
+            lng = float(point.get('lng'))
+        except (TypeError, ValueError):
+            continue
+        if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+            continue
+        try:
+            ts = int(point.get('t') or 0)
+        except (TypeError, ValueError):
+            ts = 0
+        if prev:
+            distance_m += haversine_km(prev[0], prev[1], lat, lng) * 1000
+        prev = (lat, lng)
+        points.append({'lat': round(lat, 6), 'lng': round(lng, 6), 't': ts})
+    if not points:
+        return jsonify({'error': '유효한 주행 좌표가 없습니다.'}), 400
+
+    try:
+        started_ms = int(data.get('started_at_ms') or 0)
+        ended_ms = int(data.get('ended_at_ms') or 0)
+    except (TypeError, ValueError):
+        started_ms = ended_ms = 0
+    if started_ms and ended_ms and ended_ms > started_ms:
+        started_at = datetime.fromtimestamp(started_ms / 1000)
+        ended_at = datetime.fromtimestamp(ended_ms / 1000)
+        duration_sec = int((ended_ms - started_ms) / 1000)
+    else:
+        started_at = ended_at = datetime.now()
+        duration_sec = int(data.get('duration_sec') or 0)
+    duration_sec = max(1, min(duration_sec or 1, 86400))
+    place_name = str(data.get('place_name') or '자전거 주행')[:200]
+    memo = str(data.get('memo') or '').strip()[:1000]
+    ride = BikeRide(
+        user_id=uid,
+        ride_type='gps',
+        place_name=place_name,
+        place_lat=points[-1]['lat'],
+        place_lng=points[-1]['lng'],
+        origin_lat=points[0]['lat'],
+        origin_lng=points[0]['lng'],
+        distance_m=round(distance_m, 1),
+        duration_sec=duration_sec,
+        avg_speed_kmh=round(distance_m / 1000 / (duration_sec / 3600), 1) if duration_sec else 0,
+        memo=memo,
+        track_json=json.dumps(points, ensure_ascii=False),
+        started_at=started_at,
+        ended_at=ended_at,
+    )
+    db.session.add(ride)
+    db.session.commit()
+    return jsonify({'ok': True, 'ride': _bike_ride_dict(ride)})
+
+
+@construction_bp.route('/construction/bike-rides/<int:ride_id>', methods=['DELETE'])
+def bike_ride_delete(ride_id):
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({'error': '로그인이 필요합니다.'}), 401
+    ride = BikeRide.query.filter_by(id=ride_id, user_id=uid).first()
+    if not ride:
+        return jsonify({'error': '기록을 찾을 수 없습니다.'}), 404
+    db.session.delete(ride)
+    db.session.commit()
+    return jsonify({'ok': True})
+
 
 @construction_bp.route('/construction/transit')
 def construction_transit():
@@ -331,19 +660,126 @@ def construction_local_stores():
         return jsonify({"error": "등록된 주소가 없습니다."}), 400
     town = user.town or user.curr_town
     village = user.village or user.curr_village
-    stores = ShareReport.query.filter_by(
-        town=town, village=village, status='approved'
-    ).order_by(ShareReport.created_at.desc()).limit(50).all()
-    # 그룹화: 150m 이내 같은 위치 → 하나의 가게 (클러스터 중심 좌표 사용)
+    # 등록 가게(StoreInfo) 기준으로 승인 사진을 배정 (가게 상세와 같은 기준)
     from services.transit import haversine_km
+    store_infos = StoreInfo.query.filter_by(town=town).all()
+    if not store_infos:
+        store_infos = StoreInfo.query.all()
+    store_infos = [si for si in store_infos if not (si.town and town and si.town != town)]
+
+    # 사용자 리 마을 공유글 + 마을 가게 150m 내 공유글(마을 필드 오류 보정)
+    town_shares = ShareReport.query.filter_by(
+        town=town, status='approved'
+    ).order_by(ShareReport.created_at.desc()).limit(200).all()
+    near_store_infos = [
+        si for si in store_infos
+        if not si.village or not village or si.village == village
+    ] or store_infos
+
+    def _near_village_store(s):
+        if not s.latitude or not s.longitude:
+            return False
+        return any(
+            si.latitude and si.longitude and
+            haversine_km(si.latitude, si.longitude, s.latitude, s.longitude) <= 0.15
+            for si in near_store_infos
+        )
+
+    stores = [
+        s for s in town_shares
+        if (s.village or '') == (village or '') or _near_village_store(s)
+    ]
+
+    def _store_link_info(si):
+        if si.our_link:
+            return si.our_link, '🏠 가게소개'
+        if si.store_homepage:
+            return si.store_homepage, '🌐 홈페이지'
+        if si.smartplace:
+            return si.smartplace, '📍 스마트플레이스'
+        return None, None
+
+    from sqlalchemy import func
+    photo_like_counts = {}
+    if stores:
+        rows = (
+            db.session.query(StoreInfoVote.photo_id, func.count(StoreInfoVote.id))
+            .filter(StoreInfoVote.photo_id.in_([s.id for s in stores]),
+                    StoreInfoVote.vote_type == 'up')
+            .group_by(StoreInfoVote.photo_id)
+            .all()
+        )
+        photo_like_counts = {pid: cnt for pid, cnt in rows}
+
+    def _post_dict(s):
+        return {
+            "id": s.id, "title": s.title, "desc": (s.description or "")[:100],
+            "user": display_author(getattr(s, "user_id", None), s.author_name) or "익명",
+            "image": s.image_path,
+            "like_count": photo_like_counts.get(s.id, 0),
+            "date": s.created_at.strftime("%m/%d") if s.created_at else ""
+        }
+
     grouped = {}
+    for si in store_infos:
+        link, label = _store_link_info(si)
+        grouped[f"store-{si.id}"] = {
+            "name": si.name,
+            "name_status": "confirmed",
+            "store_key": f"si:{si.id}",
+            "store_info_id": si.id,
+            "posts": [],
+            "image": None,
+            "lat": si.latitude, "lng": si.longitude,
+            "town": si.town or town,
+            "village": si.village or village,
+            "phone": si.phone or None,
+            "store_link": link,
+            "link_label": label,
+        }
+
+    def _nearest_store(s):
+        slat = s.latitude or 0
+        slng = s.longitude or 0
+        if not slat or not slng:
+            return None
+        # 작성자가 가게명을 명시한 경우 해당 등록 가게 우선
+        if s.store_name:
+            sname = _normalize_store_name(s.store_name)
+            for si in store_infos:
+                if sname and _normalize_store_name(si.name) == sname:
+                    return si
+        best = None
+        best_d = None
+        for si in store_infos:
+            if si.latitude and si.longitude:
+                d = haversine_km(si.latitude, si.longitude, slat, slng)
+                if d <= 0.15 and (best_d is None or d < best_d):
+                    best, best_d = si, d
+        return best
+
+    unassigned = []
     for s in stores:
+        si = _nearest_store(s)
+        if not si:
+            unassigned.append(s)
+            continue
+        g = grouped[f"store-{si.id}"]
+        g["posts"].append(_post_dict(s))
+        if s.image_path and not g["image"]:
+            g["image"] = s.image_path
+
+    # 등록 가게에 속하지 않는 공유글은 150m 단위로 묶어 표시
+    unknown_idx = 0
+    for s in unassigned:
         slat = s.latitude or 0
         slng = s.longitude or 0
         if not slat or not slng:
             continue
         matched_key = None
         for gk, gv in grouped.items():
+            if not gk.startswith("unknown-"):
+                continue
             if gv["lat"] and gv["lng"]:
                 d = haversine_km(float(gv["lat"]), float(gv["lng"]), slat, slng)
                 if d <= 0.15:
@@ -351,64 +787,31 @@ def construction_local_stores():
                     break
         if matched_key:
             g = grouped[matched_key]
-            g["posts"].append({
-                "id": s.id, "title": s.title, "desc": (s.description or "")[:100],
-                "user": display_author(getattr(s, "user_id", None), s.author_name) or "익명", "image": s.image_path,
-                "date": s.created_at.strftime("%m/%d") if s.created_at else ""
-            })
+            g["posts"].append(_post_dict(s))
             if s.image_path and not g["image"]:
                 g["image"] = s.image_path
-            # 중심 좌표 업데이트 (평균)
             n = len(g["posts"])
             g["lat"] = float(g["lat"]) * (n - 1) / n + slat / n
             g["lng"] = float(g["lng"]) * (n - 1) / n + slng / n
         else:
-            key = f"{round(slat,4)}|{round(slng,4)}"
-            grouped[key] = {
-                "name": s.title or "제목없음",
-                "posts": [{
-                    "id": s.id, "title": s.title, "desc": (s.description or "")[:100],
-                    "user": display_author(getattr(s, "user_id", None), s.author_name) or "익명", "image": s.image_path,
-                    "date": s.created_at.strftime("%m/%d") if s.created_at else ""
-                }],
+            grouped[f"unknown-{unknown_idx}"] = {
+                "name": "위치 확인 불가",
+                "name_status": "unknown",
+                "posts": [_post_dict(s)],
                 "image": s.image_path,
                 "lat": s.latitude, "lng": s.longitude,
             }
-    # StoreInfo 매칭: 각 그룹 좌표와 가장 가까운 StoreInfo(150m 이내) 찾기
-    # town만으로 먼저 검색 (village 불일치 허용)
-    store_infos = StoreInfo.query.filter_by(town=town).all()
-    if not store_infos:
-        store_infos = StoreInfo.query.all()  # fallback: 전체 검색
-    for gk, gv in grouped.items():
-        if not gv.get("lat") or not gv.get("lng"):
-            gv["name"] = "위치 확인 불가"
-            gv["name_status"] = "unknown"
-            continue
-        matched = False
-        for si in store_infos:
-            if si.latitude and si.longitude:
-                d = haversine_km(si.latitude, si.longitude, float(gv["lat"]), float(gv["lng"]))
-                if d <= 0.15:
-                    gv["name"] = si.name
-                    gv["name_status"] = "confirmed"
-                    gv["phone"] = si.phone or None
-                    gv["store_link"] = si.our_link or si.store_homepage or si.smartplace or None
-                    gv["link_label"] = "🏠 가게소개" if si.our_link else ("🌐 홈페이지" if si.store_homepage else ("📍 스마트플레이스" if si.smartplace else None))
-                    matched = True
-                    break
-        if not matched:
-            gv["name"] = "위치 확인 불가"
-            gv["name_status"] = "unknown"
+            unknown_idx += 1
 
-    # StoreSuggestion 매칭: StoreInfo에 없으면 회원 제안(카카오) 가게에서 찾기
+    # StoreSuggestion 매칭: 등록 가게에 없는 위치는 회원 제안(카카오) 가게에서 찾기
     all_sugs = StoreSuggestion.query.filter(
         StoreSuggestion.lat.isnot(None), StoreSuggestion.lon.isnot(None)
     ).all()
     for gk, gv in grouped.items():
         if not gv.get("lat") or not gv.get("lng"):
             continue
-        # 이미 StoreInfo로 완전 매칭됐으면 건너뜀 (phone 있으면 확정)
-        if gv.get("phone") and gv.get("store_link"):
+        # 이미 StoreInfo로 확정된 가게는 이름을 덮어쓰지 않음
+        if gv.get("name_status") == "confirmed":
             continue
         for sg in all_sugs:
             if sg.lat and sg.lon:
@@ -464,13 +867,76 @@ def construction_local_stores():
                         gv["menus"] = [{"name": m.name, "category": m.sub_category, "price": m.price} for m in menus]
                     break
 
-    # 사진 수 표시
-    for gk, gv in grouped.items():
-        gv["photo_count"] = len(gv.get("posts", []))
+    # 사진 펼치기(대표+추가 이미지) + 좋아요순 정렬
+    share_by_id = {s.id: s for s in stores}
+    for gv in grouped.values():
+        seen = set()
+        photos = []
+        for p in gv.get("posts", []):
+            s = share_by_id.get(p["id"])
+            if not s:
+                continue
+            imgs = []
+            if s.image_path:
+                imgs.append(s.image_path)
+            if s.extra_images:
+                imgs.extend([e.strip() for e in s.extra_images.split(',') if e.strip()])
+            for img in imgs:
+                if img in seen:
+                    continue
+                seen.add(img)
+                photos.append({
+                    "image": img,
+                    "post_id": s.id,
+                    "title": s.title or "",
+                    "like_count": photo_like_counts.get(s.id, 0),
+                })
+        photos.sort(key=lambda x: (-x["like_count"], -x["post_id"]))
+        gv["photos"] = photos
+        gv["photo_count"] = len(photos)
+        gv["image"] = photos[0]["image"] if photos else None
+
+    # 가게 자체 좋아요/나빠요 집계
+    store_keys = [gv.get("store_key") for gv in grouped.values() if gv.get("store_key")]
+    store_up_counts, store_down_counts, my_store_votes = {}, {}, {}
+    if store_keys:
+        for v in StoreVote.query.filter(StoreVote.store_key.in_(store_keys)).all():
+            if v.vote_type == 'up':
+                store_up_counts[v.store_key] = store_up_counts.get(v.store_key, 0) + 1
+            else:
+                store_down_counts[v.store_key] = store_down_counts.get(v.store_key, 0) + 1
+            if v.user_id == uid:
+                my_store_votes[v.store_key] = v.vote_type
+    for gv in grouped.values():
+        k = gv.get("store_key")
+        gv["store_up"] = store_up_counts.get(k, 0)
+        gv["store_down"] = store_down_counts.get(k, 0)
+        gv["my_store_vote"] = my_store_votes.get(k)
+
+    lat_arg = request.args.get('lat')
+    lng_arg = request.args.get('lng')
+    try:
+        ref_lat = float(lat_arg) if lat_arg else (user.curr_latitude or user.reg_latitude)
+        ref_lng = float(lng_arg) if lng_arg else (user.curr_longitude or user.reg_longitude)
+    except (TypeError, ValueError):
+        ref_lat = ref_lng = None
+    stores_out = list(grouped.values())
+
+    def _dist_key(gv):
+        if ref_lat and ref_lng and gv.get("lat") and gv.get("lng"):
+            return haversine_km(ref_lat, ref_lng, float(gv["lat"]), float(gv["lng"]))
+        return float("inf")
+
+    # 좋아요 많은 순 → 등록 순 → 거리 순
+    stores_out.sort(key=lambda gv: (
+        -(gv.get("store_up") or 0),
+        gv.get("store_info_id") if gv.get("store_info_id") is not None else 10**9,
+        _dist_key(gv),
+    ))
 
     result = {
         "town": town, "village": village,
-        "stores": list(grouped.values())[:20],
+        "stores": stores_out,
     }
     return jsonify(result)
 
@@ -769,6 +1235,8 @@ def store_info_json():
         elif store_info.manager_verified and store_info.manager_user_id == uid:
             can_edit = True
 
+    gallery.sort(key=lambda g: g.get('up_count', 0), reverse=True)
+
     return jsonify({
         "store_name": store_info.name if store_info else (suggestion.top_name if suggestion else (store_name or '')),
         "store_info_id": store_info.id if store_info else None,
@@ -842,6 +1310,47 @@ def store_info_vote():
         "success": True,
         "msg": f"투표 완료 (1니아 차감, 잔여 {user.points}니아){review_msg}",
         "user_points": user.points,
+    })
+
+@construction_bp.route('/construction/store-like', methods=['POST'])
+def store_like():
+    """가게 자체 좋아요/나빠요 토글 (무료)"""
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({"error": "로그인이 필요합니다."}), 401
+
+    data = request.get_json(force=True)
+    store_key = (data.get('store_key') or '').strip()
+    vote_type = data.get('vote_type', '')
+    if not store_key or vote_type not in ('up', 'down'):
+        return jsonify({"error": "잘못된 요청입니다."}), 400
+    if not store_key.startswith('si:'):
+        return jsonify({"error": "지원하지 않는 가게입니다."}), 400
+    try:
+        store_info_id = int(store_key[3:])
+    except ValueError:
+        return jsonify({"error": "잘못된 가게입니다."}), 400
+    if not StoreInfo.query.get(store_info_id):
+        return jsonify({"error": "가게를 찾을 수 없습니다."}), 404
+
+    existing = StoreVote.query.filter_by(store_key=store_key, user_id=uid).first()
+    if existing:
+        if existing.vote_type == vote_type:
+            db.session.delete(existing)
+        else:
+            existing.vote_type = vote_type
+    else:
+        db.session.add(StoreVote(store_key=store_key, user_id=uid, vote_type=vote_type))
+    db.session.commit()
+
+    up = StoreVote.query.filter_by(store_key=store_key, vote_type='up').count()
+    down = StoreVote.query.filter_by(store_key=store_key, vote_type='down').count()
+    mine = StoreVote.query.filter_by(store_key=store_key, user_id=uid).first()
+    return jsonify({
+        "success": True,
+        "up_count": up,
+        "down_count": down,
+        "my_vote": mine.vote_type if mine else None,
     })
 
 @construction_bp.route('/construction/local-scenery')

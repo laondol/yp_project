@@ -451,6 +451,49 @@ class StoreInfoVote(db.Model):
     __table_args__ = (db.UniqueConstraint('photo_id', 'user_id', name='uq_photo_vote_user'),)
 
 
+class StoreVote(db.Model):
+    """가게 자체 좋아요/나빠요 투표 (회원별 1표)"""
+    __tablename__ = 'store_vote'
+    id = db.Column(db.Integer, primary_key=True)
+    store_key = db.Column(db.String(100), nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    vote_type = db.Column(db.String(10), nullable=False)  # 'up' or 'down'
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    __table_args__ = (db.UniqueConstraint('store_key', 'user_id', name='uq_store_vote_user'),)
+
+
+class BikeRide(db.Model):
+    """자전거 코스 분석 저장 및 GPS 주행 기록"""
+    __tablename__ = 'bike_ride'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    ride_type = db.Column(db.String(20), default='course')  # course / gps
+    place_name = db.Column(db.String(200))
+    place_lat = db.Column(db.Float)
+    place_lng = db.Column(db.Float)
+    origin_lat = db.Column(db.Float)
+    origin_lng = db.Column(db.Float)
+    distance_m = db.Column(db.Float)
+    duration_sec = db.Column(db.Integer)
+    avg_speed_kmh = db.Column(db.Float)
+    bike_road_pct = db.Column(db.Float)
+    dedicated_pct = db.Column(db.Float)
+    lane_pct = db.Column(db.Float)
+    shared_pct = db.Column(db.Float)
+    max_grade_pct = db.Column(db.Float)
+    max_grade_deg = db.Column(db.Float)
+    max_grade_length_m = db.Column(db.Float)
+    max_grade_at_m = db.Column(db.Float)
+    ascent_m = db.Column(db.Float)
+    descent_m = db.Column(db.Float)
+    bike_friendly = db.Column(db.String(20))
+    memo = db.Column(db.Text)
+    track_json = db.Column(db.Text)
+    started_at = db.Column(db.DateTime)
+    ended_at = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+
 class StoreInfoReview(db.Model):
     """가게 사진 정보 수정 요청 (관리자 검토 대기)"""
     __tablename__ = 'store_info_review'

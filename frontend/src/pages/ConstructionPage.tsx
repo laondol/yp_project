@@ -8,6 +8,9 @@ import ErrorMessage from '../components/common/ErrorMessage'
 import EmptyState from '../components/common/EmptyState'
 import FacilityMap from '../components/FacilityMap'
 import LeafletMap from '../components/LeafletMap'
+import BikeDetailModal from '../components/BikeDetailModal'
+import BikeRideTracker from '../components/BikeRideTracker'
+import BikeRecordsModal from '../components/BikeRecordsModal'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { formatKST } from '../utils/format';
@@ -16,6 +19,12 @@ interface HeritageItem {
   name: string; lat: number; lng: number; description?: string
   category?: string; type?: string; image_url?: string; dist?: number
   stamped?: boolean; near_home?: boolean; dist_from_home?: number
+  origin_lat?: number; origin_lng?: number
+  content_id?: string; content_type_id?: string
+  opening_hours?: string; closed_days?: string; bike_minutes?: number
+  bike_road_pct?: number; max_grade_deg?: number
+  bike_friendly?: string; bike_friendly_label?: string
+  events?: { id: number; title: string; event_date?: string; event_date_display?: string; event_place?: string }[]
 }
 interface SceneryPlace { id?: number | null; name: string; category?: string; phone?: string }
 interface SceneryItem {
@@ -23,10 +32,14 @@ interface SceneryItem {
   latitude?: number | null; longitude?: number | null; meal_note?: string; place?: SceneryPlace | null
 }
 interface StoreGroup {
-  name: string; lat: number; lng: number; image?: string; store_link?: string
+  name: string; lat: number | null; lng: number | null; image?: string; store_link?: string
   link_label?: string; phone?: string; address?: string; place_url?: string
+  town?: string; village?: string
+  store_key?: string; store_info_id?: number
+  store_up?: number; store_down?: number; my_store_vote?: 'up' | 'down' | null
   photo_count?: number; menus?: { name: string; category: string; price?: string }[]
-  posts: { id: number; title: string; image?: string }[]
+  posts: { id: number; title: string; image?: string; like_count?: number }[]
+  photos?: { image: string; post_id: number; title?: string; like_count?: number }[]
   name_status?: 'confirmed' | 'voting' | 'unknown'
   name_votes?: number; name_total?: number
   name_options?: { name: string; votes: number }[]
@@ -48,6 +61,7 @@ const placeIcons: Record<string, string> = {
   '마트': '🛒', '상점': '🏪', '기타': '📍',
 }
 export const placeIcon = (cat?: string) => placeIcons[cat || ''] || '📍'
+const bikeBadgeClass = (level?: string) => level === 'good' ? 'bg-success' : level === 'ok' ? 'bg-warning text-dark' : 'bg-danger'
 
 export default function ConstructionPage() {
   const { user } = useAuth()
@@ -61,6 +75,9 @@ export default function ConstructionPage() {
 
   const [heritage, setHeritage] = useState<HeritageItem[]>([])
   const [heritageLoading, setHeritageLoading] = useState(false)
+  const [bikePlace, setBikePlace] = useState<HeritageItem | null>(null)
+  const [gpsPlace, setGpsPlace] = useState<HeritageItem | null>(null)
+  const [ridesOpen, setRidesOpen] = useState(false)
 
   const [scenery, setScenery] = useState<SceneryItem[]>([])
   const [selectedScenery, setSelectedScenery] = useState<SceneryItem | null>(null)
@@ -121,6 +138,36 @@ export default function ConstructionPage() {
   const [homeLat, setHomeLat] = useState(0)
   const [homeLng, setHomeLng] = useState(0)
 
+  const localStoresUrl = () => `/construction/local-stores${homeLat && homeLng ? `?lat=${homeLat}&lng=${homeLng}` : ''}`
+
+  const voteStore = async (g: StoreGroup, voteType: 'up' | 'down') => {
+    if (!g.store_key) return
+    try {
+      const res = await fetch('/construction/store-like', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ store_key: g.store_key, vote_type: voteType }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        alert(data.error || '투표에 실패했습니다.')
+        return
+      }
+      setStores(prev => {
+        const next = prev.map(x => x.store_key === g.store_key
+          ? { ...x, store_up: data.up_count, store_down: data.down_count, my_store_vote: data.my_vote }
+          : x)
+        return [...next].sort((a, b) => {
+          const byUp = (b.store_up || 0) - (a.store_up || 0)
+          if (byUp) return byUp
+          return (a.store_info_id ?? 1e9) - (b.store_info_id ?? 1e9)
+        })
+      })
+    } catch {
+      alert('투표에 실패했습니다.')
+    }
+  }
+
   const [transitSuggestion, setTransitSuggestion] = useState<any>(null)
   const [transitLoading, setTransitLoading] = useState(false)
   const [transitError, setTransitError] = useState('')
@@ -174,17 +221,28 @@ export default function ConstructionPage() {
   useEffect(() => {
     if (activeTab !== 'heritage') return
     setHeritageLoading(true)
+    const loadHeritage = (url: string) => {
+      fetch(url, { cache: 'no-store' })
+        .then(r => r.json())
+        .then(d => {
+          const list: HeritageItem[] = Array.isArray(d) ? d : []
+          setHeritage(list)
+          const origin = list[0]
+          if (origin?.origin_lat && origin?.origin_lng) {
+            setHeritageLat(origin.origin_lat)
+            setHeritageLng(origin.origin_lng)
+          }
+        })
+        .catch(() => setHeritage([]))
+        .finally(() => setHeritageLoading(false))
+    }
     navigator.geolocation.getCurrentPosition(
       pos => {
         setHeritageLat(pos.coords.latitude)
         setHeritageLng(pos.coords.longitude)
-        fetch(`/construction/heritage?lat=${pos.coords.latitude}&lng=${pos.coords.longitude}`)
-          .then(r => r.json())
-          .then(d => setHeritage(Array.isArray(d) ? d : []))
-          .catch(() => setHeritage([]))
-          .finally(() => setHeritageLoading(false))
+        loadHeritage(`/construction/heritage?lat=${pos.coords.latitude}&lng=${pos.coords.longitude}`)
       },
-      () => { setHeritageLoading(false); setHeritage([]) },
+      () => { loadHeritage('/construction/heritage') },
       { enableHighAccuracy: true, timeout: 10000 }
     )
   }, [activeTab])
@@ -207,12 +265,12 @@ export default function ConstructionPage() {
   useEffect(() => {
     if (activeTab !== 'scenery' || scenerySubTab !== 'localstore') return
     setStoresLoading(true)
-    fetch('/construction/local-stores')
+    fetch(localStoresUrl())
       .then(r => r.json())
       .then(d => { setStores(d.stores || []); setStoresTown(d.town || ''); setStoresVillage(d.village || '') })
       .catch(() => {})
       .finally(() => setStoresLoading(false))
-  }, [activeTab, scenerySubTab])
+  }, [activeTab, scenerySubTab, homeLat, homeLng])
 
   const handleNaverSearch = async () => {
     setNaverSearching(true); setRegMsg(''); setNaverResults([]); setNaverAddr('')
@@ -240,7 +298,7 @@ export default function ConstructionPage() {
         setRegMsg(`✅ ${r.msg}`)
         setNaverResults([])
         setStoresLoading(true)
-        fetch('/construction/local-stores').then(r => r.json()).then(d => { setStores(d.stores || []); setStoresTown(d.town || ''); setStoresVillage(d.village || '') }).finally(() => setStoresLoading(false))
+        fetch(localStoresUrl()).then(r => r.json()).then(d => { setStores(d.stores || []); setStoresTown(d.town || ''); setStoresVillage(d.village || '') }).finally(() => setStoresLoading(false))
       } else {
         setRegMsg(`❌ ${r.error || '등록 실패'}`)
       }
@@ -293,7 +351,7 @@ export default function ConstructionPage() {
     if (r.success) {
       setNameRec(null)
       // 목록 새로고침
-      fetch('/construction/local-stores').then(res => res.json()).then(d => {
+      fetch(localStoresUrl()).then(res => res.json()).then(d => {
         setStores(d.stores || []); setStoresTown(d.town || ''); setStoresVillage(d.village || '')
       })
     }
@@ -363,6 +421,30 @@ export default function ConstructionPage() {
     )
   }, [activeTab])
 
+  const openRides = () => {
+    if (!user) { alert('로그인이 필요합니다.'); return }
+    setRidesOpen(true)
+  }
+
+  const startGps = (place: HeritageItem) => {
+    if (!user) { alert('로그인이 필요합니다.'); return }
+    setBikePlace(null)
+    setGpsPlace(place)
+  }
+
+  const openHeritageDetail = (place: HeritageItem) => {
+    const placeKey = place.content_id ? String(place.content_id) : encodeURIComponent(place.name)
+    const params = new URLSearchParams({
+      name: place.name,
+      content_type_id: place.content_type_id || '',
+      lat: String(place.lat),
+      lng: String(place.lng),
+      from_lat: String(place.origin_lat ?? heritageLat),
+      from_lng: String(place.origin_lng ?? heritageLng),
+    })
+    navigate(`/construction/place/${placeKey}?${params.toString()}`)
+  }
+
   const handleStamp = async (name: string) => {
     setHeritageStampLoading(prev => ({ ...prev, [name]: true }))
     try {
@@ -413,7 +495,7 @@ export default function ConstructionPage() {
   if (error) return <ErrorMessage message={error} onRetry={load} />
 
   const tabs = [
-    { key: 'heritage', label: '🏛️ 국가유산' },
+    { key: 'heritage', label: '🎯 가볼만한 곳' },
     { key: 'scenery', label: '🌄 ' + (sceneryVillage || '풍경') },
     { key: 'home', label: '🏠 집으로' },
     { key: 'building', label: '🏗️ 건축공사' },
@@ -439,26 +521,58 @@ export default function ConstructionPage() {
       {/* Heritage Tab */}
       {activeTab === 'heritage' && (
         <div>
+          <div className="d-flex justify-content-between align-items-center mb-2">
+            <small className="text-muted">내 위치 6km · 자전거 30분 이내 · {heritage.length}곳</small>
+            <button className="btn btn-sm btn-outline-success" onClick={openRides}>🚴 내 라이딩 기록</button>
+          </div>
           {heritageLoading ? (
             <div className="text-center py-5 text-muted"><Loading /></div>
           ) : heritage.length === 0 ? (
-            <EmptyState icon="🏛️" title="주변 국가유산이 없습니다." />
+            <EmptyState icon="🎯" title="주변 가볼만한 곳이 없습니다." />
           ) : (
-            <div className="row g-3 flex-nowrap flex-sm-wrap" style={{ overflowX: 'auto', paddingBottom: 4 }}>
+            <div className="row g-3">
               {heritage.map(h => (
-                <div key={h.name} className="col-4" style={{ minWidth: 340 }}>
+                <div key={h.name} className="col-12">
                   <div className="card border-0 shadow-sm" style={{ borderRadius: 16 }}>
                     <div className="card-body p-3">
                       <div className="d-flex align-items-center gap-2 mb-2">
                         <span className="badge bg-success small">{h.type || h.category}</span>
                         <span className="fw-bold flex-grow-1 small">{(h.stamped ? '⭐ ' : '') + h.name}</span>
-                        {h.dist != null && <small className="text-muted flex-shrink-0">{h.dist}km</small>}
+                        {h.bike_minutes != null && <small className="text-muted flex-shrink-0">🚲 약 {h.bike_minutes}분</small>}
                       </div>
-                      {h.description && <p className="small text-muted mb-2">{h.description}</p>}
+                      {h.description && <p className="small text-muted mb-1">{h.description}</p>}
+                      {h.events && h.events.length > 0 && (
+                        <div className="d-flex flex-wrap gap-1 mb-2">
+                          {h.events.map(ev => (
+                            <button
+                              type="button"
+                              key={ev.id}
+                              className="btn btn-sm btn-danger py-0"
+                              title={`${ev.title}${ev.event_place ? ' · ' + ev.event_place : ''}`}
+                              onClick={() => navigate(`/yard/${ev.id}`)}
+                            >
+                              🎉 {ev.event_date_display ? `${ev.event_date_display} ` : ''}
+                              {ev.title.length > 22 ? ev.title.slice(0, 22) + '…' : ev.title}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      <div className="d-flex flex-wrap align-items-center gap-2 small text-muted mb-2">
+                        {h.dist != null && <span>거리 {h.dist}km</span>}
+                        {h.bike_friendly_label && <span className={`badge ${bikeBadgeClass(h.bike_friendly)}`}>🚲 {h.bike_friendly_label}</span>}
+                        {h.bike_road_pct != null && <span>자전거도로 {h.bike_road_pct}%</span>}
+                        {h.max_grade_deg != null && <span>최대 {h.max_grade_deg}°</span>}
+                        {h.opening_hours ? (
+                          <span title={h.opening_hours}>🕘 {h.opening_hours.length > 34 ? h.opening_hours.slice(0, 34) + '…' : h.opening_hours}</span>
+                        ) : (
+                          <span>🕘 운영시간 정보 없음</span>
+                        )}
+                      </div>
                       <div className="d-flex gap-1 flex-wrap mb-2">
+                        <button className="btn btn-sm btn-outline-success" onClick={() => setBikePlace(h)}>🚲 코스 분석</button>
                         <a href={`https://ko.wikipedia.org/w/index.php?search=${encodeURIComponent(h.name)}`} target="_blank" className="btn btn-sm btn-outline-secondary" rel="noopener noreferrer">📖 위키백과</a>
-                        <a href={`https://search.naver.com/search.naver?query=${encodeURIComponent(h.name + ' 문화재')}`} target="_blank" className="btn btn-sm btn-outline-success" rel="noopener noreferrer">🔍 자세히보기</a>
-                        <a href={`/compass?popup=1&lat=${h.lat}&lng=${h.lng}&name=${encodeURIComponent(h.name || '국가유산')}`} className="btn btn-sm btn-outline-primary">🧭 나침반</a>
+                        <button type="button" className="btn btn-sm btn-outline-success" onClick={() => openHeritageDetail(h)}>🔍 자세히보기</button>
+                        <a href={`/compass?popup=1&lat=${h.lat}&lng=${h.lng}&name=${encodeURIComponent(h.name || '가볼만한 곳')}`} className="btn btn-sm btn-outline-primary">🧭 나침반</a>
                       </div>
                       <div className="d-flex gap-1 flex-wrap">
                         <a href={`https://www.google.com/maps/dir/?api=1&origin=${heritageLat},${heritageLng}&destination=${h.lat},${h.lng}`} target="_blank" className="btn btn-sm btn-outline-secondary" rel="noopener noreferrer">Google</a>
@@ -585,26 +699,23 @@ export default function ConstructionPage() {
               {storesLoading ? <Loading /> : stores.length === 0 ? (
               <EmptyState icon="🏪" title="등록된 가게가 없습니다." />
             ) : (
-              <div className="row g-2">
-                {stores.map((g, i) => (
-                  <div key={i} className="col-6">
-                    <div className="card border-0 shadow-sm h-100" style={{ borderRadius: 16 }}>
-                      {g.image ? (
-                        <img src={g.image} className="card-img-top" style={{ height: 120, objectFit: 'cover', borderRadius: '16px 16px 0 0' }} alt={g.name} />
-                      ) : (
-                        <div className="d-flex align-items-center justify-content-center" style={{ height: 120, background: '#f0f0f0', borderRadius: '16px 16px 0 0' }}>🏪</div>
-                      )}
-                      <div className="card-body p-2">
-                        <div className="fw-bold small mb-1" style={{ cursor: 'pointer' }}
-                          onClick={() => {
-                            if (g.name_status !== 'confirmed' && g.lat && g.lng) {
-                              openNameRec(Number(g.lat), Number(g.lng), storesTown, storesVillage)
-                            } else if (g.lat && g.lng) {
-                              navigate(`/construction/store/${encodeURIComponent(g.name)}?town=${encodeURIComponent(storesTown)}&village=${encodeURIComponent(storesVillage)}&lat=${g.lat}&lng=${g.lng}`)
-                            }
-                          }}>
+              <div>
+                {stores.map((g, i) => {
+                  const photos = (g.photos || []).slice(0, 4)
+                  const count = g.photo_count ?? g.photos?.length ?? g.posts?.length ?? 0
+                  const openStore = () => {
+                    if (g.name_status !== 'confirmed' && g.lat && g.lng) {
+                      openNameRec(Number(g.lat), Number(g.lng), storesTown, storesVillage)
+                    } else if (g.lat && g.lng) {
+                      navigate(`/construction/store/${encodeURIComponent(g.name)}?town=${encodeURIComponent(g.town || storesTown)}&village=${encodeURIComponent(g.village || storesVillage)}&lat=${g.lat}&lng=${g.lng}`)
+                    }
+                  }
+                  return (
+                    <div key={i} className="mb-4">
+                      <div className="d-flex align-items-center justify-content-between gap-2 mb-2">
+                        <div className="fw-bold" style={{ cursor: 'pointer' }} onClick={openStore}>
                           {g.name_status === 'unknown' && (
-                            <span style={{ color: '#dc3545' }}>🔍 위치 확인 불가 <span className="text-muted" style={{ fontSize: '0.7rem' }}>📷 {g.posts?.length || 0}장</span></span>
+                            <span style={{ color: '#dc3545' }}>🔍 위치 확인 불가 <span className="text-muted" style={{ fontSize: '0.7rem' }}>📷 {count}장</span></span>
                           )}
                           {g.name_status === 'voting' && (
                             <span style={{ color: '#e67e22' }}>
@@ -612,44 +723,82 @@ export default function ConstructionPage() {
                               <span className="ms-1" style={{ fontSize: '0.7rem', color: '#666' }}>
                                 ({g.name_votes}/{g.name_total})
                               </span>
-                              <span className="text-muted" style={{ fontSize: '0.7rem' }}> 📷 {g.posts?.length || 0}장</span>
+                              <span className="text-muted" style={{ fontSize: '0.7rem' }}> 📷 {count}장</span>
                             </span>
                           )}
                           {(!g.name_status || g.name_status === 'confirmed') && (
-                            <span style={{ color: '#198754' }}>{g.name} <span className="text-muted" style={{ fontSize: '0.7rem' }}>📷 {g.posts?.length || 0}장</span></span>
+                            <span style={{ color: '#198754' }}>{g.name} <span className="text-muted" style={{ fontSize: '0.7rem' }}>📷 {count}장</span></span>
                           )}
                         </div>
-                        {g.phone && (
-                          <div className="small text-muted mb-1">
-                            📞 <a href={`tel:${g.phone}`} className="text-decoration-none">{g.phone}</a>
+                        {g.store_key && (
+                          <div className="d-flex gap-1">
+                            <button type="button"
+                              className={`btn btn-sm ${g.my_store_vote === 'up' ? 'btn-success' : 'btn-outline-success'}`}
+                              onClick={() => voteStore(g, 'up')}>
+                              👍 {g.store_up || 0}
+                            </button>
+                            <button type="button"
+                              className={`btn btn-sm ${g.my_store_vote === 'down' ? 'btn-secondary' : 'btn-outline-secondary'}`}
+                              onClick={() => voteStore(g, 'down')}>
+                              👎 {g.store_down || 0}
+                            </button>
                           </div>
-                        )}
-                        {g.address && (
-                          <div className="small text-muted mb-1" title={g.address}
-                            style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            📍 {g.address}
-                          </div>
-                        )}
-                        {g.menus && g.menus.length > 0 && (
-                          <div className="mb-1">
-                            {g.menus.slice(0, 3).map((m: {name: string; category: string; price?: string}, mi: number) => (
-                              <span key={mi} className="badge bg-light text-dark me-1 mb-1" style={{ fontSize: '0.65rem' }}>
-                                {m.name}{m.price ? ` ${m.price}` : ''}
-                              </span>
-                            ))}
-                            {g.menus.length > 3 && <span className="small text-muted">+{g.menus.length - 3}</span>}
-                          </div>
-                        )}
-                        {g.store_link && (
-                          <a href={g.store_link} target="_blank" className="small text-decoration-none" rel="noopener noreferrer"
-                            style={{ color: '#198754' }}>
-                            {g.link_label || '🔗'}
-                          </a>
                         )}
                       </div>
+                      {photos.length > 0 ? (
+                        <div className="row g-2">
+                          {photos.map((p, pi) => (
+                            <div key={`${p.post_id}-${pi}`} className="col-3">
+                              <div className="card border-0 shadow-sm h-100"
+                                style={{ borderRadius: 12, overflow: 'hidden', cursor: g.store_key ? 'pointer' : 'default' }}
+                                onClick={g.store_key ? openStore : undefined}>
+                                <img src={p.image} className="card-img-top"
+                                  style={{ height: 120, objectFit: 'contain', backgroundColor: '#f8f9fa' }}
+                                  alt={p.title || g.name} />
+                                <div className="card-body p-1 text-center">
+                                  <span className="small text-muted">👍 {p.like_count || 0}</span>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="small text-muted py-2">아직 승인된 사진이 없습니다.</div>
+                      )}
+                      {(g.phone || g.address || (g.menus && g.menus.length > 0) || g.store_link) && (
+                        <div className="mt-2">
+                          {g.phone && (
+                            <div className="small text-muted mb-1">
+                              📞 <a href={`tel:${g.phone}`} className="text-decoration-none">{g.phone}</a>
+                            </div>
+                          )}
+                          {g.address && (
+                            <div className="small text-muted mb-1" title={g.address}
+                              style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              📍 {g.address}
+                            </div>
+                          )}
+                          {g.menus && g.menus.length > 0 && (
+                            <div className="mb-1">
+                              {g.menus.slice(0, 3).map((m: {name: string; category: string; price?: string}, mi: number) => (
+                                <span key={mi} className="badge bg-light text-dark me-1 mb-1" style={{ fontSize: '0.65rem' }}>
+                                  {m.name}{m.price ? ` ${m.price}` : ''}
+                                </span>
+                              ))}
+                              {g.menus.length > 3 && <span className="small text-muted">+{g.menus.length - 3}</span>}
+                            </div>
+                          )}
+                          {g.store_link && (
+                            <a href={g.store_link} target="_blank" className="small text-decoration-none" rel="noopener noreferrer"
+                              style={{ color: '#198754' }}>
+                              {g.link_label || '🔗'}
+                            </a>
+                          )}
+                        </div>
+                      )}
                     </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             )}
             </>
@@ -830,6 +979,26 @@ export default function ConstructionPage() {
           )}
         </div>
       )}
+
+      {bikePlace && (
+        <BikeDetailModal
+          place={bikePlace}
+          originLat={heritageLat}
+          originLng={heritageLng}
+          loggedIn={!!user}
+          onClose={() => setBikePlace(null)}
+          onStartGps={startGps}
+        />
+      )}
+
+      {gpsPlace && (
+        <BikeRideTracker
+          place={gpsPlace}
+          onClose={() => setGpsPlace(null)}
+        />
+      )}
+
+      {ridesOpen && <BikeRecordsModal onClose={() => setRidesOpen(false)} />}
 
       {mapNotice && (
         <div
