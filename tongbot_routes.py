@@ -1,4 +1,4 @@
-import random, string, re, requests, json
+import random, string, re, requests, json, hmac, hashlib, calendar
 from sqlalchemy import or_
 from flask import Blueprint, request, jsonify, session, redirect, url_for, render_template, current_app, make_response, send_file
 from models import db, User, TongBot, TongBotDraft, TongBotSchedule, ChatRoom, ChatMessage, Message, FriendCache, BotKnowledge, StoreInfo, ShareReport, SharedRoute
@@ -2089,6 +2089,283 @@ def bot_schedule():
         if not (lat and lng):
             warning = "장소가 분명하지 않습니다"
     return jsonify({"success": True, "id": s.id, "warning": warning})
+
+def _unocum_feed_sig(email, uid):
+    key = (current_app.config.get('SECRET_KEY') or '').encode()
+    return hmac.new(key, f"{email}:{uid}".encode(), hashlib.sha256).hexdigest()[:32]
+
+
+def _unocum_nth_weekday_day(y, m, wd, n):
+    import calendar as _cal
+    d = 1
+    while datetime(y, m, d).weekday() != wd:
+        d += 1
+    d += (n - 1) * 7
+    if d > _cal.monthrange(y, m)[1]:
+        return -1
+    return d
+
+
+def _unocum_occurrences(s, range_start, range_end):
+    from datetime import timedelta
+    base = s.event_date
+    if not base:
+        return []
+    base_date = base.date()
+    if not (s.is_recurring and (s.end_date or s.repeat_infinite)):
+        return [base]
+    try:
+        exc = set(json.loads(s.repeat_exceptions or '[]'))
+    except Exception:
+        exc = set()
+    if s.repeat_infinite or not s.end_date:
+        repeat_end = range_end
+    else:
+        repeat_end = min(s.end_date.date(), range_end)
+    rt = s.repeat_type or ''
+    interval = int(s.repeat_interval or 1) or 1
+    wd_mask = s.repeat_weekdays or 0
+    occ = []
+    cur = base_date
+    guard = 0
+    while cur <= repeat_end and guard < 5000:
+        guard += 1
+        do_emit = False
+        if wd_mask:
+            wd = cur.weekday()
+            if wd_mask & (1 << wd):
+                moy = s.repeat_month_of_year or 0
+                wom = s.repeat_week_of_month or 0
+                ok = True
+                if moy and cur.month != moy:
+                    ok = False
+                elif wom and cur.day != _unocum_nth_weekday_day(cur.year, cur.month, wd, wom):
+                    ok = False
+                do_emit = ok
+        elif rt == 'daily':
+            do_emit = (cur - base_date).days % interval == 0
+        elif rt == 'weekly':
+            do_emit = cur.weekday() == base_date.weekday() and ((cur - base_date).days // 7) % interval == 0
+        elif rt == 'monthly':
+            import calendar as _cal
+            last_day = _cal.monthrange(cur.year, cur.month)[1]
+            day_ok = (cur.day == last_day) if getattr(s, 'repeat_lastday', False) else (cur.day == base_date.day)
+            if day_ok:
+                months = (cur.year - base_date.year) * 12 + (cur.month - base_date.month)
+                do_emit = months % interval == 0
+        elif rt == 'yearly':
+            do_emit = cur.month == base_date.month and cur.day == base_date.day and (cur.year - base_date.year) % interval == 0
+        if do_emit and cur >= range_start and cur.strftime('%Y-%m-%d') not in exc:
+            occ.append(datetime.combine(cur, base.time()))
+        cur += timedelta(days=1)
+    return occ
+
+
+def _unocum_event_end(dt, s):
+    if not s.end_date:
+        return None
+    if s.is_recurring:
+        end = datetime.combine(dt.date(), s.end_date.time())
+        if end <= dt:
+            end = dt + timedelta(hours=1)
+        return end
+    return s.end_date
+
+
+def _unocum_schedule_item(dt, s):
+    st = dt.strftime('%H:%M') if dt else ''
+    end_dt = _unocum_event_end(dt, s)
+    et = end_dt.strftime('%H:%M') if end_dt else ''
+    is_all_day = bool(s.is_allday) or (st == '00:00' and et == '23:59')
+    return {
+        "target_date": dt.strftime('%Y-%m-%d'),
+        "end_date": end_dt.strftime('%Y-%m-%d') if end_dt else dt.strftime('%Y-%m-%d'),
+        "is_all_day": 1 if is_all_day else 0,
+        "start_time": None if is_all_day else (st or None),
+        "end_time": None if is_all_day else (et or None),
+        "title": s.title or '',
+    }
+
+
+def _unocum_cors(resp):
+    resp.headers['Access-Control-Allow-Origin'] = '*'
+    resp.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
+    resp.headers['Access-Control-Allow-Headers'] = 'X-Unocum-Token, Content-Type'
+    resp.headers['Access-Control-Max-Age'] = '86400'
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp
+
+
+@tongbot_bp.after_request
+def _unocum_cors_headers(resp):
+    if request.path.startswith('/api/v1/unocum_schedules'):
+        _unocum_cors(resp)
+    return resp
+
+
+@tongbot_bp.route('/api/v1/unocum_schedules', methods=['GET', 'OPTIONS'])
+def unocum_schedules_api():
+    if request.method == 'OPTIONS':
+        return _unocum_cors(make_response('', 204))
+    user, authorized = _unocum_authorize()
+    if not authorized:
+        return jsonify({"error": "unauthorized"}), 401
+    if not user:
+        return jsonify({"error": "user not found"}), 404
+
+    range_start, range_end, err = _unocum_range()
+    if err:
+        return jsonify({"error": err}), 400
+
+    items = _unocum_collect(user, range_start, range_end)
+    return jsonify({"schedules": items})
+
+
+def _unocum_authorize():
+    shared = os.getenv('LAON_SYNC_TOKEN', '')
+    token = request.headers.get('X-Unocum-Token', '')
+    email = (request.args.get('email') or 'eou@kakao.com').strip().lower()
+    sig = request.args.get('sig', '')
+    user = User.query.filter(db.func.lower(User.email) == email).first()
+    authorized = bool(shared) and hmac.compare_digest(token, shared)
+    if not authorized and user and sig:
+        authorized = hmac.compare_digest(sig, _unocum_feed_sig(user.email or '', user.id))
+    return user, authorized
+
+
+def _unocum_range():
+    def _parse_date(v):
+        try:
+            return datetime.strptime(v, '%Y-%m-%d').date()
+        except Exception:
+            return None
+
+    today = datetime.now()
+    range_start = _parse_date(request.args.get('from', '')) or today.date().replace(day=1)
+    range_end = _parse_date(request.args.get('to', '')) or datetime(today.year, today.month, calendar.monthrange(today.year, today.month)[1]).date()
+    if range_end < range_start:
+        return None, None, "invalid range"
+    if (range_end - range_start).days > 366:
+        return None, None, "range too large"
+    return range_start, range_end, None
+
+
+def _unocum_collect(user, range_start, range_end):
+    items = []
+    seen = set()
+    schedules = TongBotSchedule.query.filter_by(user_id=user.id).all()
+    for s in schedules:
+        for dt in _unocum_occurrences(s, range_start, range_end):
+            if not (range_start <= dt.date() <= range_end):
+                continue
+            item = _unocum_schedule_item(dt, s)
+            key = (item['target_date'], item['start_time'], item['title'])
+            if key in seen:
+                continue
+            seen.add(key)
+            items.append(item)
+    items.sort(key=lambda x: (x['target_date'], x['start_time'] or ''))
+    return items
+
+
+def _ics_escape(v):
+    return (v or '').replace('\\', '\\\\').replace(';', '\\;').replace(',', '\\,').replace('\r\n', '\\n').replace('\n', '\\n')
+
+
+def _ics_fold(line):
+    if len(line.encode('utf-8')) <= 75:
+        return line
+    parts, cur, cur_len = [], '', 0
+    for ch in line:
+        b = len(ch.encode('utf-8'))
+        limit = 75 if not parts else 74
+        if cur_len + b > limit:
+            parts.append(cur)
+            cur, cur_len = ch, b
+        else:
+            cur += ch
+            cur_len += b
+    parts.append(cur)
+    return '\r\n '.join(parts)
+
+
+@tongbot_bp.route('/api/v1/unocum_schedules.ics', methods=['GET', 'OPTIONS'])
+def unocum_schedules_ics():
+    if request.method == 'OPTIONS':
+        return _unocum_cors(make_response('', 204))
+    user, authorized = _unocum_authorize()
+    if not authorized:
+        return make_response("unauthorized", 401)
+    if not user:
+        return make_response("user not found", 404)
+    range_start, range_end, err = _unocum_range()
+    if err:
+        return make_response(err, 400)
+
+    items = _unocum_collect(user, range_start, range_end)
+    stamp = datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')
+    lines = [
+        'BEGIN:VCALENDAR',
+        'VERSION:2.0',
+        'PRODID:-//unocum.kr//Schedule Feed//KO',
+        'CALSCALE:GREGORIAN',
+        'METHOD:PUBLISH',
+        'X-WR-CALNAME:unocum 일정',
+        'X-WR-TIMEZONE:Asia/Seoul',
+    ]
+    for it in items:
+        try:
+            start_dt = datetime.strptime(it['target_date'] + ' ' + (it['start_time'] or '00:00'), '%Y-%m-%d %H:%M')
+        except Exception:
+            continue
+        uid_src = f"{user.id}:{it['target_date']}:{it['start_time'] or ''}:{it['title']}"
+        uid = hashlib.md5(uid_src.encode('utf-8')).hexdigest()[:16]
+        if it['is_all_day']:
+            day = start_dt.date()
+            end_day = datetime.strptime(it['end_date'], '%Y-%m-%d').date() if it.get('end_date') else day
+            if end_day < day:
+                end_day = day
+            dtstart = 'DTSTART;VALUE=DATE:' + day.strftime('%Y%m%d')
+            dtend = 'DTEND;VALUE=DATE:' + (end_day + timedelta(days=1)).strftime('%Y%m%d')
+        else:
+            if it['end_time']:
+                end_dt = datetime.strptime(it['end_date'] + ' ' + it['end_time'], '%Y-%m-%d %H:%M')
+                if end_dt <= start_dt:
+                    end_dt = start_dt + timedelta(hours=1)
+            else:
+                end_dt = start_dt + timedelta(hours=1)
+            dtstart = 'DTSTART:' + (start_dt - timedelta(hours=9)).strftime('%Y%m%dT%H%M%SZ')
+            dtend = 'DTEND:' + (end_dt - timedelta(hours=9)).strftime('%Y%m%dT%H%M%SZ')
+        lines += [
+            'BEGIN:VEVENT',
+            'UID:' + uid + '@unocum.kr',
+            'DTSTAMP:' + stamp,
+            dtstart,
+            dtend,
+            'SUMMARY:' + _ics_escape(it['title']),
+            'END:VEVENT',
+        ]
+    lines.append('END:VCALENDAR')
+    body = '\r\n'.join(_ics_fold(l) for l in lines) + '\r\n'
+    resp = make_response(body, 200)
+    resp.headers['Content-Type'] = 'text/calendar; charset=utf-8'
+    resp.headers['Content-Disposition'] = 'inline; filename="unocum_schedules.ics"'
+    return resp
+
+
+@tongbot_bp.route('/api/bot/schedule/share-feed', methods=['GET'])
+def schedule_share_feed():
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({"error": "로그인이 필요합니다."}), 401
+    user = User.query.get(uid)
+    if not user or not user.email:
+        return jsonify({"error": "이메일이 없습니다."}), 400
+    sig = _unocum_feed_sig(user.email, user.id)
+    base = f"{request.url_root.rstrip('/')}/api/v1/unocum_schedules"
+    qs = f"?email={user.email}&sig={sig}"
+    return jsonify({"url": base + ".ics" + qs, "ics_url": base + ".ics" + qs, "json_url": base + qs})
+
 
 @tongbot_bp.route('/api/bot/schedule/reminders', methods=['GET'])
 def bot_schedule_reminders():

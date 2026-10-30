@@ -37,6 +37,7 @@ export default function SchedulePage() {
   const [shareUsers, setShareUsers] = useState<{id:number;username:string;real_name?:string}[]>([])
   const [shareSelectedIds, setShareSelectedIds] = useState<number[]>([])
   const [shareSending, setShareSending] = useState(false)
+  const [feedSending, setFeedSending] = useState(false)
   const formRef = useRef<HTMLDivElement>(null)
 
   const [formTitle, setFormTitle] = useState('')
@@ -109,6 +110,25 @@ export default function SchedulePage() {
     if (m < 1) { m = 12; y-- }
     if (m > 12) { m = 1; y++ }
     setYear(y); setMonth(m)
+  }
+
+  const shareFeed = async () => {
+    if (feedSending) return
+    setFeedSending(true)
+    try {
+      const res = await fetch('/api/bot/schedule/share-feed')
+      const data = await res.json().catch(() => ({}))
+      if (res.ok && data.url) {
+        try { await navigator.clipboard.writeText(data.url) } catch {}
+        window.prompt('아래 링크를 복사해 샵 일정 프로그램에 등록하세요.', data.url)
+      } else {
+        alert('공유 링크를 만들지 못했습니다.')
+      }
+    } catch {
+      alert('공유 링크를 만들지 못했습니다. 잠시 후 다시 시도해주세요.')
+    } finally {
+      setFeedSending(false)
+    }
   }
 
   const openAdd = (day?: number) => {
@@ -245,6 +265,9 @@ export default function SchedulePage() {
       <div className="d-flex gap-2 mb-3">
         <button className="btn btn-sm btn-outline-secondary" onClick={() => setShowForm(false)}>달력</button>
         <button className="btn btn-sm btn-success" onClick={() => openAdd()}>+ 일정등록</button>
+        <button className="btn btn-sm btn-outline-primary" onClick={shareFeed} disabled={feedSending}>
+          {feedSending ? '준비 중...' : '일정 공유'}
+        </button>
         <button className="btn btn-sm btn-outline-secondary ms-auto" onClick={() => navigate('/user/' + (window as unknown as Record<string, unknown>).userId || '')}>내 프로필</button>
       </div>
 
