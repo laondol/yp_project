@@ -1,7 +1,7 @@
-import random, string, re, requests, json, hmac, hashlib, calendar
+import random, string, re, requests, json, hmac, hashlib, calendar, secrets
 from sqlalchemy import or_
 from flask import Blueprint, request, jsonify, session, redirect, url_for, render_template, current_app, make_response, send_file
-from models import db, User, TongBot, TongBotDraft, TongBotSchedule, ChatRoom, ChatMessage, Message, FriendCache, BotKnowledge, StoreInfo, ShareReport, SharedRoute
+from models import db, User, TongBot, TongBotDraft, TongBotSchedule, ChatRoom, ChatMessage, Message, FriendCache, BotKnowledge, StoreInfo, ShareReport, SharedRoute, LaonRateLimit, LaonMemberToken
 from services.geo import _geocode_location
 from services.route_recalc import _ensure_day_routes, _gen_occurrences
 from services.route_worker import enqueue_recalc
@@ -1893,6 +1893,46 @@ def bot_schedule_calc_time():
         return jsonify({"error": str(e)})
 
 
+def _naive_kst(dt):
+    if dt is None:
+        return None
+    if dt.tzinfo is not None:
+        return dt.astimezone(KST).replace(tzinfo=None)
+    return dt
+
+
+def _schedule_time_range(event_date, end_date, is_allday=False):
+    start = _naive_kst(event_date)
+    if start is None:
+        return None, None
+    end = _naive_kst(end_date)
+    if end is None or end <= start:
+        if is_allday:
+            end = start.replace(hour=23, minute=59)
+        else:
+            end = start + timedelta(hours=1)
+    return start, end
+
+
+def _find_schedule_conflict(uid, start, end, exclude_id=None):
+    """바쁨 일정끼리 시간이 겹치는지 확인 (예약가능 일정은 충돌로 보지 않음)"""
+    if start is None or end is None:
+        return None
+    for s in TongBotSchedule.query.filter_by(user_id=uid).all():
+        if exclude_id is not None and s.id == exclude_id:
+            continue
+        if (getattr(s, 'status', None) or 'active') == 'canceled':
+            continue
+        if getattr(s, 'busy', True) is False:
+            continue
+        s_start, s_end = _schedule_time_range(s.event_date, s.end_date, bool(s.is_allday))
+        if s_start is None:
+            continue
+        if start < s_end and s_start < end:
+            return s
+    return None
+
+
 @tongbot_bp.route('/api/bot/schedule', methods=['GET', 'POST'])
 def bot_schedule():
     uid = session.get('user_id')
@@ -1917,6 +1957,9 @@ def bot_schedule():
                 "return_time": s.return_time.strftime('%H:%M') if s.return_time else '',
                 "invited": s.invited_user_ids, "color": "gray",
                 "is_allday": s.is_allday or False,
+                "busy": True if s.busy is None else bool(s.busy),
+                "source": s.source or '',
+                "source_id": s.source_id or '',
                 "is_recurring": s.is_recurring or False,
                 "repeat_type": s.repeat_type or '',
                 "repeat_interval": s.repeat_interval or 1,
@@ -2048,6 +2091,18 @@ def bot_schedule():
         except: pass
     _is_rec = bool(data.get('is_recurring'))
     _end_date = end_date
+    _busy = bool(data.get('busy', True))
+    if _busy:
+        try:
+            _start_dt = datetime.fromisoformat(data.get('event_date', ''))
+        except Exception:
+            _start_dt = None
+        if _start_dt is not None:
+            _st, _en = _schedule_time_range(_start_dt, end_date, bool(data.get('is_allday', False)))
+            _conf = _find_schedule_conflict(uid, _st, _en)
+            if _conf:
+                _ct = (_conf.title or '').strip() or '일정'
+                return jsonify({"error": f"같은 시간에 이미 일정이 있습니다: {_ct}", "conflict": True}), 409
     _infinite = bool(data.get('repeat_infinite'))
 
     s = TongBotSchedule(user_id=uid, title=data.get('title',''), description=data.get('description',''),
@@ -2059,6 +2114,7 @@ def bot_schedule():
         departure_location=data.get('departure_location',''),
         return_location=data.get('return_location',''),
         is_allday=data.get('is_allday', False),
+        busy=bool(data.get('busy', True)),
         is_recurring=data.get('is_recurring', False),
         repeat_type=data.get('repeat_type', ''),
         repeat_interval=data.get('repeat_interval', 1) or 1,
@@ -2172,37 +2228,6 @@ def _unocum_event_end(dt, s):
     return s.end_date
 
 
-def _unocum_schedule_item(dt, s):
-    st = dt.strftime('%H:%M') if dt else ''
-    end_dt = _unocum_event_end(dt, s)
-    et = end_dt.strftime('%H:%M') if end_dt else ''
-    is_all_day = bool(s.is_allday) or (st == '00:00' and et == '23:59')
-    return {
-        "target_date": dt.strftime('%Y-%m-%d'),
-        "end_date": end_dt.strftime('%Y-%m-%d') if end_dt else dt.strftime('%Y-%m-%d'),
-        "is_all_day": 1 if is_all_day else 0,
-        "start_time": None if is_all_day else (st or None),
-        "end_time": None if is_all_day else (et or None),
-        "title": s.title or '',
-    }
-
-
-def _unocum_cors(resp):
-    resp.headers['Access-Control-Allow-Origin'] = '*'
-    resp.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
-    resp.headers['Access-Control-Allow-Headers'] = 'X-Unocum-Token, Content-Type'
-    resp.headers['Access-Control-Max-Age'] = '86400'
-    resp.headers['Cache-Control'] = 'no-store'
-    return resp
-
-
-@tongbot_bp.after_request
-def _unocum_cors_headers(resp):
-    if request.path.startswith('/api/v1/unocum_schedules'):
-        _unocum_cors(resp)
-    return resp
-
-
 @tongbot_bp.route('/api/v1/unocum_schedules', methods=['GET', 'OPTIONS'])
 def unocum_schedules_api():
     if request.method == 'OPTIONS':
@@ -2210,8 +2235,6 @@ def unocum_schedules_api():
     user, authorized = _unocum_authorize()
     if not authorized:
         return jsonify({"error": "unauthorized"}), 401
-    if not user:
-        return jsonify({"error": "user not found"}), 404
 
     range_start, range_end, err = _unocum_range()
     if err:
@@ -2221,16 +2244,71 @@ def unocum_schedules_api():
     return jsonify({"schedules": items})
 
 
+def _request_token():
+    return (request.headers.get('X-Unocum-Token') or request.args.get('token') or '').strip()
+
+
+def _member_token_value(user, row):
+    key = (current_app.config.get('SECRET_KEY') or '').encode()
+    return hmac.new(key, f"laon:{user.id}:{row.nonce}".encode(), hashlib.sha256).hexdigest()
+
+
+def _ensure_member_token(user, rotate=False):
+    row = LaonMemberToken.query.filter_by(user_id=user.id).first()
+    if row is None:
+        row = LaonMemberToken(user_id=user.id, nonce=secrets.token_hex(16), token_hash='', active=True)
+        db.session.add(row)
+        rotate = True
+    elif rotate:
+        row.nonce = secrets.token_hex(16)
+        row.active = True
+    if rotate or not row.token_hash:
+        token = _member_token_value(user, row)
+        row.token_hash = hashlib.sha256(token.encode()).hexdigest()
+        db.session.commit()
+    return row
+
+
+def _member_token_plain(user):
+    row = LaonMemberToken.query.filter_by(user_id=user.id).first()
+    if not row or not row.active:
+        return None
+    return _member_token_value(user, row)
+
+
+def _member_by_token(token):
+    if not token:
+        return None
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    row = LaonMemberToken.query.filter_by(token_hash=token_hash, active=True).first()
+    if not row:
+        return None
+    return User.query.get(row.user_id)
+
+
+def _resolve_member(email='', sig='', token=''):
+    """토큰(회원 전용) 또는 회원 서명으로 회원을 식별. email이 오면 일치해야 함."""
+    email = (email or '').strip().lower()
+    token = (token or '').strip()
+    user = _member_by_token(token)
+    if user is None and email and sig:
+        cand = User.query.filter(db.func.lower(User.email) == email).first()
+        if cand and hmac.compare_digest(sig, _unocum_feed_sig(cand.email or '', cand.id)):
+            user = cand
+    if user is None:
+        return None
+    if email and (user.email or '').lower() != email:
+        return None
+    return user
+
+
 def _unocum_authorize():
-    shared = os.getenv('LAON_SYNC_TOKEN', '')
-    token = request.headers.get('X-Unocum-Token', '')
-    email = (request.args.get('email') or 'eou@kakao.com').strip().lower()
-    sig = request.args.get('sig', '')
-    user = User.query.filter(db.func.lower(User.email) == email).first()
-    authorized = bool(shared) and hmac.compare_digest(token, shared)
-    if not authorized and user and sig:
-        authorized = hmac.compare_digest(sig, _unocum_feed_sig(user.email or '', user.id))
-    return user, authorized
+    user = _resolve_member(
+        email=request.args.get('email') or '',
+        sig=request.args.get('sig') or '',
+        token=_request_token(),
+    )
+    return user, user is not None
 
 
 def _unocum_range():
@@ -2250,21 +2328,91 @@ def _unocum_range():
     return range_start, range_end, None
 
 
-def _unocum_collect(user, range_start, range_end):
-    items = []
-    seen = set()
-    schedules = TongBotSchedule.query.filter_by(user_id=user.id).all()
-    for s in schedules:
+def _unocum_records(user, range_start, range_end):
+    recs = []
+    for s in TongBotSchedule.query.filter_by(user_id=user.id).all():
+        if (getattr(s, 'status', None) or 'active') == 'canceled':
+            continue
+        is_free = (getattr(s, 'busy', True) is False)
         for dt in _unocum_occurrences(s, range_start, range_end):
             if not (range_start <= dt.date() <= range_end):
                 continue
-            item = _unocum_schedule_item(dt, s)
-            key = (item['target_date'], item['start_time'], item['title'])
-            if key in seen:
+            tz = s.event_date.tzinfo if s.event_date and s.event_date.tzinfo else KST
+            start = dt.replace(tzinfo=tz) if dt.tzinfo is None else dt
+            end = _unocum_event_end(dt, s)
+            if end is None:
+                end = start.replace(hour=23, minute=59) if s.is_allday else start + timedelta(hours=1)
+            if end.tzinfo is None:
+                end = end.replace(tzinfo=tz)
+            if end <= start:
+                end = start + timedelta(hours=1)
+            recs.append({"s": s, "start": start, "end": end, "free": is_free})
+    return recs
+
+
+def _unocum_busy_segments(recs):
+    free_ivs = [(r["start"], r["end"]) for r in recs if r["free"]]
+    out = []
+    for r in recs:
+        if r["free"]:
+            continue
+        segs = [(r["start"], r["end"])]
+        for fs, fe in free_ivs:
+            if fe <= r["start"] or fs >= r["end"]:
                 continue
-            seen.add(key)
-            items.append(item)
-    items.sort(key=lambda x: (x['target_date'], x['start_time'] or ''))
+            nxt = []
+            for a, b in segs:
+                if fe <= a or fs >= b:
+                    nxt.append((a, b))
+                    continue
+                if fs > a:
+                    nxt.append((a, min(fs, b)))
+                if fe < b:
+                    nxt.append((max(fe, a), b))
+            segs = nxt
+            if not segs:
+                break
+        for a, b in segs:
+            if b > a:
+                out.append((r["s"], a, b))
+    return out
+
+
+def _unocum_segment_item(s, start, end):
+    st = start.strftime('%H:%M')
+    et = end.strftime('%H:%M')
+    is_all_day = bool(s.is_allday) and st == '00:00' and et == '23:59'
+    if getattr(s, 'source_id', None):
+        ev_id = 'evt_%d' % s.id
+    else:
+        ev_id = hashlib.md5(f"{s.id}:{start.isoformat()}:{end.isoformat()}".encode('utf-8')).hexdigest()[:16]
+    return {
+        "id": ev_id,
+        "title": s.title or '',
+        "location": s.location or '',
+        "start": _unocum_iso(start),
+        "end": _unocum_iso(end),
+        "all_day": is_all_day,
+        "source": getattr(s, 'source', '') or '',
+        "target_date": start.strftime('%Y-%m-%d'),
+        "end_date": end.strftime('%Y-%m-%d'),
+        "is_all_day": 1 if is_all_day else 0,
+        "start_time": None if is_all_day else (st or None),
+        "end_time": None if is_all_day else (et or None),
+    }
+
+
+def _unocum_collect(user, range_start, range_end):
+    items = []
+    seen = set()
+    for s, a, b in _unocum_busy_segments(_unocum_records(user, range_start, range_end)):
+        item = _unocum_segment_item(s, a, b)
+        key = (item['start'], item['end'], item['title'], item['location'])
+        if key in seen:
+            continue
+        seen.add(key)
+        items.append(item)
+    items.sort(key=lambda x: x['start'])
     return items
 
 
@@ -2296,8 +2444,6 @@ def unocum_schedules_ics():
     user, authorized = _unocum_authorize()
     if not authorized:
         return make_response("unauthorized", 401)
-    if not user:
-        return make_response("user not found", 404)
     range_start, range_end, err = _unocum_range()
     if err:
         return make_response(err, 400)
@@ -2353,6 +2499,226 @@ def unocum_schedules_ics():
     return resp
 
 
+def _unocum_iso(dt, fallback_tz=None):
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=fallback_tz or KST)
+    return dt.isoformat(timespec='seconds')
+
+
+@tongbot_bp.route('/api/v1/schedules', methods=['GET', 'OPTIONS'])
+def unocum_schedules_v2_api():
+    if request.method == 'OPTIONS':
+        return _unocum_cors(make_response('', 204))
+    user = _resolve_member(
+        email=request.args.get('email') or '',
+        sig=request.args.get('sig') or '',
+        token=_request_token(),
+    )
+    if user is None:
+        return jsonify({"success": False, "message": "Unauthorized"}), 401
+
+    def _pd(v):
+        try:
+            return datetime.strptime(v, '%Y-%m-%d').date()
+        except Exception:
+            return None
+
+    today = datetime.now().date()
+    range_start = _pd(request.args.get('from', '')) or (today - timedelta(days=30))
+    range_end = _pd(request.args.get('to', '')) or (today + timedelta(days=90))
+    if range_end < range_start:
+        return jsonify({"success": False, "message": "invalid range"}), 400
+
+    events = []
+    for it in _unocum_collect(user, range_start, range_end):
+        events.append({
+            "id": it["id"],
+            "title": it["title"],
+            "location": it["location"],
+            "start": it["start"],
+            "end": it["end"],
+            "all_day": bool(it["all_day"]),
+            "source": it["source"],
+        })
+    return jsonify({"success": True, "events": events})
+
+
+# ===== 라온 연동 쓰기 API (2단계) =====
+
+def _write_member(data=None):
+    """쓰기 API 인증: 회원 전용 토큰(필수) + 선택적 sig/email 일치 검증"""
+    data = data or {}
+    token = (request.headers.get('X-Unocum-Token') or str(data.get('token') or '')).strip()
+    user = _member_by_token(token)
+    if user is None:
+        return None
+    email = str(data.get('email') or request.args.get('email') or '').strip().lower()
+    if email and (user.email or '').lower() != email:
+        return None
+    sig = str(data.get('sig') or request.args.get('sig') or '').strip()
+    if sig and not hmac.compare_digest(sig, _unocum_feed_sig(user.email or '', user.id)):
+        return None
+    return user
+
+
+def _laon_rate_ok(key):
+    """동일 source_id 분당 10회 (DB 기반: gunicorn 워커 간 공유)"""
+    now = datetime.now(KST).replace(tzinfo=None)
+    try:
+        row = LaonRateLimit.query.filter_by(rkey=key).with_for_update().first()
+        if row is None:
+            db.session.add(LaonRateLimit(rkey=key, window_start=now, cnt=1))
+        elif (now - row.window_start).total_seconds() >= 60:
+            row.window_start = now
+            row.cnt = 1
+        elif (row.cnt or 0) >= 10:
+            db.session.rollback()
+            return False
+        else:
+            row.cnt = (row.cnt or 0) + 1
+        db.session.commit()
+        return True
+    except Exception:
+        db.session.rollback()
+        return True
+
+
+def _laon_parse_dt(v):
+    if not isinstance(v, str) or not v.strip():
+        return None
+    try:
+        dt = datetime.fromisoformat(v.strip())
+    except Exception:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=KST)
+    return dt
+
+
+def _laon_validate(data, partial=False):
+    errs = []
+    out = {}
+    if 'title' in data or not partial:
+        title = str(data.get('title') or '').strip()
+        if not title:
+            errs.append('title required')
+        elif len(title) > 255:
+            errs.append('title too long')
+        out['title'] = title
+    for fld in ('location', 'description'):
+        if fld in data:
+            val = str(data.get(fld) or '')
+            if fld == 'location' and len(val) > 200:
+                errs.append('location too long')
+            out[fld] = val
+    for fld in ('start', 'end'):
+        if fld in data or not partial:
+            dt = _laon_parse_dt(data.get(fld))
+            if dt is None:
+                errs.append(f'{fld} invalid')
+            out[fld] = dt
+    if out.get('start') and out.get('end') and out['start'] >= out['end']:
+        errs.append('start must be before end')
+    if 'all_day' in data:
+        out['all_day'] = bool(data.get('all_day'))
+    return out, errs
+
+
+def _laon_event_id(s):
+    return 'evt_%d' % s.id
+
+
+def _laon_find_event(event_id, user_id=None):
+    raw = str(event_id or '')
+    if raw.startswith('evt_'):
+        raw = raw[4:]
+    if not raw.isdigit():
+        return None
+    s = TongBotSchedule.query.get(int(raw))
+    if not s or not s.source_id:
+        return None
+    if user_id is not None and s.user_id != user_id:
+        return None
+    return s
+
+
+@tongbot_bp.route('/api/v1/events', methods=['POST', 'OPTIONS'])
+def unocum_events_create():
+    if request.method == 'OPTIONS':
+        return _unocum_cors(make_response('', 204))
+    data = request.get_json(silent=True) or {}
+    user = _write_member(data)
+    if user is None:
+        return jsonify({"success": False, "message": "Unauthorized"}), 401
+    source = str(data.get('source') or '').strip()
+    source_id = str(data.get('source_id') or '').strip()
+    if not re.fullmatch(r'[A-Za-z0-9_]{1,32}', source):
+        return jsonify({"success": False, "message": "invalid source"}), 400
+    if not source_id or len(source_id) > 64:
+        return jsonify({"success": False, "message": "invalid source_id"}), 400
+    if not _laon_rate_ok(f"{source}:{source_id}"):
+        return jsonify({"success": False, "message": "rate limited"}), 429
+    fields, errs = _laon_validate(data)
+    if errs:
+        return jsonify({"success": False, "message": "; ".join(errs)}), 400
+
+    s = TongBotSchedule.query.filter_by(source=source, source_id=source_id).first()
+    if not s:
+        s = TongBotSchedule(user_id=user.id, event_date=fields['start'], source=source, source_id=source_id)
+        db.session.add(s)
+    s.title = fields['title']
+    s.event_date = fields['start']
+    s.end_date = fields['end']
+    s.location = fields.get('location', s.location or '')
+    s.description = fields.get('description', s.description or '')
+    s.is_allday = fields.get('all_day', bool(s.is_allday))
+    s.status = 'active'
+    db.session.commit()
+    return jsonify({"success": True, "event_id": _laon_event_id(s)})
+
+
+@tongbot_bp.route('/api/v1/events/<event_id>', methods=['PUT', 'DELETE', 'OPTIONS'])
+def unocum_events_modify(event_id):
+    if request.method == 'OPTIONS':
+        return _unocum_cors(make_response('', 204))
+    data0 = request.get_json(silent=True) or {}
+    user = _write_member(data0)
+    if user is None:
+        return jsonify({"success": False, "message": "Unauthorized"}), 401
+    s = _laon_find_event(event_id, user_id=user.id)
+    if not s:
+        return jsonify({"success": False, "message": "event not found"}), 404
+
+    if request.method == 'DELETE':
+        s.status = 'canceled'
+        db.session.commit()
+        return jsonify({"success": True, "event_id": _laon_event_id(s)})
+
+    data = data0
+    fields, errs = _laon_validate(data, partial=True)
+    if errs:
+        return jsonify({"success": False, "message": "; ".join(errs)}), 400
+    if 'title' in fields:
+        s.title = fields['title']
+    if 'location' in fields:
+        s.location = fields['location']
+    if 'description' in fields:
+        s.description = fields['description']
+    if 'start' in fields and fields['start']:
+        s.event_date = fields['start']
+    if 'end' in fields and fields['end']:
+        s.end_date = fields['end']
+    if 'all_day' in fields:
+        s.is_allday = fields['all_day']
+    if s.end_date and s.event_date and s.event_date >= s.end_date:
+        return jsonify({"success": False, "message": "start must be before end"}), 400
+    db.session.commit()
+    return jsonify({"success": True, "event_id": _laon_event_id(s)})
+
+
+
 @tongbot_bp.route('/api/bot/schedule/share-feed', methods=['GET'])
 def schedule_share_feed():
     uid = session.get('user_id')
@@ -2362,9 +2728,18 @@ def schedule_share_feed():
     if not user or not user.email:
         return jsonify({"error": "이메일이 없습니다."}), 400
     sig = _unocum_feed_sig(user.email, user.id)
+    rotate = request.args.get('rotate') in ('1', 'true', 'yes')
+    row = _ensure_member_token(user, rotate=rotate)
+    token = _member_token_value(user, row)
     base = f"{request.url_root.rstrip('/')}/api/v1/unocum_schedules"
-    qs = f"?email={user.email}&sig={sig}"
-    return jsonify({"url": base + ".ics" + qs, "ics_url": base + ".ics" + qs, "json_url": base + qs})
+    qs = f"?email={user.email}&sig={sig}&token={token}"
+    return jsonify({
+        "url": base + ".ics" + qs,
+        "ics_url": base + ".ics" + qs,
+        "json_url": base + qs,
+        "token": token,
+        "rotated": rotate,
+    })
 
 
 @tongbot_bp.route('/api/bot/schedule/reminders', methods=['GET'])
@@ -2713,6 +3088,7 @@ def bot_schedule_update():
         try: s.end_date = datetime.fromisoformat(data['end_date'])
         except: pass
     if 'is_allday' in data: s.is_allday = data['is_allday']
+    if 'busy' in data: s.busy = bool(data['busy'])
     if 'is_recurring' in data: s.is_recurring = data['is_recurring']
     if data.get('repeat_type') is not None: s.repeat_type = data['repeat_type']
     if data.get('repeat_weekdays') is not None: s.repeat_weekdays = data.get('repeat_weekdays') or 0
@@ -2738,6 +3114,14 @@ def bot_schedule_update():
     else:
         s.repeat_infinite = False
         s.repeat_end_date = None
+    _busy_now = True if s.busy is None else bool(s.busy)
+    if _busy_now:
+        _st, _en = _schedule_time_range(s.event_date, s.end_date, bool(s.is_allday))
+        _conf = _find_schedule_conflict(uid, _st, _en, exclude_id=s.id)
+        if _conf:
+            db.session.rollback()
+            _ct = (_conf.title or '').strip() or '일정'
+            return jsonify({"error": f"같은 시간에 이미 일정이 있습니다: {_ct}", "conflict": True}), 409
     db.session.commit()
     parsed = False
     if is_move_event and memo_changed and s.memo:

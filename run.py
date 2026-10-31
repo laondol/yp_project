@@ -513,5 +513,11 @@ with app.app_context():
                     print('[auto-add] %s.%s added' % (_t, _col.name))
                 except Exception as _ae:
                     print('[auto-add] %s.%s failed: %s' % (_t, _col.name, _ae))
+        try:
+            with db.engine.connect() as _c:
+                _c.execute(_sa_text('CREATE UNIQUE INDEX IF NOT EXISTS uq_schedule_source_source_id ON tong_bot_schedule (source, source_id)'))
+                _c.commit()
+        except Exception as _ie:
+            print('[auto-index] uq_schedule_source_source_id: %s' % _ie)
     except Exception as _e:
         print('[SKIP] generic auto-add: %s' % _e)

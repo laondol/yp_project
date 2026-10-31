@@ -24,10 +24,12 @@ GET https://unocum.kr/api/v1/unocum_schedules.ics
 
 | 방식 | 사용 주체 | 방법 |
 |---|---|---|
-| A. 서버 공유토큰 | 라온 서버 | 헤더 `X-Unocum-Token: <공유토큰>` |
-| B. 회원 개인 링크 | 회원 샵(개인) | unocum 일정 화면의 **일정 공유** 버튼으로 받은 URL 그대로 사용 (`email`, `sig` 포함) |
+| **회원 토큰** (권장) | 라온 서버 | 헤더 `X-Unocum-Token: <회원 토큰>` 또는 `?token=<회원 토큰>` |
+| 회원 링크(`sig`) | 캘린더 구독 등 | `?email=<회원이메일>&sig=<서명>` |
 
-> 개인 링크의 `sig`는 회원별 서명값으로, **해당 회원 일정만** 조회할 수 있습니다.
+> **토큰은 회원마다 1개**입니다. 일정 화면의 **일정 공유** 버튼으로 발급되며, 그 회원 일정에만 접근할 수 있습니다.
+> 재발급(`?rotate=1`)하면 이전 토큰은 즉시 무효가 됩니다.
+> `email`을 함께 보내면 토큰의 회원과 일치해야 합니다(불일치 시 401).
 
 ### CORS
 
@@ -37,13 +39,13 @@ GET https://unocum.kr/api/v1/unocum_schedules.ics
 - `Access-Control-Allow-Headers: X-Unocum-Token, Content-Type`
 - `OPTIONS` 사전요청(204) 지원
 
-즉 **서버 간 호출과 브라우저(JS) 호출 모두 가능**합니다. 단, 브라우저 코드에 공유토큰을 넣지 말고 **개인 링크(`sig`) 방식**을 사용하세요.
+즉 **서버 간 호출과 브라우저(JS) 호출 모두 가능**합니다. 단, 브라우저 코드에 회원 토큰을 넣지 말고 **회원 링크(`sig`) 방식**을 사용하세요.
 
 ### 파라미터
 
 | 이름 | 필수 | 설명 |
 |---|---|---|
-| `email` | 선택 | 조회할 회원 이메일. **기본값 `eou@kakao.com`** |
+| `email` | 선택 | 회원 이메일. **토큰 회원과 일치해야 함** (불일치 시 401) |
 | `from` | 선택 | 시작일 `YYYY-MM-DD` (기본: 이번 달 1일) |
 | `to` | 선택 | 종료일 `YYYY-MM-DD` (기본: 이번 달 말일) |
 | `sig` | 선택 | 개인 링크용 서명 |
@@ -124,28 +126,171 @@ GET https://unocum.kr/api/v1/unocum_schedules
 | `404` | 해당 이메일 회원 없음 |
 | `400` | 날짜 범위 오류 (역순, 366일 초과) |
 
-## 4. 호출 예시
+## 3-1. 일정 읽기 API v2 (location/source 포함) — 1단계
+
+라온 예약 차단은 **장소(location)** 가 필요하므로 아래 API를 사용하세요. 기존 ICS 피드는 그대로 유지됩니다.
+
+```
+GET https://www.unocum.kr/api/v1/schedules?email=<회원이메일>&sig=<서명>
+```
+
+- 인증: `X-Unocum-Token`(회원 토큰) 헤더/`token` 파라미터, 또는 회원 `sig`
+- 토큰은 **그 회원 일정만** 반환합니다. 다른 회원 이메일을 지정하면 401
+- 기본 조회 범위: **오늘 -30일 ~ +90일** (`from`, `to`로 변경 가능)
+
+### 응답
+
+```json
+{
+  "success": true,
+  "events": [
+    {
+      "id": "a3ff441d2659a0a8",
+      "title": "경실련 서진숙외1 이훈 미팅 이동",
+      "location": "양수로156번길 4 가동",
+      "start": "2026-10-01T11:40:00+09:00",
+      "end": "2026-10-01T11:50:00+09:00",
+      "all_day": false,
+      "source": ""
+    }
+  ]
+}
+```
+
+| 필드 | 타입 | 설명 |
+|---|---|---|
+| `id` | string | 일정 고유 ID (16자리) |
+| `title` | string | 제목 |
+| `location` | string | 장소 (없으면 빈 문자열) |
+| `start` | string | ISO8601 + KST(+09:00) |
+| `end` | string | ISO8601 + KST(+09:00) |
+| `all_day` | bool | 종일 여부 |
+| `source` | string | 라온이 등록한 일정이면 `"laon"`, 직접 입력은 `""` |
+
+- `start` 오름차순 정렬, 반복 일정은 발생일마다 1건
+- 오류: sig/토큰 불일치 `401`, 회원 없음 `404`
+
+> `source` 값은 2단계(쓰기 API + `source` 컬럼) 완료 후 `"laon"`으로 채워집니다. 그 전까지는 `""`입니다.
+
+## 3-2. 예약가능 구분
+
+일정 등록 화면의 **`예약가능`** 체크로 구분합니다 (**기본값: 체크 안 됨 = 바쁨**).
+
+| 구분 | 공유 피드 반영 | 일정 중복 |
+|---|---|---|
+| **기본(바쁨)** | 피드에 포함 → 그 시간 예약 불가 | 같은 시간에 다른 일정 등록 불가 |
+| **`예약가능` 체크** | 피드에서 제외 → 그 시간 예약 가능 | 겹쳐도 등록 가능 |
+
+- 바쁨 일정과 `예약가능` 일정이 **겹치면, 겹친 구간만 잘라내어** 예약 가능 시간으로 비웁니다.
+  - 예: 종일 일정 + 12:00~14:00 `예약가능` → 피드에는 00:00~12:00, 14:00~23:59 두 건으로 전달
+- 여러 날 일정(출장 등) 중 특정 시간만 예약을 받고 싶을 때 유용합니다.
+- 과거 일정처럼 `busy` 값이 없는 데이터는 **바쁨으로 간주**합니다.
+
+## 4-1. 쓰기 API (라온 예약 → unocum 일정 자동 등록) — 2단계
+
+라온에서 예약이 확정되면 회원 일정에 자동 등록합니다. **회원 토큰이 필수**입니다.
+
+| 메서드 | 경로 | 설명 |
+|---|---|---|
+| `POST` | `/api/v1/events` | 등록 (같은 `source`+`source_id`면 갱신) |
+| `PUT` | `/api/v1/events/{event_id}` | 수정 (변경할 필드만) |
+| `DELETE` | `/api/v1/events/{event_id}` | 삭제 (소프트 삭제: `status='canceled'`) |
+
+### 인증과 회원 범위
+
+- **회원 토큰**(`X-Unocum-Token` 또는 `?token=`)이 필수입니다.
+  - 읽기: 헤더 또는 `?token=` 모두 허용
+  - **쓰기: 헤더 `X-Unocum-Token`만 허용** (링크 유출 시 무단 쓰기 방지)
+- 토큰은 회원마다 발급되며 **그 회원 일정에만** 읽기/쓰기가 가능합니다.
+  - 다른 회원 이메일을 지정하면 `401`
+  - 다른 회원의 `event_id`를 수정/삭제하면 `404`
+- `email`은 선택이며, 보내면 토큰 회원과 일치해야 합니다.
+- `sig`는 선택이며, 보내면 토큰 회원의 서명과 일치해야 합니다.
+- 토큰 재발급: `GET /api/bot/schedule/share-feed?rotate=1` (로그인 세션 필요) → 새 토큰 발급, 기존 토큰 무효
+
+### 등록 요청
+
+```json
+{
+  "email": "eou@kakao.com",
+  "source": "laon",
+  "source_id": "RES-20261030-0001",
+  "title": "[라온카페] 핸드드립 체험 - 홍길동",
+  "location": "양수로156번길 4 가동",
+  "description": "예약번호 RES-20261030-0001 / 2명 / 010-0000-0000",
+  "start": "2026-11-10T14:00:00+09:00",
+  "end": "2026-11-10T15:30:00+09:00",
+  "all_day": false
+}
+```
+
+응답: `{"success": true, "event_id": "evt_123"}`
+
+### 규칙
+
+- 같은 `source`+`source_id` 재요청 시 **같은 `event_id`로 갱신** (DB UNIQUE)
+- 인증: `X-Unocum-Token` (불일치 `401`)
+- 삭제는 `status='canceled'` 처리 → 읽기 API 목록에서 제외
+- 검증: `title` ≤255자, `source` 영문/숫자/`_`, `source_id` ≤64자, `start < end`
+- 레이트리밋: 동일 `source_id` **분당 10회** (초과 시 `429`)
+- `PUT`/`DELETE`는 라온이 등록한 일정(`source_id` 있음)만 가능
+
+### 읽기 응답의 source
+
+라온이 등록한 일정은 읽기 API에서 `source`가 `"laon"`으로 반환됩니다.
+**라온은 `source == "laon"`인 일정을 예약 차단 계산에서 제외**해야 자기 예약을 외출로 오인하지 않습니다.
+
+## 4-2. 호출 예시
 
 ```bash
-# 표준 iCalendar 피드 (서버 공유토큰)
-curl -H "X-Unocum-Token: <공유토큰>" \
-  "https://unocum.kr/api/v1/unocum_schedules.ics?email=eou@kakao.com&from=2026-11-01&to=2026-11-30"
+# 표준 iCalendar 피드 (회원 토큰)
+curl -H "X-Unocum-Token: <회원 토큰>" \
+  "https://unocum.kr/api/v1/unocum_schedules.ics?token=<회원 토큰>&from=2026-11-01&to=2026-11-30"
 
 # JSON (회원 개인 링크)
 curl "https://unocum.kr/api/v1/unocum_schedules?email=member@example.com&sig=<서명>&from=2026-11-01&to=2026-11-30"
 ```
 
+### 쓰기 (라온 예약 자동 등록)
+
+```bash
+# 등록 (회원 링크의 sig를 함께 보내면 그 회원 일정에만 기록)
+curl -X POST https://www.unocum.kr/api/v1/events \
+  -H "Content-Type: application/json" \
+  -H "X-Unocum-Token: <회원 토큰>" \
+  -d '{
+    "email": "eou@kakao.com",
+    "sig": "<회원 링크의 sig>",
+    "source": "laon",
+    "source_id": "RES-20261030-0001",
+    "title": "[라온카페] 핸드드립 체험 - 홍길동",
+    "location": "양수로156번길 4 가동",
+    "description": "예약번호 RES-20261030-0001 / 2명",
+    "start": "2026-11-10T14:00:00+09:00",
+    "end": "2026-11-10T15:30:00+09:00",
+    "all_day": false
+  }'
+
+# 수정 / 삭제 (sig로 회원 범위 확인)
+curl -X PUT "https://www.unocum.kr/api/v1/events/evt_123?sig=<sig>" \
+  -H "Content-Type: application/json" -H "X-Unocum-Token: <회원 토큰>" \
+  -d '{"title":"[라온카페] 핸드드립 체험 - 홍길동 (변경)"}'
+
+curl -X DELETE "https://www.unocum.kr/api/v1/events/evt_123?sig=<sig>" \
+  -H "X-Unocum-Token: <회원 토큰>"
+```
+
 ## 5. 샵 페이지 삽입 예제 (PHP, JSON 방식)
 
-`.ics` 구독이 불가능한 샵은 아래처럼 JSON을 받아 달력을 그릴 수 있습니다. `$FEED_URL`만 회원이 받은 개인 링크(또는 공유토큰 방식 URL)로 바꾸면 됩니다.
+`.ics` 구독이 불가능한 샵은 아래처럼 JSON을 받아 달력을 그릴 수 있습니다. `$FEED_URL`만 회원이 받은 링크(또는 토큰 방식 URL)로 바꾸면 됩니다.
 
 ```php
 <?php
 // unocum_schedule_calendar.php
 $FEED_URL = 'https://unocum.kr/api/v1/unocum_schedules?email=member@example.com&sig=발급받은서명';
-// 공유토큰 방식이면:
-// $FEED_URL = 'https://unocum.kr/api/v1/unocum_schedules?email=eou@kakao.com';
-// $SHARED_TOKEN = '발급받은공유토큰';
+// 회원 토큰 방식이면:
+// $FEED_URL = 'https://unocum.kr/api/v1/unocum_schedules';
+// $SHARED_TOKEN = '발급받은회원토큰';
 
 $month = isset($_GET['m']) && preg_match('/^\d{4}-\d{2}$/', $_GET['m']) ? $_GET['m'] : date('Y-m');
 $from  = $month . '-01';
@@ -216,10 +361,10 @@ $startDow = (int)date('w', $first);
 
 1. 회원이 unocum.kr 일정 화면에서 **일정 공유** 버튼 클릭 → 개인 피드 URL 복사
 2. 그 URL을 캘린더 구독에 등록하거나, 샵 관리 화면에 등록
-3. 서버 간 연동이면 공유토큰을 서버 환경변수/설정에 보관하고 `X-Unocum-Token` 헤더로 호출
+3. 서버 간 연동이면 회원 토큰을 회원별로 보관하고 `X-Unocum-Token` 헤더로 호출
 
 ## 7. 보안 주의
 
 - 개인 링크(`sig`)는 해당 회원 일정만 조회 가능하지만, 링크를 아는 사람은 조회할 수 있으니 공개 게시판 등에 노출하지 마세요.
-- 공유토큰은 **서버에서만** 보관하고 브라우저/프론트엔드 코드에 넣지 마세요.
+- 회원 토큰은 **서버에서만** 보관하고 브라우저/프론트엔드 코드에 넣지 마세요. 토큰이 유출돼도 **그 회원 일정에만** 영향이 있습니다.
 - API는 읽기 전용이며 수정·삭제 기능은 없습니다. unocum의 기존 일정 기능(등록·수정·삭제·경로·숙소)에는 어떤 영향도 주지 않습니다.

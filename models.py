@@ -809,7 +809,7 @@ class TongBotMemoComment(db.Model):
 class TongBotSchedule(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    title = db.Column(db.String(200), nullable=False)
+    title = db.Column(db.String(255), nullable=False)
     description = db.Column(db.Text)
     event_date = db.Column(db.DateTime, nullable=False)
     end_date = db.Column(db.DateTime)
@@ -841,6 +841,11 @@ class TongBotSchedule(db.Model):
     parent_id = db.Column(db.Integer, db.ForeignKey('tong_bot_schedule.id', ondelete='CASCADE'), nullable=True)
     occ_date = db.Column(db.Date, nullable=True)  # 발생일 실제 날짜 (occurrence 전용)
     route_dirty = db.Column(db.Boolean, default=False)  # 모일정 변경 시 이동/귀가 재생성 필요 표시
+    # --- 외부(라온) 연동 ---
+    source = db.Column(db.String(32), default='')  # '' 직접 입력, 'laon' 라온 등록
+    source_id = db.Column(db.String(64), nullable=True)  # 외부 시스템 예약 ID
+    status = db.Column(db.String(16), default='active')  # active | canceled
+    busy = db.Column(db.Boolean, default=True)  # True=바쁨(예약 불가), False=예약 가능(공유 제외)
 
 class ChatRoom(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -1578,3 +1583,23 @@ class DiscussionProposalVote(db.Model):
     __table_args__ = (
         db.UniqueConstraint('proposal_id', 'user_id', name='uq_discussion_proposal_vote'),
     )
+
+
+class LaonRateLimit(db.Model):
+    """라온 쓰기 API 레이트리밋 (워커 간 공유용 DB 카운터)"""
+    __tablename__ = 'laon_rate_limit'
+    id = db.Column(db.Integer, primary_key=True)
+    rkey = db.Column(db.String(160), unique=True, nullable=False)
+    window_start = db.Column(db.DateTime, nullable=False)
+    cnt = db.Column(db.Integer, default=0)
+
+
+class LaonMemberToken(db.Model):
+    """라온 연동용 회원별 토큰 (회원 1명 = 토큰 1개, 재발급 시 기존 토큰 무효화)"""
+    __tablename__ = 'laon_member_token'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), unique=True, nullable=False)
+    nonce = db.Column(db.String(64), nullable=False)
+    token_hash = db.Column(db.String(64), nullable=False, index=True)
+    active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.now)

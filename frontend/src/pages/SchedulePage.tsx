@@ -7,7 +7,7 @@ import { formatKST } from '../utils/format';
 
 interface ScheduleItem {
   id: number | string; title: string; description?: string; memo?: string; location?: string
-  event_date: string; end_date?: string; color?: string; is_allday?: boolean
+  event_date: string; end_date?: string; color?: string; is_allday?: boolean; busy?: boolean
   is_recurring?: boolean; repeat_type?: string; repeat_interval?: number
   repeat_infinite?: boolean; repeat_weekdays?: number; repeat_week_of_month?: number
   repeat_month_of_year?: number; reminder_minutes?: number; exceptions?: string
@@ -38,6 +38,7 @@ export default function SchedulePage() {
   const [shareSelectedIds, setShareSelectedIds] = useState<number[]>([])
   const [shareSending, setShareSending] = useState(false)
   const [feedSending, setFeedSending] = useState(false)
+  const [feedInfo, setFeedInfo] = useState<{ url: string; token: string } | null>(null)
   const formRef = useRef<HTMLDivElement>(null)
 
   const [formTitle, setFormTitle] = useState('')
@@ -50,6 +51,7 @@ export default function SchedulePage() {
   const [formAccommodation, setFormAccommodation] = useState('')
   const [showAccommodation, setShowAccommodation] = useState(false)
   const [formAllDay, setFormAllDay] = useState(false)
+  const [formFree, setFormFree] = useState(false)
   const [formRecurring, setFormRecurring] = useState(false)
   const [formRepeatType, setFormRepeatType] = useState('')
   const [formReminder, setFormReminder] = useState(0)
@@ -115,18 +117,20 @@ export default function SchedulePage() {
   const shareFeed = async () => {
     if (feedSending) return
     setFeedSending(true)
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), 10000)
     try {
-      const res = await fetch('/api/bot/schedule/share-feed')
+      const res = await fetch('/api/bot/schedule/share-feed', { signal: ctrl.signal })
       const data = await res.json().catch(() => ({}))
       if (res.ok && data.url) {
-        try { await navigator.clipboard.writeText(data.url) } catch {}
-        window.prompt('아래 링크를 복사해 샵 일정 프로그램에 등록하세요.', data.url)
+        setFeedInfo({ url: data.url, token: data.token || '' })
       } else {
         alert('공유 링크를 만들지 못했습니다.')
       }
     } catch {
       alert('공유 링크를 만들지 못했습니다. 잠시 후 다시 시도해주세요.')
     } finally {
+      clearTimeout(timer)
       setFeedSending(false)
     }
   }
@@ -135,6 +139,7 @@ export default function SchedulePage() {
     setEditingId(null)
     setFormTitle(''); setFormLocation(''); setFormMemo(''); setFormAccommodation(''); setShowAccommodation(false)
     setFormAllDay(false)
+    setFormFree(false)
     setFormRecurring(false); setFormRepeatType(''); setFormReminder(0)
     setFormStartTime(''); setFormEndTime('')
     const d = day || selectedDay || 1
@@ -164,6 +169,7 @@ export default function SchedulePage() {
     setFormMemo((s.memo || '').replace(/\[숙소:[^\]]+\]/g, '').replace(/^\s*<br>\s*/i, '').trim())
     setShowAccommodation(!!am || (!!edStr && edStr !== dt.slice(0, 10)))
     setFormAllDay(s.is_allday || false)
+    setFormFree(s.busy === false)
     setFormRecurring(s.is_recurring || false)
     setFormRepeatType(s.repeat_type || '')
     setFormReminder(s.reminder_minutes || 0)
@@ -183,6 +189,7 @@ export default function SchedulePage() {
         location: formLocation,
         memo,
         is_allday: formAllDay,
+        busy: !formFree,
         is_recurring: formRecurring,
         repeat_type: formRepeatType,
         reminder_minutes: formReminder,
@@ -195,9 +202,11 @@ export default function SchedulePage() {
       if (editingId) {
         body.id = typeof editingId === 'string' ? parseInt(editingId.split('_')[0]) : editingId
         const r = await fetch('/api/bot/schedule/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json())
+        if (r && r.error) { alert(r.error); return }
         if (r && r.route_parsed) alert('✅ 메모를 바탕으로 이동 경로를 만들었습니다.')
       } else {
-        await fetch('/api/bot/schedule', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json())
+        const r = await fetch('/api/bot/schedule', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json())
+        if (r && r.error) { alert(r.error); return }
       }
       setShowForm(false); setEditingId(null); load()
     } catch { alert('저장 실패') }
@@ -695,6 +704,7 @@ export default function SchedulePage() {
             </div>
             <div className="col-3 d-flex align-items-end">
               <label className="small"><input type="checkbox" checked={formAllDay} onChange={e => setFormAllDay(e.target.checked)} /> 종일</label>
+              <label className="small ms-2"><input type="checkbox" checked={formFree} onChange={e => setFormFree(e.target.checked)} /> 예약가능</label>
             </div>
           </div>
           <div className="row g-2 mb-2">
@@ -879,6 +889,40 @@ export default function SchedulePage() {
                 finally { setSavingRoute(false) }
               }}>{savingRoute ? '저장 중...' : '저장'}</button>
               <button className="btn btn-sm btn-outline-secondary" onClick={() => setEditRoute(null)}>취소</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+
+      {/* 일정 공유 링크/토큰 모달 */}
+      {feedInfo && (
+        <div className="modal fade show d-block" tabIndex={-1} style={{ background: 'rgba(0,0,0,0.5)' }}>
+          <div className="modal-dialog modal-dialog-centered">
+            <div className="modal-content" style={{ borderRadius: 16 }}>
+              <div className="modal-header border-0 pb-0">
+                <h6 className="fw-bold">🔗 일정 공유</h6>
+                <button className="btn-close" onClick={() => setFeedInfo(null)} />
+              </div>
+              <div className="modal-body">
+                <label className="small fw-bold">링크 (읽기용)</label>
+                <div className="input-group input-group-sm mb-3">
+                  <input className="form-control" readOnly value={feedInfo.url} onFocus={e => e.currentTarget.select()} />
+                  <button className="btn btn-outline-secondary" onClick={() => { navigator.clipboard?.writeText(feedInfo.url); alert('링크를 복사했습니다.') }}>복사</button>
+                </div>
+                <label className="small fw-bold">토큰 (쓰기 포함)</label>
+                <div className="input-group input-group-sm mb-2">
+                  <input className="form-control" readOnly value={feedInfo.token} onFocus={e => e.currentTarget.select()} />
+                  <button className="btn btn-outline-secondary" onClick={() => { navigator.clipboard?.writeText(feedInfo.token); alert('토큰을 복사했습니다.') }}>복사</button>
+                </div>
+                <div className="text-muted" style={{ fontSize: 11 }}>
+                  · 링크는 일정 조회/구독용입니다.<br />
+                  · 토큰은 라온 등록용이며, 이 회원의 일정에만 쓰기 가능합니다.
+                </div>
+                <div className="text-end mt-3">
+                  <button className="btn btn-sm btn-outline-secondary" onClick={() => setFeedInfo(null)}>닫기</button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
