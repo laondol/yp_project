@@ -93,7 +93,8 @@ def _translate(ai, clean_title, body, src, attempts=3):
 
 
 def parse_args():
-    limit, sleep_s = None, 5.0
+    limit, sleep_s = None, 10.0
+    gemini_only = False
     args = sys.argv[1:]
     i = 0
     while i < len(args):
@@ -101,13 +102,15 @@ def parse_args():
             limit = int(args[i + 1]); i += 2
         elif args[i] == '--sleep' and i + 1 < len(args):
             sleep_s = float(args[i + 1]); i += 2
+        elif args[i] == '--gemini-only':
+            gemini_only = True; i += 1
         else:
             log.info('무시된 인자: %s', args[i]); i += 1
-    return limit, sleep_s
+    return limit, sleep_s, gemini_only
 
 
 def main():
-    limit, sleep_s = parse_args()
+    limit, sleep_s, gemini_only = parse_args()
     from run import create_app
     from models import NewsArticle, db
     from datetime import datetime
@@ -138,7 +141,17 @@ def main():
             src = 'zh' if (len(re.findall(r'[一-鿿]', src_body)) >
                            len(re.findall(r'[A-Za-z]', src_body))) else 'en'
             try:
-                if kind == 'summary':
+                if gemini_only:
+                    from services.news_service import _motif_text
+                    _prompt = (
+                        '다음 기사를 한국어 격식체로 번역해 JSON으로만 답하세요.\n'
+                        '출력: {"title": "번역된 제목", "summary": "한국어 요약"}\n'
+                        f'제목: {clean_title}\n내용: {(a.content or a.summary or "")[:1200]}'
+                    )
+                    _r = _motif_text('당신은 전문 번역가입니다. 한국어로만 답합니다.',
+                                     _prompt, format_json=True, provider='gemini')
+                    result = _r if isinstance(_r, dict) and _r.get('title') else None
+                elif kind == 'summary':
                     # 제목·본문은 한글 → 요약만 재생성 (기존 한글 본문은 보존)
                     result = _translate(ai_translate_and_format, raw_title,
                                         a.summary or '', src)
