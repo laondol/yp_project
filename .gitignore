@@ -79,3 +79,7 @@ yard_posts_export.json
 
 # private attachment storage
 private_uploads/
+
+# 비밀/백업 파일 (커밋 금지)
+.env_b
+uploads_*.tgz
