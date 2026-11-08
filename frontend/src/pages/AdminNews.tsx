@@ -263,18 +263,23 @@ export default function AdminNews() {
         return
       }
       // 백그라운드 진행 상황 폴링
+      let lastRemain = -1
+      let stallCount = 0
       for (let i = 0; i < 400; i++) {
         await new Promise(r => setTimeout(r, 3000))
         const st = await fetch('/admin/news/translate-status').then(r => r.json())
         setTranslateMsg(`번역 중… 남은 ${st.remaining ?? '?'}건 (완료 ${st.done ?? 0}건)`)
-        if (!st.running && (st.remaining ?? 0) === 0) {
+        if ((st.remaining ?? 0) === 0) {
           setTranslateMsg('')
           alert(`✅ 번역 완료 (완료 ${st.done}건, 실패 ${st.failed}건)`)
           break
         }
-        if (!st.running) {
+        // 진행이 멈춘 경우(같은 남은 건수가 10회 연속) 종료
+        stallCount = (st.remaining === lastRemain) ? stallCount + 1 : 0
+        lastRemain = st.remaining
+        if (stallCount >= 10) {
           setTranslateMsg('')
-          alert(`번역 종료 (남은 ${st.remaining}건)`)
+          alert(`번역이 멈췄습니다. 남은 ${st.remaining}건 — 다시 실행해 주세요.`)
           break
         }
       }
