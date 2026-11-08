@@ -324,6 +324,12 @@ export default function AdminNews() {
         ))}
       </ul>
 
+      <div className="mb-3">
+        <button className="btn btn-outline-primary btn-sm" onClick={handleTranslateUntranslated}>
+          🌐 미번역 일괄 번역
+        </button>
+      </div>
+
       {/* URL Import + Action Buttons (hidden on 'all' tab) */}
       {tab !== 'all' && (
         <div className="card border-0 shadow-sm mb-4 p-3">
@@ -353,9 +359,6 @@ export default function AdminNews() {
                 {suggesting ? '⏳ 생성 중...' : '🤖 세계와양평 AI 추천'}
               </button>
             )}
-            <button className="btn btn-outline-primary btn-sm" onClick={handleTranslateUntranslated}>
-              🌐 미번역 일괄 번역
-            </button>
             <button className="btn btn-outline-warning btn-sm" onClick={handleCleanCjk} disabled={cleaning}>
               {cleaning ? '⏳ 정리 중...' : '🗣️ 깨진 글자 정리'}
             </button>
