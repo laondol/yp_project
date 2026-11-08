@@ -219,6 +219,40 @@ def admin_news_approve(news_id, tab, approver):
     db.session.commit()
     return jsonify({"status": "success"})
 
+@news_bp.route('/admin/news/translate-untranslated', methods=['POST'])
+def admin_news_translate_untranslated():
+    """미번역(외국어) 기사 제목·요약을 일괄 번역 (삭제 없음)"""
+    if session.get('role') not in ['admin', 'leader']:
+        return jsonify({"status": "error", "msg": "권한 없음"}), 403
+    from services.news_service import ai_translate_and_format
+    import re as _re
+
+    def _need(t):
+        t = t or ''
+        if '[미번역]' in t:
+            return True
+        letters = [c for c in t if c.isalpha()]
+        if not letters:
+            return False
+        h = sum(1 for c in letters if '\uac00' <= c <= '\ud7a3')
+        return h / len(letters) < 0.3
+
+    rows = [a for a in NewsArticle.query.all() if _need(a.title) or _need(a.summary)]
+    ok = 0
+    for a in rows:
+        m = _re.match(r'^(\[[^\]]+\]\s*)', a.title or '')
+        prefix = m.group(1) if m else ''
+        body = (a.title or '')[len(prefix):]
+        tr = ai_translate_and_format(body, a.summary or '')
+        if isinstance(tr, dict) and tr.get('title'):
+            a.title = prefix + str(tr['title']).replace('[미번역]', '').strip()
+            if tr.get('summary'):
+                a.summary = str(tr['summary'])[:500]
+            ok += 1
+        db.session.commit()
+    return jsonify({"status": "success", "count": ok, "target": len(rows),
+                    "msg": f"✅ {ok}/{len(rows)}건 번역 완료"})
+
 @news_bp.route('/admin/news/approve-all', methods=['POST'])
 def admin_news_approve_all():
     """현재 탭/분류/출처 필터에 해당하는 기사를 관리자 채택 처리"""

@@ -247,6 +247,18 @@ export default function AdminNews() {
     }
   }
 
+  const handleTranslateUntranslated = async () => {
+    if (!window.confirm('미번역 기사를 모두 한국어로 번역할까요? (삭제 없음)')) return
+    try {
+      const res = await fetch('/admin/news/translate-untranslated', { method: 'POST' })
+      const data = await res.json()
+      alert(data.msg || (data.status === 'success' ? '완료' : '실패'))
+      fetchNews()
+    } catch {
+      alert('오류가 발생했습니다.')
+    }
+  }
+
   const handleApprove = async (id: number, approver: 'ai' | 'admin') => {
     setNews(prev => prev.map(n => n.id === id ? { ...n, [approver === 'ai' ? 'ai_approved' : 'admin_approved']: !n[approver === 'ai' ? 'ai_approved' : 'admin_approved'] } : n))
     try {
@@ -341,6 +353,9 @@ export default function AdminNews() {
                 {suggesting ? '⏳ 생성 중...' : '🤖 세계와양평 AI 추천'}
               </button>
             )}
+            <button className="btn btn-outline-primary btn-sm" onClick={handleTranslateUntranslated}>
+              🌐 미번역 일괄 번역
+            </button>
             <button className="btn btn-outline-warning btn-sm" onClick={handleCleanCjk} disabled={cleaning}>
               {cleaning ? '⏳ 정리 중...' : '🗣️ 깨진 글자 정리'}
             </button>
