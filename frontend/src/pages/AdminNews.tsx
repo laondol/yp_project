@@ -16,6 +16,8 @@ interface NewsItem {
   is_selected: boolean
   created_at: string
   published_at?: string
+  ai_score?: number
+  source_name?: string
 }
 
 const TABS = [
@@ -32,6 +34,12 @@ export default function AdminNews() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [page, setPage] = useState(1)
+  const [categoryFilter, setCategoryFilter] = useState('')
+  const [categories, setCategories] = useState<string[]>([])
+  const [catMenu, setCatMenu] = useState<{ x: number; y: number } | null>(null)
+  const [sourceFilter, setSourceFilter] = useState('')
+  const [sources, setSources] = useState<string[]>([])
+  const [srcMenu, setSrcMenu] = useState<{ x: number; y: number } | null>(null)
   const [totalPages, setTotalPages] = useState(1)
   const [importUrl, setImportUrl] = useState('')
   const [importing, setImporting] = useState(false)
@@ -66,11 +74,13 @@ export default function AdminNews() {
     setLoading(true)
     setError('')
     try {
-      const res = await fetch(`/api/admin/news?tab=${tab}&page=${page}`)
+      const res = await fetch(`/api/admin/news?tab=${tab}&page=${page}${categoryFilter ? `&category=${encodeURIComponent(categoryFilter)}` : ''}${sourceFilter ? `&source=${encodeURIComponent(sourceFilter)}` : ''}`, { cache: 'no-store' })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = await res.json()
       setNews(data.items ?? [])
       setTotalPages(data.total_pages ?? 1)
+      setCategories(data.categories ?? [])
+      setSources(data.sources ?? [])
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : '불러오기 실패')
     } finally {
@@ -84,7 +94,7 @@ export default function AdminNews() {
 
   useEffect(() => {
     fetchNews()
-  }, [tab, page])
+  }, [tab, page, categoryFilter, sourceFilter])
 
   const handleImportUrl = async () => {
     if (!importUrl.trim()) return
@@ -173,6 +183,67 @@ export default function AdminNews() {
       alert('오류가 발생했습니다.')
     } finally {
       setCollecting(false)
+    }
+  }
+
+  const handleCollectWorld = async () => {
+    setCollecting(true)
+    try {
+      const res = await fetch('/admin/news/collect-world', { method: 'POST' })
+      const data = await res.json()
+      if (data.status === 'success' || data.success) {
+        alert(data.msg || `✅ ${data.count}건 수집 완료`)
+        fetchNews()
+      } else {
+        alert(data.msg || data.message || '수집 실패')
+      }
+    } catch {
+      alert('오류가 발생했습니다.')
+    } finally {
+      setCollecting(false)
+    }
+  }
+
+  const handleApproveAll = async () => {
+    const ids = news.map(n => n.id)
+    if (ids.length === 0) return
+    // 화면 즉시 반영 (AI 채택 여부와 무관하게 관리 채택)
+    setNews(prev => prev.map(n => ids.includes(n.id) ? { ...n, admin_approved: true } : n))
+    try {
+      const res = await fetch('/admin/news/approve-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tab, category: categoryFilter, source: sourceFilter, value: true, ids }),
+      })
+      const data = await res.json()
+      if (data.status === 'success') {
+        await fetchNews()
+      } else {
+        alert(data.msg || '실패')
+      }
+    } catch {
+      alert('오류가 발생했습니다.')
+    }
+  }
+
+  const handleApproveAllAI = async () => {
+    const ids = news.map(n => n.id)
+    if (ids.length === 0) return
+    setNews(prev => prev.map(n => ids.includes(n.id) ? { ...n, ai_approved: true } : n))
+    try {
+      const res = await fetch('/admin/news/approve-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tab, category: categoryFilter, source: sourceFilter, value: true, approver: 'ai', ids }),
+      })
+      const data = await res.json()
+      if (data.status === 'success') {
+        await fetchNews()
+      } else {
+        alert(data.msg || '실패')
+      }
+    } catch {
+      alert('오류가 발생했습니다.')
     }
   }
 
@@ -278,6 +349,11 @@ export default function AdminNews() {
                 {collecting ? '⏳ 수집 중...' : '📰 대한민국·양평 자동 수집'}
               </button>
             )}
+            {tab === 'world' && (
+              <button className="btn btn-outline-info btn-sm ms-1" onClick={handleCollectWorld} disabled={collecting}>
+                {collecting ? '⏳ 수집 중...' : '🌍 세계 뉴스 자동 수집'}
+              </button>
+            )}
             <small className="text-muted ms-2">
               {tab === 'world' ? '🌐 영문 검색 → 해외 기사 중심' : '🇰🇷 국내 검색 → 한국 뉴스 중심'} (자동 가져오기)
             </small>
@@ -304,12 +380,13 @@ export default function AdminNews() {
                 <tr className="text-center small">
                   <th style={{ width: '5%' }}>ID</th>
                   <th style={{ width: '22%' }}>제목</th>
-                  <th style={{ width: '7%' }}>분류</th>
-                  <th style={{ width: '12%' }}>AI 선정 이유</th>
+                  <th style={{ width: '9%', cursor: 'pointer' }} onClick={(e) => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); setSrcMenu(prev => prev ? null : { x: r.left, y: r.bottom + 2 }) }} title="출처별 보기">출처 {sourceFilter ? `(${sourceFilter})` : '▾'}</th>
+                  <th style={{ width: '7%', cursor: 'pointer' }} onClick={(e) => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); setCatMenu(prev => prev ? null : { x: r.left, y: r.bottom + 2 }) }} title="분류별 보기">분류 {categoryFilter ? `(${categoryFilter})` : '▾'}</th>
+                  <th style={{ width: '12%' }}>기사 날짜</th>
                   <th style={{ width: '8%' }}>원본링크</th>
                   <th style={{ width: '4%' }}>AI</th>
-                  <th style={{ width: '8%' }}>채자(AI)</th>
-                  <th style={{ width: '8%' }}>채자(관리)</th>
+                  <th style={{ width: '9%' }}>채자(AI) <input type="checkbox" checked={news.length > 0 && news.every(n => !!n.ai_approved)} onChange={handleApproveAllAI} title="현재 페이지 AI 전체 채택" /></th>
+                  <th style={{ width: '10%' }}>채자(관리) <input type="checkbox" checked={news.length > 0 && news.every(n => !!n.admin_approved)} onChange={handleApproveAll} title="현재 페이지 전체 채택" /></th>
                   <th style={{ width: '8%' }}>등록일</th>
                   <th style={{ width: '10%' }}>관리</th>
                 </tr>
@@ -328,12 +405,25 @@ export default function AdminNews() {
                           : item.summary}
                       </small>
                     </td>
-                    <td><span className="badge bg-secondary">{item.category}</span></td>
-                    <td className="text-start small" style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={item.ai_reason || ''}>
-                      {item.ai_reason ? (
-                        <span className="text-success" title={item.ai_reason}>
-                          💡 {item.ai_reason.length > 50 ? item.ai_reason.slice(0, 50) + '...' : item.ai_reason}
-                        </span>
+                    <td className="small text-truncate" style={{ maxWidth: 120 }} title={item.source_name || ''}>
+                      {item.source_name ? (
+                        <span style={{ cursor: 'pointer' }} onClick={() => { setSourceFilter(item.source_name || ''); setPage(1) }}>{item.source_name}</span>
+                      ) : (<span className="text-muted">-</span>)}
+                    </td>
+                    <td><span className="badge bg-secondary" style={{ cursor: 'pointer' }} onClick={() => { setCategoryFilter(item.category); setPage(1) }} title="이 분류만 보기">{item.category}</span></td>
+                    <td className="text-start small" style={{ whiteSpace: 'nowrap' }}>
+                      {item.published_at || item.created_at ? (
+                        <div>
+                          <div className="text-dark">
+                            📅 {formatKST((item.published_at || item.created_at) as string, { year: '2-digit', month: '2-digit', day: '2-digit' })}
+                          </div>
+                          <div className="text-muted">
+                            {formatKST((item.published_at || item.created_at) as string, { hour: '2-digit', minute: '2-digit' })}
+                            {typeof item.ai_score === 'number' && item.ai_score > 0 && (
+                              <span className="badge bg-success ms-1">{item.ai_score}점</span>
+                            )}
+                          </div>
+                        </div>
                       ) : (
                         <span className="text-muted">-</span>
                       )}
@@ -342,7 +432,6 @@ export default function AdminNews() {
                       {item.source_url ? (
                         <div className="d-flex gap-1 justify-content-center">
                           <a href={item.source_url} target="_blank" rel="noopener noreferrer" className="btn btn-sm btn-outline-primary">🔗 원문</a>
-                          <a href={`https://papago.naver.net/website?source=auto&target=ko&url=${encodeURIComponent(item.source_url)}`} target="_blank" rel="noopener noreferrer" className="btn btn-sm btn-outline-info">🌐 번역</a>
                         </div>
                       ) : (
                         <span className="text-muted small">-</span>
@@ -406,6 +495,45 @@ export default function AdminNews() {
           </ul>
         </nav>
       )}
+      {srcMenu && (
+        <>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 1040 }} onClick={() => setSrcMenu(null)} />
+          <div
+            className="bg-white border rounded shadow"
+            style={{ position: 'fixed', top: srcMenu.y, left: srcMenu.x, minWidth: 180, maxHeight: 260, overflowY: 'auto', zIndex: 1050 }}
+            onClick={e => e.stopPropagation()}>
+            <button className={`dropdown-item ${sourceFilter === '' ? 'active' : ''}`}
+              onClick={() => { setSourceFilter(''); setPage(1); setSrcMenu(null) }}>전체</button>
+            {sources.map(c => (
+              <button key={c} className={`dropdown-item ${sourceFilter === c ? 'active' : ''}`}
+                onClick={() => { setSourceFilter(c); setPage(1); setSrcMenu(null) }}>{c}</button>
+            ))}
+          </div>
+        </>
+      )}
+      {catMenu && (
+        <>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 1040 }} onClick={() => setCatMenu(null)} />
+          <div
+            className="bg-white border rounded shadow"
+            style={{ position: 'fixed', top: catMenu.y, left: catMenu.x, minWidth: 160, maxHeight: 260, overflowY: 'auto', zIndex: 1050 }}
+            onClick={e => e.stopPropagation()}>
+            <button
+              className={`dropdown-item ${categoryFilter === '' ? 'active' : ''}`}
+              onClick={() => { setCategoryFilter(''); setPage(1); setCatMenu(null) }}>
+              전체
+            </button>
+            {categories.map(c => (
+              <button key={c}
+                className={`dropdown-item ${categoryFilter === c ? 'active' : ''}`}
+                onClick={() => { setCategoryFilter(c); setPage(1); setCatMenu(null) }}>
+                {c}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
     </div>
   )
 }

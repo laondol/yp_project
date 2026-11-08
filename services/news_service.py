@@ -126,6 +126,8 @@ def ai_translate_and_format(title, content, source_lang="en"):
 원본 제목: {title}
 원본 내용: {content[:3000]}"""
     result = _motif_text(system, prompt, format_json=True, provider='groq')
+    if not (isinstance(result, dict) and result.get('title')):
+        result = _motif_text(system, prompt, format_json=True, provider='gemini')
     if not result:
         print(f"[NewsService] 번역 실패: {title[:50]}")
     return result
@@ -140,8 +142,10 @@ def ai_triage_pending_news(batch_limit=60):
     from datetime import datetime, timedelta
     from models import db, NewsArticle
     cutoff = datetime.now() - timedelta(days=7)
+    KR_YP_CATS = ['양평','경기','정치','경제','사회','교육','환경','노동','복지','의료','문화','대한민국뉴스','양평소식','정책정보','지역소식']
     pending = (NewsArticle.query
                .filter(NewsArticle.is_ai_generated == True,
+                       NewsArticle.category.in_(KR_YP_CATS),
                        NewsArticle.created_at >= cutoff,
                        db.or_(NewsArticle.ai_score == 0, NewsArticle.ai_score.is_(None)))
                .order_by(NewsArticle.created_at.desc())
@@ -163,6 +167,9 @@ def ai_triage_pending_news(batch_limit=60):
         prompt = f"""다음 뉴스 기사들을 채점하세요. JSON으로만 답하세요.
 
 채점 기준 (중요도 순):
+-1. 사실성 최우선: 확인된 사실·공식 발표·명확한 출처만 높은 점수. 추측·루머·과장·선정적 제목·출처 불명 → 0~25
+0. 삶을 풍요롭게 하는 소식: 자연이 주는 행복(풍경·계절·생태), 나눔·사랑·봉사로 더 나은 세상을 만드는 이야기 → 90~100
+0-1. 재외동포(교포) 소식: 교포 공동체·봉사·문화·기여 → 80~95
 1. 환경이 1순위: 환경 오염·재해·기후·생태·하천/수질 관련 → 85~100
 2. 양평군민 생활 필수: 농업/임업, 대중교통, 복지, 건강·의료, 장애인, 사이버피해 예방, 지역 인구감소 해법, 물가·지원금 → 75~95
 3. 국토·도로·공사·계획의 공개(오픈) 정보: 도로 건설·국토계획·공사 착공/개통/노선 변경 등 → 80~100 (매우 중요, 민감 정보)
@@ -176,6 +183,10 @@ def ai_triage_pending_news(batch_limit=60):
 
 출력 형식: {{"articles": [{{"id": 1, "score": 90, "reason": "사유"}}]}}"""
         result = _motif_text(system, prompt, format_json=True, provider='groq', max_tokens=4000)
+        if not (isinstance(result, dict) and result.get("articles")):
+            result = _motif_text(system, prompt, format_json=True, provider='gemini', max_tokens=4000)
+        if isinstance(result, list):
+            return result
         items = result.get("articles") if isinstance(result, dict) else None
         return items or []
 
@@ -202,6 +213,137 @@ def ai_triage_pending_news(batch_limit=60):
         n += 1
     db.session.commit()
     print(f"[TRIAGE] AI 선별 완료: {n}건 채점 (대상 {len(pending)}건)")
+    return n
+
+def cleanup_unselected_news(days=30):
+    """채택되지 않은(미선택·미승인) 기사 중 days일 지난 것 삭제"""
+    from datetime import datetime, timedelta
+    from models import db, NewsArticle
+    cutoff = datetime.now() - timedelta(days=days)
+    cond = db.and_(
+        NewsArticle.created_at < cutoff,
+        db.or_(NewsArticle.is_selected.is_(None), NewsArticle.is_selected == False),
+        db.or_(NewsArticle.world_admin_approved.is_(None), NewsArticle.world_admin_approved == False),
+        db.or_(NewsArticle.kr_yp_admin_approved.is_(None), NewsArticle.kr_yp_admin_approved == False),
+    )
+    n = NewsArticle.query.filter(cond).delete(synchronize_session=False)
+    db.session.commit()
+    print(f"[NEWS_CLEANUP] 미채택 {days}일 경과 기사 삭제: {n}건")
+    return n
+
+
+def cleanup_no_like_news(days=60):
+    """좋아요가 없는 기사 중 days일 지난 것 삭제"""
+    from datetime import datetime, timedelta
+    from models import db, NewsArticle
+    cutoff = datetime.now() - timedelta(days=days)
+    cond = db.and_(
+        NewsArticle.created_at < cutoff,
+        db.or_(NewsArticle.like_count.is_(None), NewsArticle.like_count == 0),
+    )
+    n = NewsArticle.query.filter(cond).delete(synchronize_session=False)
+    db.session.commit()
+    print(f"[NEWS_CLEANUP] 좋아요 0 · {days}일 경과 기사 삭제: {n}건")
+    return n
+
+
+def ai_triage_world_news(batch_limit=100):
+    """세계 뉴스 AI 채점: '양평군민이 알아야 할 국제 이슈' 기준 (0~100).
+
+    - 인권·교육·아프리카·중동·중앙아시아·동남아·국제기구 이슈 가산
+    - 미채점 최근 7일 세계 뉴스만 대상 (idempotent)
+    """
+    from datetime import datetime, timedelta
+    from models import db, NewsArticle
+    WORLD_CATS = ['미국','중국','러시아','영국','프랑스','동남아시아','중앙아시아','일본','북유럽','서유럽','남아프리카','북아프리카','동유럽','남유럽','호주','UN','유네스코','중동','캐나다','중남미','세계뉴스','환경뉴스','건강정보','복지정보','농업정보','관광소식']
+    cutoff = datetime.now() - timedelta(days=7)
+    pending = (NewsArticle.query
+               .filter(NewsArticle.is_ai_generated == True,
+                       NewsArticle.category.in_(WORLD_CATS),
+                       NewsArticle.created_at >= cutoff,
+                       db.or_(NewsArticle.ai_score == 0, NewsArticle.ai_score.is_(None)))
+               .order_by(NewsArticle.created_at.desc())
+               .limit(batch_limit).all())
+    if not pending:
+        return 0
+
+    system = ("당신은 양평군민을 위한 국제 뉴스 선별가입니다. "
+              "'삶을 더 풍요롭게 만드는 세계의 소식'을 우선 판단해 기사별 점수(0~100)와 사유를 냅니다.")
+    import json as _json
+
+    def _score_chunk(chunk):
+        articles = [{
+            "id": a.id,
+            "title": a.title or "",
+            "summary": (a.summary or "")[:150],
+            "category": a.category or "",
+        } for a in chunk]
+        prompt = f"""다음 세계 뉴스 기사들을 채점하세요. JSON으로만 답하세요.
+
+가장 중요한 원칙 1: **반드시 사실이어야 합니다.**
+- 확인된 사실, 공식 발표, 명확한 출처·인용이 있는 보도만 높은 점수
+- 추측·루머·과장·선정적 제목·출처 불명·단일 미확인 주장 → 0~25
+- "~할 수도", "~라는 주장" 등 미확인 표현이 핵심이면 낮게
+
+가장 중요한 원칙 2: **삶을 더 풍요롭게 만드는 소식일수록 높은 점수**.
+사람을 미워하게 하거나 불안만 키우는 소식은 낮은 점수.
+
+채점 기준 (중요도 순):
+1. 자연이 주는 행복: 자연 풍경·계절·생태 회복·숲·강·바다·동물·정원·자연 속 삶 → 90~100
+2. 사랑으로 더 좋은 세상을 만드는 소식: 나눔·봉사·연대·돌봄·공동체·화해·평화·작은 영웅 → 90~100
+3. 삶의 질·행복: 건강·휴식·명상·음식·여행·예술·음악·문화유산·교육의 기쁨 → 80~95
+4. 인권·교육: 인권 보호, 난민 돕기, 아동·여성·장애인 권리, 교육 기회 확대 → 80~95
+5. 국제기구 공식 발표: 유엔·유네스코·유니세프·WHO 등의 희망적 결의·보고서 → 75~90
+6. 생활 영향: 물가·에너지·환율·기후·전염병·노동 등 실생활 정보 → 60~85
+7. 아프리카·중동·중앙아시아·동남아의 따뜻한 이야기·문화·발전 → 75~95
+7-1. 재외동포(교포) 소식: 교포 공동체·봉사·문화·기여·삶의 이야기 → 80~95
+8. 분쟁·재난·사고 속보: 사실 전달은 하되 참혹한 묘사 위주면 → 30~55
+9. 연예·스캔들·광고·홍보·자극적 사건 → 0~25
+
+지역 가산점 (사실성을 해치지 않는 범위에서):
+- 분쟁·빈곤·개발도상국(아프리카·중동·중앙아시아·남아시아·동남아·중남미 일부)의
+  삶·어려움·회복·나눔 소식은 +10~20 가산 (최대 100)
+- 그런 지역에 사는 재외동포(교포)의 삶·어려움·봉사 이야기도 +10~20
+- 선진국 중심의 경제·기술·시장 뉴스는 가산 없이 기본 점수
+
+대한민국이나 양평과 연결되어 삶을 풍요롭게 하면 가산점.
+
+각 기사마다 사유는 한국어 25자 이내. 입력된 모든 기사를 반드시 포함하세요.
+기사 목록:
+{_json.dumps(articles, ensure_ascii=False)}
+
+출력 형식: {{"articles": [{{"id": 1, "score": 90, "reason": "사유"}}]}}"""
+        result = _motif_text(system, prompt, format_json=True, provider='groq', max_tokens=4000)
+        if not (isinstance(result, dict) and result.get("articles")):
+            result = _motif_text(system, prompt, format_json=True, provider='gemini', max_tokens=4000)
+        if isinstance(result, list):
+            return result
+        items = result.get("articles") if isinstance(result, dict) else None
+        return items or []
+
+    by_id = {}
+    for i in range(0, len(pending), 20):
+        for it in _score_chunk(pending[i:i + 20]):
+            try:
+                by_id[int(it.get("id"))] = (int(it.get("score", 0)), str(it.get("reason", ""))[:60])
+            except (TypeError, ValueError):
+                continue
+    if not by_id:
+        print("[TRIAGE_WORLD] AI 응답 없음")
+        return 0
+    n = 0
+    for a in pending:
+        r = by_id.get(a.id)
+        if not r:
+            continue
+        score, reason = r
+        score = max(0, min(100, score))
+        a.ai_score = score
+        base = (a.ai_reason or "").strip()
+        a.ai_reason = f"[선별 {score}] {reason}" + (f" | {base}" if base else "")
+        n += 1
+    db.session.commit()
+    print(f"[TRIAGE_WORLD] AI 선별 완료: {n}건 채점 (대상 {len(pending)}건)")
     return n
 
 def ai_summarize_url(text):

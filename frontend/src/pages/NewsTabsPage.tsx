@@ -37,6 +37,10 @@ export default function NewsTabsPage() {
   const [page, setPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
   const [total, setTotal] = useState(0)
+  const [sub, setSub] = useState('')
+  const [src, setSrc] = useState('')
+  const [categories, setCategories] = useState<string[]>([])
+  const [sources, setSources] = useState<string[]>([])
 
   const [winWidth, setWinWidth] = useState(window.innerWidth)
   useEffect(() => {
@@ -64,6 +68,8 @@ export default function NewsTabsPage() {
     try {
       const params = new URLSearchParams()
       if (tab) params.set('category', tab)
+      if (sub) params.set('sub', sub)
+      if (src) params.set('source', src)
       params.set('page', String(page))
       const res = await fetch(`/api/news?${params.toString()}`)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -72,6 +78,8 @@ export default function NewsTabsPage() {
         setArticles(data.items)
         setTotalPages(data.pages || 1)
         setTotal(data.total || 0)
+        setCategories(data.categories ?? [])
+        setSources(data.sources ?? [])
       } else {
         setArticles(Array.isArray(data) ? data : [])
         setTotalPages(1)
@@ -80,9 +88,9 @@ export default function NewsTabsPage() {
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : '불러오기 실패')
     } finally { setLoading(false) }
-  }, [tab, page])
+  }, [tab, page, sub, src])
 
-  useEffect(() => { setPage(1) }, [tab])
+  useEffect(() => { setPage(1); setSub(''); setSrc('') }, [tab])
   useEffect(() => { load() }, [load])
 
   const handleVote = async (id: number, vote: 'like' | 'dislike') => {
@@ -116,6 +124,19 @@ export default function NewsTabsPage() {
           </li>
         ))}
       </ul>
+
+      <div className="d-flex gap-2 mb-3 flex-wrap">
+        <select className="form-select form-select-sm" style={{ maxWidth: 170 }} value={sub}
+          onChange={e => { setSub(e.target.value); setPage(1) }}>
+          <option value="">분류: 전체</option>
+          {categories.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <select className="form-select form-select-sm" style={{ maxWidth: 190 }} value={src}
+          onChange={e => { setSrc(e.target.value); setPage(1) }}>
+          <option value="">출처: 전체</option>
+          {sources.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+      </div>
 
       {loading ? (
         <Loading />

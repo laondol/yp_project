@@ -1,9 +1,10 @@
 import requests
+from urllib.parse import quote
 import re
 import time
 import html
 import xml.etree.ElementTree as ET
-from datetime import datetime
+from datetime import datetime, timedelta
 from email.utils import parsedate_to_datetime
 
 def _clean_text(s):
@@ -15,12 +16,45 @@ def _clean_text(s):
     return s.strip()
 
 def _within_days(pub_date, days=7):
-    """Google News RSS pubDate(RFC822) 확인 — days일 이내만 수집 (구 기사 차단)"""
+    """Google News RSS pubDate(RFC822) 확인 — 정확히 days*24시간 이내만 수집"""
+    from datetime import timedelta
     try:
         d = parsedate_to_datetime(pub_date or '')
-        return (datetime.now(d.tzinfo) - d).days <= days
+        if d.tzinfo is None:
+            return (datetime.now() - d) <= timedelta(days=days)
+        return (datetime.now(d.tzinfo) - d) <= timedelta(days=days)
     except Exception:
         return False
+
+def _pub_naive(pub):
+    """RFC822 발행시각 → KST naive datetime (DB 저장용)"""
+    try:
+        from datetime import timezone
+        d = parsedate_to_datetime(pub or '')
+        if d.tzinfo is None:
+            return d
+        return d.astimezone(timezone(timedelta(hours=9))).replace(tzinfo=None)
+    except Exception:
+        return None
+
+
+def _source_from_title(title, fallback='네이버'):
+    """제목 끝 ' - 매체명' 형태에서 출처 추출"""
+    m = re.search(r'\s-\s([^-]{2,25})$', title or '')
+    return m.group(1).strip() if m else fallback
+
+
+def _needs_translation(text):
+    """한글 비율이 낮으면 번역 대상 (영어·중국어·일본어·러시아어 등)"""
+    t = text or ''
+    if '[미번역]' in t:
+        return True
+    letters = [c for c in t if c.isalpha()]
+    if not letters:
+        return False
+    hangul = sum(1 for c in letters if '\uac00' <= c <= '\ud7a3')
+    return (hangul / len(letters)) < 0.3
+
 
 def _news_url_blocked(url):
     """삭제한 뉴스 URL 블랙리스트 확인 (재수집 영구 차단)"""
@@ -98,20 +132,112 @@ LOCAL_MEDIA_SOURCES = [
     {"name": "정도일보", "domain": "jungdoilbo.com"},
     {"name": "비전21뉴스", "domain": "vision21.kr"},
     {"name": "경기인뉴스", "domain": "gninews.co.kr"},
+    {"name": "옥천신문", "domain": "okinews.com", "region_filter": False},
+]
+
+# 공식 기관/정부 사이트 (공식 성명·보도자료)
+OFFICIAL_SOURCES = [
+    {"name": "양평군청", "domain": "yp21.go.kr", "region_filter": False, "verify_date": True},
+    {"name": "경기도", "domain": "gg.go.kr", "region_filter": False, "verify_date": True},
+    {"name": "고용노동부", "domain": "moel.go.kr", "region_filter": False, "verify_date": True},
+    {"name": "정책브리핑", "domain": "korea.kr", "region_filter": False, "verify_date": True},
 ]
 
 WORLD_SOURCES = [
     {"name": "AP", "domain": "apnews.com", "query": "site:apnews.com"},
     {"name": "로이터", "domain": "reuters.com", "query": "site:reuters.com"},
     {"name": "AFP", "domain": "afp.com", "query": "site:afp.com"},
-    {"name": "뉴욕타임스", "domain": "nytimes.com", "query": "site:nytimes.com"},
-    {"name": "월스트리트저널", "domain": "wsj.com", "query": "site:wsj.com"},
     {"name": "워싱턴포스트", "domain": "washingtonpost.com", "query": "site:washingtonpost.com"},
     {"name": "BBC", "domain": "bbc.com", "query": "site:bbc.com"},
-    {"name": "파이넨션타임스", "domain": "ft.com", "query": "site:ft.com"},
     {"name": "더가디언", "domain": "theguardian.com", "query": "site:theguardian.com"},
-    {"name": "니혼게이자이", "domain": "nikkei.com", "query": "site:nikkei.com"},
+    {"name": "알자지라", "domain": "aljazeera.com", "query": "site:aljazeera.com"},
+    {"name": "중국CCTV", "domain": "cctv.com", "query": "site:cctv.com"},
+    {"name": "신화통신", "domain": "news.cn", "query": "site:news.cn"},
+    {"name": "대한뉴스(KTV)", "domain": "ktv.go.kr", "query": "site:ktv.go.kr", "lang": "ko"},
+    {"name": "아리랑TV", "domain": "arirang.com", "query": "site:arirang.com", "lang": "ko"},
+    {"name": "NHK", "domain": "nhk.or.jp", "query": "site:nhk.or.jp"},
+    {"name": "DW", "domain": "dw.com", "query": "site:dw.com"},
+    {"name": "프랑스24", "domain": "france24.com", "query": "site:france24.com"},
+    {"name": "CNA", "domain": "channelnewsasia.com", "query": "site:channelnewsasia.com"},
+    {"name": "유엔뉴스", "domain": "news.un.org", "query": "site:news.un.org", "max_items": 3},
+    {"name": "유네스코", "domain": "unesco.org", "query": "site:unesco.org", "max_items": 3},
+    # 인권
+    {"name": "유엔인권", "domain": "news.un.org", "q": "human rights", "max_items": 3},
+    {"name": "휴먼라이츠워치", "domain": "hrw.org", "max_items": 3},
+    {"name": "국제앰네스티", "domain": "amnesty.org", "max_items": 3},
+    {"name": "유엔인권사무소", "domain": "ohchr.org", "max_items": 3},
+    # 교육
+    {"name": "유엔교육", "domain": "news.un.org", "q": "education", "max_items": 3},
+    {"name": "유니세프", "domain": "unicef.org", "max_items": 3},
+    # 지역
+    {"name": "유엔아프리카", "domain": "news.un.org", "q": "Africa", "max_items": 3},
+    {"name": "올아프리카", "domain": "allafrica.com", "max_items": 3},
+    {"name": "유엔중동", "domain": "news.un.org", "q": "Middle East", "max_items": 3},
+    {"name": "유엔중앙아시아", "domain": "news.un.org", "q": "Central Asia", "max_items": 3},
+    {"name": "유라시아넷", "domain": "eurasianet.org", "max_items": 3},
+    {"name": "유엔동남아", "domain": "news.un.org", "q": "Southeast Asia", "max_items": 3},
+    {"name": "라플러", "domain": "rappler.com", "max_items": 3},
+    # 재외동포(교포) 소식
+    {"name": "재외동포신문", "domain": "dongponews.net", "lang": "ko", "max_items": 3},
+    {"name": "미주중앙일보", "domain": "koreadaily.com", "lang": "ko", "max_items": 3},
+    {"name": "미주한국일보", "domain": "koreatimes.com", "lang": "ko", "max_items": 3},
+    {"name": "월드코리안", "domain": "worldkorean.net", "lang": "ko", "max_items": 3},
+    {"name": "고려일보(중앙아시아)", "domain": "koreilbo.com", "lang": "ko", "max_items": 3},
+    {"name": "재일민단", "domain": "mindan.org", "lang": "ko", "max_items": 3},
+    {"name": "흑룡강신문(중국동포)", "domain": "hljnews.cn", "lang": "ko", "max_items": 3},
+    {"name": "밴쿠버조선(캐나다)", "domain": "vanchosun.com", "lang": "ko", "max_items": 3},
+    # 키워드 기반 교포 소식 (전용 매체가 없는 지역)
+    {"name": "ABC호주", "domain": "abc.net.au", "max_items": 3},
+    {"name": "Yle(핀란드)", "domain": "yle.fi", "max_items": 3},
+    {"name": "NRK(노르웨이)", "domain": "nrk.no", "max_items": 3},
+    {"name": "TASS(러시아)", "domain": "tass.com", "max_items": 3},
+    {"name": "아프리카 교포(에티오피아·탄자니아)", "q": "에티오피아 한인 OR 탄자니아 한인 OR 아프리카 교포", "lang": "ko", "max_items": 3},
+    {"name": "중남미 교포", "q": "브라질 한인 OR 아르헨티나 한인 OR 멕시코 한인 OR 칠레 한인 OR 중남미 교포", "lang": "ko", "max_items": 3},
+    {"name": "호주 교포", "q": "호주 한인 OR 시드니 교포 OR 멜버른 한인 OR 브리즈번 한인", "lang": "ko", "max_items": 3},
 ]
+
+WORLD_CATEGORY_BY_SOURCE = {
+    'AP': '미국', '워싱턴포스트': '미국',
+    '로이터': '영국', 'BBC': '영국', '더가디언': '영국',
+    'AFP': '프랑스', '프랑스24': '프랑스',
+    '알자지라': '중동',
+    '중국CCTV': '중국', '신화통신': '중국',
+    'NHK': '일본',
+    'DW': '서유럽',
+    'CNA': '동남아시아', '라플러': '동남아시아',
+    '유엔뉴스': 'UN', '유엔인권': 'UN', '유엔교육': 'UN', '유엔중동': 'UN',
+    '유엔중앙아시아': 'UN', '유엔동남아': 'UN', '유엔아프리카': 'UN',
+    '휴먼라이츠워치': 'UN', '국제앰네스티': 'UN', '유엔인권사무소': 'UN', '유니세프': 'UN',
+    '유네스코': '유네스코',
+    '올아프리카': '남아프리카', '아프리카 교포(에티오피아·탄자니아)': '남아프리카',
+    '유라시아넷': '중앙아시아', '고려일보(중앙아시아)': '중앙아시아',
+    '재외동포신문': '미국', '미주중앙일보': '미국', '미주한국일보': '미국', '월드코리안': '미국',
+    '재일민단': '일본', '흑룡강신문(중국동포)': '중국', '밴쿠버조선(캐나다)': '캐나다',
+    '중남미 교포': '중남미', '호주 교포': '호주',
+    'ABC호주': '호주', 'Yle(핀란드)': '북유럽', 'NRK(노르웨이)': '북유럽', 'TASS(러시아)': '러시아',
+    '대한뉴스(KTV)': '대한민국뉴스', '아리랑TV': '대한민국뉴스',
+}
+
+KR_CATEGORY_RULES = [
+    ('양평', '양평'), ('경기', '경기'),
+    ('교육', '교육'), ('학교', '교육'),
+    ('환경', '환경'), ('기후', '환경'), ('생태', '환경'),
+    ('노동', '노동'), ('고용', '노동'), ('임금', '노동'),
+    ('복지', '복지'), ('장애', '복지'), ('지원금', '복지'),
+    ('의료', '의료'), ('건강', '의료'), ('병원', '의료'),
+    ('경제', '경제'), ('물가', '경제'), ('금리', '경제'),
+    ('정치', '정치'), ('국회', '정치'), ('선거', '정치'),
+    ('문화', '문화'), ('축제', '문화'), ('공연', '문화'), ('전시', '문화'),
+]
+
+
+def _kr_category(title, desc=''):
+    t = f"{title or ''} {desc or ''}"
+    for kw, cat in KR_CATEGORY_RULES:
+        if kw in t:
+            return cat
+    return '사회'
+
 
 KR_YP_KEYWORDS = [
     "양평", "경기도", "한강", "용문산", "남한강",
@@ -185,7 +311,7 @@ def collect_labor_news():
                     source_url=url,
                     source_name=source['name'],
                     category="정책정보",
-                    is_selected=False,
+                    is_selected=True,
                     is_ai_generated=True,
                     ai_reason=f"자동 수집: {source['name']} ({now.strftime('%m/%d')})",
                     created_by=None,
@@ -259,7 +385,7 @@ def collect_labor_news_rss():
                     source_url=link,
                     source_name=source['name'],
                     category="정책정보",
-                    is_selected=False,
+                    is_selected=True,
                     is_ai_generated=True,
                     ai_reason=f"자동 수집(RSS): {source['name']} ({now.strftime('%m/%d')})",
                     created_by=None,
@@ -304,7 +430,7 @@ def collect_kr_yp_news_rss():
                 items = root.findall('.//item')
                 # 7일 이내 신규 기사만, 최신순 상위 5건 (구 기사 재수집 차단)
                 items = [it for it in items
-                         if _within_days(it.findtext('pubDate', ''), 7)]
+                         if _within_days(it.findtext('pubDate', ''), 1)]
                 items.sort(key=lambda it: parsedate_to_datetime(it.findtext('pubDate', '')),
                            reverse=True)
                 items = items[:5]
@@ -332,14 +458,17 @@ def collect_kr_yp_news_rss():
 
                     is_yp = any(kw in title + desc for kw in ["양평", "경기도"])
                     article = NewsArticle(
+                        source_name=source['name'],
+                        published_at=_pub_naive(item.findtext('pubDate', '')),
                         title=f"[{source['name']}] {title}",
                         summary=desc[:200],
                         content=f"<p>{desc[:1000]}</p>",
                         source_url=link,
-                        category="양평소식" if is_yp else "대한민국뉴스",
-                        is_selected=False,
+                        category=_kr_category(title, desc),
+                        is_selected=True,
                         is_ai_generated=True,
                         kr_yp_ai_approved=True,
+                        kr_yp_admin_approved=True,
                         ai_reason=f"자동수집(RSS): {source['name']} ({now.strftime('%m/%d')})",
                     )
                     db.session.add(article)
@@ -355,15 +484,44 @@ def collect_kr_yp_news_rss():
     return total_new, 'rss'
 
 
+def _naver_verify_pubdate(title):
+    """제목으로 네이버 뉴스를 조회해 실제 발행일 확인 (공식 사이트 재색인 대응)"""
+    try:
+        from flask import current_app
+        cid = current_app.config.get('NAVER_SEARCH_CLIENT_ID', '')
+        sec = current_app.config.get('NAVER_SEARCH_CLIENT_SECRET', '')
+        if not cid or not sec:
+            return None
+        q = re.sub(r'<[^>]+>', '', title or '')[:100]
+        if not q:
+            return None
+        r = requests.get(
+            "https://openapi.naver.com/v1/search/news.json",
+            headers={"X-Naver-Client-Id": cid, "X-Naver-Client-Secret": sec},
+            params={"query": q, "display": 10, "sort": "date"}, timeout=10,
+        )
+        if r.status_code != 200:
+            return None
+        for it in r.json().get('items', []):
+            t = re.sub(r'<[^>]+>', '', it.get('title', ''))
+            if not t:
+                continue
+            if q[:20] in t or t[:20] in q:
+                return parsedate_to_datetime(it.get('pubDate', ''))
+        return None
+    except Exception:
+        return None
+
+
 def collect_kr_yp_local_rss():
-    """양평 지역 전문 언론(백운신문 등)을 Google News RSS로 수집 (API 키 불필요, 항상 실행)"""
+    """양평 지역 언론·옥천신문·공식 기관 사이트를 Google News RSS로 수집 (API 키 불필요, 항상 실행)"""
     from models import db, NewsArticle
 
     total_new = 0
     seen_urls = set()
     now = datetime.now()
 
-    for source in LOCAL_MEDIA_SOURCES:
+    for source in LOCAL_MEDIA_SOURCES + OFFICIAL_SOURCES:
         try:
             res = requests.get(
                 "https://news.google.com/rss/search",
@@ -378,7 +536,7 @@ def collect_kr_yp_local_rss():
             items = root.findall('.//item')
             # 7일 이내 신규 기사만, 최신순 상위 5건 (구 기사 재수집 차단)
             items = [it for it in items
-                     if _within_days(it.findtext('pubDate', ''), 7)]
+                     if _within_days(it.findtext('pubDate', ''), 1)]
             items.sort(key=lambda it: parsedate_to_datetime(it.findtext('pubDate', '')),
                        reverse=True)
             items = items[:5]
@@ -399,8 +557,17 @@ def collect_kr_yp_local_rss():
                     continue
 
                 # 지역 매체 기사는 양평 관련만 저장 (타 지역 소식 제거)
-                if not any(kw in title + desc for kw in KR_YP_KEYWORDS):
+                if source.get('region_filter', True) and not any(kw in title + desc for kw in KR_YP_KEYWORDS):
                     continue
+
+                # 공식 사이트는 실제 발행일 교차검증 (24시간 이내만)
+                if source.get('verify_date'):
+                    _pd = _naver_verify_pubdate(title)
+                    if _pd is None:
+                        continue
+                    _now = datetime.now(_pd.tzinfo) if _pd.tzinfo else datetime.now()
+                    if (_now - _pd) > timedelta(hours=24):
+                        continue
 
                 if _is_junk_title(title):
                     continue
@@ -411,15 +578,24 @@ def collect_kr_yp_local_rss():
                 if existing:
                     continue
 
+                # 한글 전용 원칙: 요약/본문에 외국어가 남아 있으면 비움
+                if _needs_translation(art_summary):
+                    art_summary = ''
+                if _needs_translation(re.sub(r'<[^>]+>', ' ', art_content or '')):
+                    art_content = f"<p>{art_summary}</p>" if art_summary else ''
+
                 article = NewsArticle(
+                    source_name=source['name'],
+                    published_at=_pub_naive(item.findtext('pubDate', '')),
                     title=title,
                     summary=desc[:200],
                     content=f"<p>{desc[:1000]}</p>",
                     source_url=link,
-                    category="양평소식",
-                    is_selected=False,
+                    category=_kr_category(title, desc),
+                    is_selected=True,
                     is_ai_generated=True,
                     kr_yp_ai_approved=True,
+                    kr_yp_admin_approved=True,
                     ai_reason=f"자동수집(RSS·지역언론): {source['name']} ({now.strftime('%m/%d')})",
                 )
                 db.session.add(article)
@@ -502,6 +678,8 @@ def collect_kr_yp_news():
                 if not url or url in seen_urls:
                     continue
                 seen_urls.add(url)
+                if not _within_days(item.get('pubDate', ''), 1):
+                    continue
                 if not _is_korean_source(url):
                     continue
 
@@ -518,17 +696,20 @@ def collect_kr_yp_news():
                     continue
 
                 is_yp = any(kw in title + desc for kw in ["양평", "경기도"])
-                category = "양평소식" if is_yp else "대한민국뉴스"
+                category = _kr_category(title, desc)
 
                 article = NewsArticle(
+                    source_name=_source_from_title(title),
+                    published_at=_pub_naive(item.get('pubDate', '')),
                     title=title,
                     summary=desc[:200],
                     content=f"<p>{desc[:1000]}</p>",
                     source_url=url,
                     category=category,
-                    is_selected=False,
+                    is_selected=True,
                     is_ai_generated=True,
                     kr_yp_ai_approved=True,
+                    kr_yp_admin_approved=True,
                     ai_reason=f"자동수집: {sq} ({now.strftime('%m/%d')})",
                 )
                 db.session.add(article)
@@ -557,8 +738,8 @@ def collect_kr_yp_news():
     return total_new, 'naver'
 
 
-def collect_world_news():
-    """10개 세계 언론사에서 글로벌 뉴스를 자동 수집하여 DB에 저장 (Google News RSS + Naver)"""
+def collect_world_news(categories=None):
+    """세계 언론사(국가/공영 방송 포함)에서 글로벌 뉴스를 자동 수집하여 DB에 저장 (Google News RSS + Naver)"""
     from flask import current_app
     from models import db, NewsArticle
 
@@ -566,10 +747,18 @@ def collect_world_news():
     seen_urls = set()
     now = datetime.now()
 
-    # 1) Google News RSS로 각 소스별 수집
-    for source in WORLD_SOURCES:
+    # 1) Google News RSS로 각 소스별 수집 (categories 지정 시 해당 지역만)
+    _sources = WORLD_SOURCES
+    if categories:
+        _cats = set(categories)
+        _sources = [x for x in WORLD_SOURCES if WORLD_CATEGORY_BY_SOURCE.get(x['name']) in _cats]
+    for source in _sources:
         try:
-            rss_url = f"https://news.google.com/rss/search?q=site:{source['domain']}&hl=en&gl=US&ceid=US:en"
+            _hl, _gl, _ceid = ('ko', 'KR', 'KR:ko') if source.get('lang') == 'ko' else ('en', 'US', 'US:en')
+            _q = f"site:{source['domain']}" if source.get('domain') else ''
+            if source.get('q'):
+                _q = (_q + ' ' + source['q']).strip() if _q else source['q']
+            rss_url = f"https://news.google.com/rss/search?q={quote(_q)}&hl={_hl}&gl={_gl}&ceid={_ceid}"
             res = requests.get(rss_url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=15)
             if res.status_code != 200:
                 print(f"[WORLD_NEWS] {source['name']}: Google RSS 오류 {res.status_code}")
@@ -578,7 +767,11 @@ def collect_world_news():
             root = ET.fromstring(res.content)
             items = root.findall('.//item')
 
-            for item in items[:5]:
+            # 최근 24시간 이내 기사만 (구 기사 재수집 차단)
+            items = [it for it in items if _within_days(it.findtext('pubDate', ''), 1)]
+            items.sort(key=lambda it: parsedate_to_datetime(it.findtext('pubDate', '')), reverse=True)
+
+            for item in items[:int(source.get('max_items', 5))]:
                 title = (item.findtext('title', '') or '').strip()
                 link = (item.findtext('link', '') or '').strip()
                 desc = (item.findtext('description', '') or '').strip()
@@ -602,12 +795,8 @@ def collect_world_news():
                 art_summary = desc[:200]
                 art_content = f"<p>{desc[:1000]}</p>"
 
-                # 세계뉴스는 반드시 한글 번역 후 저장
-                eng_chars = sum(1 for c in title if c.isascii() and c.isalpha())
-                total_chars = max(sum(1 for c in title if c.isalpha()), 1)
-                eng_ratio = eng_chars / total_chars
-
-                if eng_ratio > 0.3:
+                # 세계뉴스는 한글이 아니면 반드시 번역 후 저장 (영어·중국어·일본어·러시아어 포함)
+                if _needs_translation(title):
                     tr = None
                     for attempt in range(2):
                         try:
@@ -628,19 +817,22 @@ def collect_world_news():
                         if tr.get('content'):
                             art_content = tr['content'][:1000]
                     else:
-                        # 번역 실패 시 원본에 [미번역] 태그 추가
-                        art_title = f"[{source['name']}] [미번역] {title}"
-                        print(f"[WORLD_NEWS] 번역 실패 - 원본 저장: {title[:60]}")
+                        # 번역 실패 시 저장하지 않음 (한글 전용 원칙)
+                        print(f"[WORLD_NEWS] 번역 실패 - 저장 건너뜀: {title[:60]}")
+                        continue
 
                 article = NewsArticle(
+                    source_name=source['name'],
+                    published_at=_pub_naive(item.findtext('pubDate', '')),
                     title=art_title,
                     summary=art_summary,
                     content=art_content,
                     source_url=link,
-                    category="세계뉴스",
-                    is_selected=False,
+                    category=WORLD_CATEGORY_BY_SOURCE.get(source['name'], '세계뉴스'),
+                    is_selected=True,
                     is_ai_generated=True,
                     world_ai_approved=True,
+                    world_admin_approved=True,
                     ai_reason=f"자동수집: {source['name']} ({now.strftime('%m/%d')})",
                 )
                 db.session.add(article)
@@ -652,7 +844,10 @@ def collect_world_news():
             print(f"[WORLD_NEWS] {source['name']} 수집 오류: {e}")
             continue
 
-    # 2) Naver 국내뉴스 (양평·경기 관련)
+    # 2) Naver 국내뉴스 (양평·경기 관련) — 야간 지역별 수집 시 생략
+    if categories:
+        print(f"[WORLD_NEWS] 지역별 수집 완료: {total_new}건 신규 등록")
+        return total_new
     try:
         client_id = current_app.config.get('NAVER_SEARCH_CLIENT_ID', '')
         client_secret = current_app.config.get('NAVER_SEARCH_CLIENT_SECRET', '')
@@ -681,6 +876,8 @@ def collect_world_news():
                     url = item.get('link', '')
                     if not url or url in seen_urls:
                         continue
+                    if not _within_days(item.get('pubDate', ''), 1):
+                        continue
                     if not _is_korean_source(url):
                         continue
                     seen_urls.add(url)
@@ -697,17 +894,20 @@ def collect_world_news():
                         continue
 
                     is_yp = any(kw in title + desc for kw in ["양평", "경기도"])
-                    category = "양평소식" if is_yp else "대한민국뉴스"
+                    category = _kr_category(title, desc)
 
                     article = NewsArticle(
+                        source_name=_source_from_title(title),
+                        published_at=_pub_naive(item.get('pubDate', '')),
                         title=f"[네이버] {title}",
                         summary=desc[:200],
                         content=f"<p>{desc[:1000]}</p>",
                         source_url=url,
                         category=category,
-                        is_selected=False,
+                        is_selected=True,
                         is_ai_generated=True,
                         kr_yp_ai_approved=True,
+                        kr_yp_admin_approved=True,
                         ai_reason=f"자동수집: 네이버 국내뉴스 ({now.strftime('%m/%d')})",
                     )
                     db.session.add(article)

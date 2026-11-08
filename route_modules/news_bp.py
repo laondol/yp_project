@@ -219,6 +219,52 @@ def admin_news_approve(news_id, tab, approver):
     db.session.commit()
     return jsonify({"status": "success"})
 
+@news_bp.route('/admin/news/approve-all', methods=['POST'])
+def admin_news_approve_all():
+    """현재 탭/분류/출처 필터에 해당하는 기사를 관리자 채택 처리"""
+    if session.get('role') not in ['admin', 'leader']:
+        return jsonify({"status": "error", "msg": "권한 없음"}), 403
+    data = request.get_json(silent=True) or {}
+    tab = data.get('tab', 'all')
+    cat = (data.get('category') or '').strip()
+    src = (data.get('source') or '').strip()
+    value = bool(data.get('value', True))
+    approver = data.get('approver', 'admin')
+    WORLD = ['미국','중국','러시아','영국','프랑스','동남아시아','중앙아시아','일본','북유럽','서유럽','남아프리카','북아프리카','동유럽','남유럽','호주','UN','유네스코','중동','캐나다','중남미','세계뉴스','환경뉴스','건강정보','복지정보','농업정보','관광소식']
+    KR = ['양평','경기','정치','경제','사회','교육','환경','노동','복지','의료','문화','대한민국뉴스','양평소식','정책정보','지역소식']
+    ids = data.get('ids')
+    use_ids = isinstance(ids, list) and bool(ids)
+    q = NewsArticle.query.filter(NewsArticle.labor_only != True)
+    if use_ids:
+        # 페이지 단위 체크: id가 기준 (탭/분류/출처 필터로 제외되지 않도록)
+        q = q.filter(NewsArticle.id.in_(ids))
+    else:
+        if tab == 'world':
+            q = q.filter(NewsArticle.category.in_(WORLD))
+        elif tab == 'kr_yp':
+            q = q.filter(NewsArticle.category.in_(KR))
+        if cat:
+            q = q.filter(NewsArticle.category == cat)
+        if src:
+            q = q.filter(NewsArticle.source_name == src)
+    n = 0
+    for a in q.all():
+        is_world = a.category in WORLD
+        if approver == 'ai':
+            if is_world:
+                a.world_ai_approved = value
+            else:
+                a.kr_yp_ai_approved = value
+        else:
+            if tab == 'world' or (tab == 'all' and is_world):
+                a.world_admin_approved = value
+            elif tab == 'kr_yp' or (tab == 'all' and not is_world):
+                a.kr_yp_admin_approved = value
+        a.updated_at = datetime.now()
+        n += 1
+    db.session.commit()
+    return jsonify({"status": "success", "count": n})
+
 @news_bp.route('/admin/news/delete/<int:news_id>', methods=['POST'])
 def admin_news_delete(news_id):
     if session.get('role') not in ['admin', 'leader']:
@@ -392,9 +438,9 @@ def admin_news_clean_cjk():
     tab = request.form.get('tab', 'all')
     query = NewsArticle.query
     if tab == 'world':
-        query = query.filter(NewsArticle.category.in_(['세계뉴스', '환경뉴스', '건강정보', '복지정보', '농업정보', '관광소식']))
+        query = query.filter(NewsArticle.category.in_(['미국','중국','러시아','영국','프랑스','동남아시아','중앙아시아','일본','북유럽','서유럽','남아프리카','북아프리카','동유럽','남유럽','호주','UN','유네스코','중동','캐나다','중남미','세계뉴스','환경뉴스','건강정보','복지정보','농업정보','관광소식']))
     elif tab == 'kr_yp':
-        query = query.filter(NewsArticle.category.in_(['대한민국뉴스', '양평소식', '정책정보', '지역소식']))
+        query = query.filter(NewsArticle.category.in_(['양평','경기','정치','경제','사회','교육','환경','노동','복지','의료','문화','대한민국뉴스','양평소식','정책정보','지역소식']))
     articles = query.all()
     count = 0
     for a in articles:
@@ -638,8 +684,8 @@ def news_comments_fragment(news_id):
 def api_news():
     category = request.args.get('category', '')
     page = request.args.get('page', 1, type=int)
-    kr_yp_cats = ['대한민국뉴스', '양평소식', '정책정보', '지역소식']
-    world_cats = ['세계뉴스', '환경뉴스', '건강정보', '복지정보', '농업정보', '관광소식']
+    kr_yp_cats = ['양평','경기','정치','경제','사회','교육','환경','노동','복지','의료','문화','대한민국뉴스','양평소식','정책정보','지역소식']
+    world_cats = ['미국','중국','러시아','영국','프랑스','동남아시아','중앙아시아','일본','북유럽','서유럽','남아프리카','북아프리카','동유럽','남유럽','호주','UN','유네스코','중동','캐나다','중남미','세계뉴스','환경뉴스','건강정보','복지정보','농업정보','관광소식']
     if category == 'kr_yp':
         q = NewsArticle.query.filter(
             NewsArticle.category.in_(kr_yp_cats),
@@ -660,6 +706,15 @@ def api_news():
             NewsArticle.category.in_(kr_yp_cats + world_cats),
             or_(NewsArticle.is_selected == True, NewsArticle.world_admin_approved == True, NewsArticle.kr_yp_admin_approved == True)
         )
+    from sqlalchemy import func as _f
+    _cats = [c for (c,) in q.with_entities(NewsArticle.category).distinct().order_by(NewsArticle.category).all()]
+    _srcs = [x for (x,) in q.with_entities(NewsArticle.source_name).distinct().order_by(NewsArticle.source_name).all() if x]
+    sub = (request.args.get('sub') or '').strip()
+    src = (request.args.get('source') or '').strip()
+    if sub:
+        q = q.filter(NewsArticle.category == sub)
+    if src:
+        q = q.filter(NewsArticle.source_name == src)
     articles = q.order_by(NewsArticle.created_at.desc()).paginate(page=page, per_page=20, error_out=False)
     return jsonify({
         'items': [{
@@ -673,6 +728,10 @@ def api_news():
         'page': articles.page,
         'pages': articles.pages,
         'total': articles.total,
+        'categories': _cats,
+        'sources': _srcs,
+        'sub': sub,
+        'source': src,
     })
 
 @news_bp.route('/api/news/content/<int:news_id>')
@@ -698,7 +757,7 @@ def _get_news_with_recs(news_list):
 @news_bp.route('/world-news')
 def world_news():
     page = request.args.get('page', 1, type=int)
-    news_list = NewsArticle.query.filter(NewsArticle.is_selected == True, NewsArticle.world_admin_approved == True, NewsArticle.category.in_(['세계뉴스', '환경뉴스', '건강정보', '복지정보', '농업정보', '관광소식'])).order_by(NewsArticle.like_count.desc(), NewsArticle.created_at.desc()).paginate(page=page, per_page=12, error_out=False)
+    news_list = NewsArticle.query.filter(NewsArticle.is_selected == True, NewsArticle.world_admin_approved == True, NewsArticle.category.in_(['미국','중국','러시아','영국','프랑스','동남아시아','중앙아시아','일본','북유럽','서유럽','남아프리카','북아프리카','동유럽','남유럽','호주','UN','유네스코','중동','캐나다','중남미','세계뉴스','환경뉴스','건강정보','복지정보','농업정보','관광소식'])).order_by(NewsArticle.like_count.desc(), NewsArticle.created_at.desc()).paginate(page=page, per_page=12, error_out=False)
     return _serve_spa()
 
 @news_bp.route('/yp-news')
@@ -713,7 +772,7 @@ def kr_yp_news():
     news_list = NewsArticle.query.filter(
         NewsArticle.is_selected == True,
         NewsArticle.kr_yp_admin_approved == True,
-        NewsArticle.category.in_(['대한민국뉴스', '양평소식', '정책정보', '지역소식'])
+        NewsArticle.category.in_(['양평','경기','정치','경제','사회','교육','환경','노동','복지','의료','문화','대한민국뉴스','양평소식','정책정보','지역소식'])
     ).order_by(NewsArticle.like_count.desc(), NewsArticle.created_at.desc()).paginate(page=page, per_page=12, error_out=False)
     return _serve_spa()
 
@@ -1057,7 +1116,14 @@ def admin_news_collect_world():
     try:
         from services.labor_news_collector import collect_world_news
         count = collect_world_news()
-        return jsonify({"status": "success", "count": count, "msg": f"✅ {count}건의 세계뉴스를 수집했습니다."})
+        scored = 0
+        try:
+            from services.news_service import ai_triage_world_news
+            scored = ai_triage_world_news()
+        except Exception as _se:
+            print(f"[WORLD_COLLECT] AI 채점 오류: {_se}")
+        return jsonify({"status": "success", "count": count, "scored": scored,
+                        "msg": f"✅ 세계뉴스 {count}건 수집 · AI 채점 {scored}건"})
     except Exception as e:
         import traceback
         traceback.print_exc()

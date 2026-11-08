@@ -174,15 +174,28 @@ def api_admin_news():
     tab = request.args.get('tab', 'all')
     page = int(request.args.get('page', 1))
     per_page = 20
+    cat = (request.args.get('category') or '').strip()
+    src = (request.args.get('source') or '').strip()
     q = NewsArticle.query.filter(NewsArticle.labor_only != True)
     if tab == 'world':
-        q = q.filter(NewsArticle.category.in_(['세계뉴스', '환경뉴스', '건강정보', '복지정보', '농업정보', '관광소식']))
+        q = q.filter(NewsArticle.category.in_(['미국','중국','러시아','영국','프랑스','동남아시아','중앙아시아','일본','북유럽','서유럽','남아프리카','북아프리카','동유럽','남유럽','호주','UN','유네스코','중동','캐나다','중남미','세계뉴스','환경뉴스','건강정보','복지정보','농업정보','관광소식']))
     elif tab == 'kr_yp':
-        q = q.filter(NewsArticle.category.in_(['대한민국뉴스', '양평소식', '정책정보', '지역소식']))
+        q = q.filter(NewsArticle.category.in_(['양평','경기','정치','경제','사회','교육','환경','노동','복지','의료','문화','대한민국뉴스','양평소식','정책정보','지역소식']))
+    from sqlalchemy import func as _f2
+    cats = [c for (c,) in q.with_entities(NewsArticle.category).distinct().order_by(NewsArticle.category).all()]
+    sources = [x for (x,) in q.with_entities(NewsArticle.source_name).distinct().order_by(NewsArticle.source_name).all() if x]
+    if cat:
+        q = q.filter(NewsArticle.category == cat)
+    if src:
+        q = q.filter(NewsArticle.source_name == src)
     total = q.count()
-    items = q.order_by(NewsArticle.created_at.desc()).offset((page-1)*per_page).limit(per_page).all()
-    world_cats = {'세계뉴스', '환경뉴스', '건강정보', '복지정보', '농업정보', '관광소식'}
-    kr_yp_cats = {'대한민국뉴스', '양평소식', '정책정보', '지역소식'}
+    if tab == 'world':
+        from sqlalchemy import func as _f
+        items = q.order_by(_f.coalesce(NewsArticle.ai_score, 0).desc(), NewsArticle.created_at.desc()).offset((page-1)*per_page).limit(per_page).all()
+    else:
+        items = q.order_by(NewsArticle.created_at.desc()).offset((page-1)*per_page).limit(per_page).all()
+    world_cats = {'미국','중국','러시아','영국','프랑스','동남아시아','중앙아시아','일본','북유럽','서유럽','남아프리카','북아프리카','동유럽','남유럽','호주','UN','유네스코','중동','캐나다','중남미','세계뉴스','환경뉴스','건강정보','복지정보','농업정보','관광소식'}
+    kr_yp_cats = {'양평','경기','정치','경제','사회','교육','환경','노동','복지','의료','문화','대한민국뉴스','양평소식','정책정보','지역소식'}
     def _approval(a):
         if tab == 'world':
             return a.world_ai_approved, a.world_admin_approved
@@ -202,7 +215,9 @@ def api_admin_news():
         'ai_approved': _approval(a)[0],
         'admin_approved': _approval(a)[1],
         'is_selected': getattr(a, 'is_selected', False),
-    } for a in items], 'total_pages': max(1, (total + per_page - 1) // per_page)})
+        'ai_score': a.ai_score or 0,
+        'source_name': a.source_name or '',
+    } for a in items], 'total_pages': max(1, (total + per_page - 1) // per_page), 'categories': cats, 'category': cat, 'sources': sources, 'source': src})
 
 @admin_bp.route('/api/admin/pending-letters')
 def api_admin_pending_letters():

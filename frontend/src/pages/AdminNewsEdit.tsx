@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import Loading from '../components/common/Loading'
 
-const CATEGORIES = ['세계뉴스', '대한민국뉴스', '양평소식', '지역소식', '정책정보', '농업정보', '관광소식', '환경뉴스', '복지정보', '건강정보']
+const CATEGORIES = ['양평','경기','정치','경제','사회','교육','환경','노동','복지','의료','문화','미국','중국','러시아','영국','프랑스','동남아시아','중앙아시아','일본','북유럽','서유럽','남아프리카','북아프리카','동유럽','남유럽','호주','UN','유네스코','중동','캐나다','중남미','세계뉴스']
 
 interface Props { type?: 'news' | 'labor' }
 

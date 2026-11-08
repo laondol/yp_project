@@ -107,8 +107,8 @@ export const friendApi = {
 };
 
 export const newsApi = {
-  list: (category?: string, page?: number) =>
-    api.get<{ items: import('./types').NewsArticle[]; page: number; pages: number; total: number }>('/api/news', { category, page }),
+  list: (category?: string, page?: number, sub?: string, source?: string) =>
+    api.get<{ items: import('./types').NewsArticle[]; page: number; pages: number; total: number; categories?: string[]; sources?: string[] }>('/api/news', { category, page, sub, source }),
   get: (id: number) => api.get<import('./types').NewsArticle & { content?: string }>(`/api/news/content/${id}`),
   vote: (id: number, vote: 'like' | 'dislike') =>
     api.post<{ status: string; likes?: number; dislikes?: number }>(`/news/${vote}/${id}`),

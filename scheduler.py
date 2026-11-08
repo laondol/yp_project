@@ -398,47 +398,52 @@ def run_labor_news_scheduler(app):
         time.sleep(86400)
 
 
-def run_kr_yp_news_scheduler(app):
-    """매일 새벽 2시에 10개 주요 언론사 대한민국·양평 뉴스 자동 수집"""
-    def _wait_until_2am():
-        now = datetime.now()
-        target = now.replace(hour=2, minute=0, second=0, microsecond=0)
-        if now >= target:
-            from datetime import timedelta
-            target += timedelta(days=1)
-        wait_sec = (target - now).total_seconds()
-        print(f"[KR_YP_NEWS_SCHEDULER] 다음 수집까지 {wait_sec/3600:.1f}시간 대기")
-        time.sleep(wait_sec)
+def _wait_until_times(times, tag):
+    """지정한 시각(0-23) 중 다음 시각까지 대기 (한국 시간)"""
+    from datetime import timedelta
+    now = datetime.now()
+    for h in sorted(times):
+        target = now.replace(hour=h, minute=0, second=0, microsecond=0)
+        if target > now:
+            wait = (target - now).total_seconds()
+            print(f"[{tag}] 다음 수집까지 {wait/3600:.1f}시간 대기 ({h:02d}:00)")
+            time.sleep(wait)
+            return
+    target = (now + timedelta(days=1)).replace(hour=min(times), minute=0, second=0, microsecond=0)
+    wait = (target - now).total_seconds()
+    print(f"[{tag}] 다음 수집까지 {wait/3600:.1f}시간 대기 ({min(times):02d}:00)")
+    time.sleep(wait)
 
-    _wait_until_2am()
+
+def _wait_until_next_slot(anchor_hour, step_hours, tag):
+    """anchor_hour 기준 step_hours 간격 슬롯까지 대기 (예: 2시 기준 6시간 간격)"""
+    from datetime import timedelta
+    now = datetime.now()
+    target = now.replace(hour=anchor_hour, minute=0, second=0, microsecond=0)
+    while target <= now:
+        target += timedelta(hours=step_hours)
+    wait_sec = (target - now).total_seconds()
+    print(f"[{tag}] 다음 수집까지 {wait_sec/3600:.1f}시간 대기 ({target.strftime('%H:%M')})")
+    time.sleep(wait_sec)
+
+
+def run_kr_yp_news_scheduler(app):
+    """매일 06시 대한민국·양평 뉴스 수집"""
     while True:
+        _wait_until_times([6], 'KR_YP_NEWS_SCHEDULER')
         try:
             with app.app_context():
                 from services.labor_news_collector import collect_kr_yp_news
                 count, mode = collect_kr_yp_news()
                 print(f"[KR_YP_NEWS_SCHEDULER] 자동 수집 완료: {count}건 (경로: {mode})")
-                from services.news_service import ai_triage_pending_news
-                triaged = ai_triage_pending_news()
-                print(f"[KR_YP_NEWS_SCHEDULER] AI 선별: {triaged}건 채점")
         except Exception as e:
             print(f"[KR_YP_NEWS_SCHEDULER] 수집 오류: {e}")
-        time.sleep(86400)
 
 
 def run_world_news_scheduler(app):
-    """매일 오후 1시에 10개 세계 언론사 글로벌 뉴스 자동 수집 (오후 8시까지, 9시 정리)"""
-    def _wait_until_1pm():
-        now = datetime.now()
-        target = now.replace(hour=13, minute=0, second=0, microsecond=0)
-        if now >= target:
-            from datetime import timedelta
-            target += timedelta(days=1)
-        wait_sec = (target - now).total_seconds()
-        print(f"[WORLD_NEWS_SCHEDULER] 다음 수집까지 {wait_sec/3600:.1f}시간 대기")
-        time.sleep(wait_sec)
-
-    _wait_until_1pm()
+    """매일 06시 세계 뉴스 수집"""
     while True:
+        _wait_until_times([6], 'WORLD_NEWS_SCHEDULER')
         try:
             with app.app_context():
                 from services.labor_news_collector import collect_world_news
@@ -446,6 +451,46 @@ def run_world_news_scheduler(app):
                 print(f"[WORLD_NEWS_SCHEDULER] 자동 수집 완료: {count}건")
         except Exception as e:
             print(f"[WORLD_NEWS_SCHEDULER] 수집 오류: {e}")
+
+
+def run_world_night_scheduler(app):
+    """새벽 2시(한국): 해외 아침 지역(미국·호주·북유럽·러시아·중동) 기사 집중 수집"""
+    while True:
+        _wait_until_times([2], 'WORLD_NIGHT_SCHEDULER')
+        try:
+            with app.app_context():
+                from services.labor_news_collector import collect_world_news
+                count = collect_world_news(categories=['미국', '호주', '북유럽', '러시아', '중동'])
+                print(f"[WORLD_NIGHT_SCHEDULER] 자동 수집 완료: {count}건")
+        except Exception as e:
+            print(f"[WORLD_NIGHT_SCHEDULER] 수집 오류: {e}")
+
+
+def run_news_score_scheduler(app):
+    """매일 08시: 수집된 기사 AI 채점 (세계 + 국내)"""
+    while True:
+        _wait_until_times([8], 'NEWS_SCORE_SCHEDULER')
+        try:
+            with app.app_context():
+                from services.news_service import ai_triage_world_news, ai_triage_pending_news
+                w = ai_triage_world_news()
+                k = ai_triage_pending_news()
+                print(f"[NEWS_SCORE_SCHEDULER] 채점 완료: 세계 {w}건 / 국내 {k}건")
+        except Exception as e:
+            print(f"[NEWS_SCORE_SCHEDULER] 오류: {e}")
+
+
+def run_news_cleanup_scheduler(app):
+    """매일 03시: 채택되지 않은 30일 경과 뉴스 삭제"""
+    _wait_until_next_slot(3, 24, 'NEWS_CLEANUP')
+    while True:
+        try:
+            with app.app_context():
+                from services.news_service import cleanup_unselected_news, cleanup_no_like_news
+                cleanup_unselected_news(30)
+                cleanup_no_like_news(60)
+        except Exception as e:
+            print(f"[NEWS_CLEANUP] 오류: {e}")
         time.sleep(86400)
 
 
@@ -471,6 +516,9 @@ def main():
     threading.Thread(target=run_labor_news_scheduler, args=(app,), daemon=True).start()
     threading.Thread(target=run_kr_yp_news_scheduler, args=(app,), daemon=True).start()
     threading.Thread(target=run_world_news_scheduler, args=(app,), daemon=True).start()
+    threading.Thread(target=run_world_night_scheduler, args=(app,), daemon=True).start()
+    threading.Thread(target=run_news_score_scheduler, args=(app,), daemon=True).start()
+    threading.Thread(target=run_news_cleanup_scheduler, args=(app,), daemon=True).start()
     threading.Thread(target=run_attachment_archive_scheduler, args=(app,), daemon=True).start()
 
     print("[SCHEDULER] All schedulers started. Keeping alive...")

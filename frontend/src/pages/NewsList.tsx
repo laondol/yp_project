@@ -21,16 +21,22 @@ export default function NewsList() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [content, setContent] = useState<{ id: number; title: string; content: string; category: string } | null>(null)
+  const [sub, setSub] = useState('')
+  const [src, setSrc] = useState('')
+  const [categories, setCategories] = useState<string[]>([])
+  const [sources, setSources] = useState<string[]>([])
 
   const load = useCallback(async () => {
     setLoading(true); setError('')
     try {
-      const data = await newsApi.list(tab || undefined, page)
-      setArticles(Array.isArray(data) ? data : [])
+      const data = await newsApi.list(tab || undefined, page, sub || undefined, src || undefined)
+      setArticles(Array.isArray(data.items) ? data.items : [])
+      setCategories(data.categories ?? [])
+      setSources(data.sources ?? [])
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : '불러오기 실패')
     } finally { setLoading(false) }
-  }, [tab, page])
+  }, [tab, page, sub, src])
 
   useEffect(() => { load() }, [load])
 
@@ -64,12 +70,25 @@ export default function NewsList() {
         {TABS.map(t => (
           <li className="nav-item" key={t.key}>
             <button className={`nav-link ${tab === t.key ? 'active' : ''}`}
-              onClick={() => setSearchParams(t.key ? { category: t.key } : {})}>
+              onClick={() => { setSub(''); setSrc(''); setSearchParams(t.key ? { category: t.key } : {}) }}>
               {t.label}
             </button>
           </li>
         ))}
       </ul>
+
+      <div className="d-flex gap-2 mb-3 flex-wrap">
+        <select className="form-select form-select-sm" style={{ maxWidth: 160 }} value={sub}
+          onChange={e => { setSub(e.target.value); setSearchParams(tab ? { category: tab, page: '1' } : { page: '1' }) }}>
+          <option value="">분류: 전체</option>
+          {categories.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <select className="form-select form-select-sm" style={{ maxWidth: 180 }} value={src}
+          onChange={e => { setSrc(e.target.value); setSearchParams(tab ? { category: tab, page: '1' } : { page: '1' }) }}>
+          <option value="">출처: 전체</option>
+          {sources.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+      </div>
 
       {articles.length === 0 ? (
         <EmptyState icon="📰" title="등록된 뉴스가 없습니다." />
