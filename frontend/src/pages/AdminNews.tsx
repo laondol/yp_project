@@ -248,14 +248,32 @@ export default function AdminNews() {
   }
 
   const handleTranslateUntranslated = async () => {
-    if (!window.confirm('미번역 기사를 모두 한국어로 번역할까요? (삭제 없음)')) return
+    if (!window.confirm('미번역 기사를 한국어로 번역할까요? (5건씩 나눠 처리, 삭제 없음)')) return
+    let total = 0
+    let guard = 0
     try {
-      const res = await fetch('/admin/news/translate-untranslated', { method: 'POST' })
-      const data = await res.json()
-      alert(data.msg || (data.status === 'success' ? '완료' : '실패'))
+      while (guard < 40) {
+        guard += 1
+        const res = await fetch('/admin/news/translate-untranslated', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ limit: 5 }),
+        })
+        const data = await res.json()
+        if (data.status !== 'success') {
+          alert(data.msg || '번역 실패')
+          break
+        }
+        total += data.count || 0
+        if (!data.remaining || data.count === 0) {
+          alert(`✅ 총 ${total}건 번역 완료`)
+          break
+        }
+        await new Promise(r => setTimeout(r, 800))
+      }
       fetchNews()
     } catch {
-      alert('오류가 발생했습니다.')
+      alert('오류가 발생했습니다. 잠시 후 다시 시도해 주세요.')
     }
   }
 

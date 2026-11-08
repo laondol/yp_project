@@ -237,7 +237,15 @@ def admin_news_translate_untranslated():
         h = sum(1 for c in letters if '\uac00' <= c <= '\ud7a3')
         return h / len(letters) < 0.3
 
+    try:
+        data = request.get_json(silent=True) or {}
+    except Exception:
+        data = {}
+    limit = int(data.get('limit') or 5)
+    limit = max(1, min(limit, 20))
     rows = [a for a in NewsArticle.query.all() if _need(a.title) or _need(a.summary)]
+    remaining_before = len(rows)
+    rows = rows[:limit]
     ok = 0
     for a in rows:
         m = _re.match(r'^(\[[^\]]+\]\s*)', a.title or '')
@@ -250,8 +258,10 @@ def admin_news_translate_untranslated():
                 a.summary = str(tr['summary'])[:500]
             ok += 1
         db.session.commit()
+    remain = sum(1 for a in NewsArticle.query.all() if _need(a.title) or _need(a.summary))
     return jsonify({"status": "success", "count": ok, "target": len(rows),
-                    "msg": f"✅ {ok}/{len(rows)}건 번역 완료"})
+                    "remaining": remain, "total": remaining_before,
+                    "msg": f"✅ {ok}/{len(rows)}건 번역 완료 (남은 {remain}건)"})
 
 @news_bp.route('/admin/news/approve-all', methods=['POST'])
 def admin_news_approve_all():
