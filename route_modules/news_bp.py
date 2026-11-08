@@ -253,12 +253,14 @@ def _translate_worker(app):
     with app.app_context():
         from models import db, NewsArticle
         try:
+            attempted = set()
             while True:
                 rows = [a for a in NewsArticle.query.order_by(NewsArticle.id.asc()).all()
-                        if _need(a.title) or _need(a.summary)]
+                        if a.id not in attempted and (_need(a.title) or _need(a.summary))]
                 if not rows:
                     break
                 a = rows[0]
+                attempted.add(a.id)
                 m = _re.match(r'^(\[[^\]]+\]\s*)', a.title or '')
                 prefix = m.group(1) if m else ''
                 body = (a.title or '')[len(prefix):]
