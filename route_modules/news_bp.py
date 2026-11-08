@@ -219,13 +219,13 @@ def admin_news_approve(news_id, tab, approver):
     db.session.commit()
     return jsonify({"status": "success"})
 
-@news_bp.route('/admin/news/translate-untranslated', methods=['POST'])
-def admin_news_translate_untranslated():
-    """미번역(외국어) 기사 제목·요약을 일괄 번역 (삭제 없음)"""
-    if session.get('role') not in ['admin', 'leader']:
-        return jsonify({"status": "error", "msg": "권한 없음"}), 403
-    from services.news_service import ai_translate_and_format
+_TRANSLATE_STATE = {'running': False, 'done': 0, 'failed': 0, 'total': 0}
+
+
+def _translate_worker(app):
     import re as _re
+    import time as _time
+    from services.news_service import ai_translate_and_format, _motif_text
 
     def _need(t):
         t = t or ''
@@ -237,31 +237,99 @@ def admin_news_translate_untranslated():
         h = sum(1 for c in letters if '\uac00' <= c <= '\ud7a3')
         return h / len(letters) < 0.3
 
-    try:
-        data = request.get_json(silent=True) or {}
-    except Exception:
-        data = {}
-    limit = int(data.get('limit') or 5)
-    limit = max(1, min(limit, 20))
-    rows = [a for a in NewsArticle.query.all() if _need(a.title) or _need(a.summary)]
-    remaining_before = len(rows)
-    rows = rows[:limit]
-    ok = 0
-    for a in rows:
-        m = _re.match(r'^(\[[^\]]+\]\s*)', a.title or '')
-        prefix = m.group(1) if m else ''
-        body = (a.title or '')[len(prefix):]
-        tr = ai_translate_and_format(body, a.summary or '')
+    def _translate(body, content):
+        tr = ai_translate_and_format(body, content or '')
         if isinstance(tr, dict) and tr.get('title'):
-            a.title = prefix + str(tr['title']).replace('[미번역]', '').strip()
-            if tr.get('summary'):
-                a.summary = str(tr['summary'])[:500]
-            ok += 1
-        db.session.commit()
+            return tr
+        prompt = (
+            '다음 기사를 한국어 격식체로 번역해 JSON으로만 답하세요.\n'
+            '출력: {"title": "번역된 제목", "summary": "한국어 요약"}\n'
+            f'제목: {body}\n내용: {(content or "")[:1500]}'
+        )
+        r = _motif_text('당신은 전문 번역가입니다. 한국어로만 답합니다.',
+                        prompt, format_json=True, provider='gemini')
+        return r if isinstance(r, dict) and r.get('title') else None
+
+    with app.app_context():
+        from models import db, NewsArticle
+        try:
+            while True:
+                rows = [a for a in NewsArticle.query.order_by(NewsArticle.id.asc()).all()
+                        if _need(a.title) or _need(a.summary)]
+                if not rows:
+                    break
+                a = rows[0]
+                m = _re.match(r'^(\[[^\]]+\]\s*)', a.title or '')
+                prefix = m.group(1) if m else ''
+                body = (a.title or '')[len(prefix):]
+                tr = _translate(body, a.summary or '')
+                if tr:
+                    a.title = prefix + str(tr['title']).replace('[미번역]', '').strip()
+                    if tr.get('summary'):
+                        a.summary = str(tr['summary'])[:500]
+                    _TRANSLATE_STATE['done'] += 1
+                else:
+                    # 실패 시 무한반복 방지: 제목에 표시만 남기고 다음으로
+                    if '[미번역]' not in (a.title or ''):
+                        a.title = '[미번역] ' + (a.title or '')
+                    _TRANSLATE_STATE['failed'] += 1
+                db.session.commit()
+                _time.sleep(1)
+        except Exception as e:
+            print(f'[TRANSLATE_WORKER] 오류: {e}')
+        finally:
+            db.session.remove()
+            _TRANSLATE_STATE['running'] = False
+
+
+@news_bp.route('/admin/news/translate-untranslated', methods=['POST'])
+def admin_news_translate_untranslated():
+    """미번역 기사 번역을 백그라운드로 시작 (즉시 응답)"""
+    if session.get('role') not in ['admin', 'leader']:
+        return jsonify({"status": "error", "msg": "권한 없음"}), 403
+
+    def _need(t):
+        t = t or ''
+        if '[미번역]' in t:
+            return True
+        letters = [c for c in t if c.isalpha()]
+        if not letters:
+            return False
+        h = sum(1 for c in letters if '\uac00' <= c <= '\ud7a3')
+        return h / len(letters) < 0.3
+
+    if _TRANSLATE_STATE['running']:
+        return jsonify({"status": "success", "running": True, "msg": "이미 번역이 진행 중입니다."})
+
+    import threading
+    from flask import current_app
+    target = sum(1 for a in NewsArticle.query.all() if _need(a.title) or _need(a.summary))
+    _TRANSLATE_STATE.update({'running': True, 'done': 0, 'failed': 0, 'total': target})
+    threading.Thread(target=_translate_worker, args=(current_app._get_current_object(),), daemon=True).start()
+    return jsonify({"status": "success", "running": True, "total": target,
+                    "msg": f"백그라운드 번역 시작 (대상 {target}건)"})
+
+
+@news_bp.route('/admin/news/translate-status')
+def admin_news_translate_status():
+    if session.get('role') not in ['admin', 'leader']:
+        return jsonify({"status": "error", "msg": "권한 없음"}), 403
+
+    def _need(t):
+        t = t or ''
+        if '[미번역]' in t:
+            return True
+        letters = [c for c in t if c.isalpha()]
+        if not letters:
+            return False
+        h = sum(1 for c in letters if '\uac00' <= c <= '\ud7a3')
+        return h / len(letters) < 0.3
+
     remain = sum(1 for a in NewsArticle.query.all() if _need(a.title) or _need(a.summary))
-    return jsonify({"status": "success", "count": ok, "target": len(rows),
-                    "remaining": remain, "total": remaining_before,
-                    "msg": f"✅ {ok}/{len(rows)}건 번역 완료 (남은 {remain}건)"})
+    return jsonify({"status": "success", "running": _TRANSLATE_STATE['running'],
+                    "done": _TRANSLATE_STATE['done'], "failed": _TRANSLATE_STATE['failed'],
+                    "remaining": remain})
+
 
 @news_bp.route('/admin/news/approve-all', methods=['POST'])
 def admin_news_approve_all():

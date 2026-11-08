@@ -247,33 +247,42 @@ export default function AdminNews() {
     }
   }
 
+  const [translating, setTranslating] = useState(false)
+  const [translateMsg, setTranslateMsg] = useState('')
+
   const handleTranslateUntranslated = async () => {
-    if (!window.confirm('미번역 기사를 한국어로 번역할까요? (5건씩 나눠 처리, 삭제 없음)')) return
-    let total = 0
-    let guard = 0
+    if (translating) return
+    setTranslating(true)
+    setTranslateMsg('번역 시작 중...')
     try {
-      while (guard < 40) {
-        guard += 1
-        const res = await fetch('/admin/news/translate-untranslated', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ limit: 5 }),
-        })
-        const data = await res.json()
-        if (data.status !== 'success') {
-          alert(data.msg || '번역 실패')
+      const res = await fetch('/admin/news/translate-untranslated', { method: 'POST' })
+      const data = await res.json()
+      if (data.status !== 'success') {
+        alert(data.msg || '시작 실패')
+        setTranslating(false)
+        return
+      }
+      // 백그라운드 진행 상황 폴링
+      for (let i = 0; i < 400; i++) {
+        await new Promise(r => setTimeout(r, 3000))
+        const st = await fetch('/admin/news/translate-status').then(r => r.json())
+        setTranslateMsg(`번역 중… 남은 ${st.remaining ?? '?'}건 (완료 ${st.done ?? 0}건)`)
+        if (!st.running && (st.remaining ?? 0) === 0) {
+          setTranslateMsg('')
+          alert(`✅ 번역 완료 (완료 ${st.done}건, 실패 ${st.failed}건)`)
           break
         }
-        total += data.count || 0
-        if (!data.remaining || data.count === 0) {
-          alert(`✅ 총 ${total}건 번역 완료`)
+        if (!st.running) {
+          setTranslateMsg('')
+          alert(`번역 종료 (남은 ${st.remaining}건)`)
           break
         }
-        await new Promise(r => setTimeout(r, 800))
       }
       fetchNews()
     } catch {
-      alert('오류가 발생했습니다. 잠시 후 다시 시도해 주세요.')
+      alert('오류가 발생했습니다.')
+    } finally {
+      setTranslating(false)
     }
   }
 
@@ -343,9 +352,10 @@ export default function AdminNews() {
       </ul>
 
       <div className="mb-3">
-        <button className="btn btn-outline-primary btn-sm" onClick={handleTranslateUntranslated}>
-          🌐 미번역 일괄 번역
+        <button className="btn btn-outline-primary btn-sm" onClick={handleTranslateUntranslated} disabled={translating}>
+          {translating ? '⏳ 번역 중...' : '🌐 미번역 일괄 번역(백그라운드)'}
         </button>
+        {translateMsg && <span className="small text-muted ms-2">{translateMsg}</span>}
       </div>
 
       {/* URL Import + Action Buttons (hidden on 'all' tab) */}
