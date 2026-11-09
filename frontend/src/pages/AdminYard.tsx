@@ -105,6 +105,7 @@ export default function AdminYard() {
   const [rMsgOk, setRMsgOk] = useState(false)
 
   const PAGE_SIZE = 10
+  const APPROVED_PAGE_SIZE = 21
   const [pendingPage, setPendingPage] = useState(1)
   const [approvedPage, setApprovedPage] = useState(1)
 
@@ -197,9 +198,9 @@ export default function AdminYard() {
   const pending = items.filter(i => !i.is_approved)
   const approved = items.filter(i => i.is_approved)
   const pendingPages = Math.ceil(pending.length / PAGE_SIZE)
-  const approvedPages = Math.ceil(approved.length / PAGE_SIZE)
+  const approvedPages = Math.ceil(approved.length / APPROVED_PAGE_SIZE)
   const pendingSlice = pending.slice((pendingPage - 1) * PAGE_SIZE, pendingPage * PAGE_SIZE)
-  const approvedSlice = approved.slice((approvedPage - 1) * PAGE_SIZE, approvedPage * PAGE_SIZE)
+  const approvedSlice = approved.slice((approvedPage - 1) * APPROVED_PAGE_SIZE, approvedPage * APPROVED_PAGE_SIZE)
 
   const [winWidth, setWinWidth] = useState(window.innerWidth)
   useEffect(() => {
