@@ -92,6 +92,8 @@ export default function AdminYard() {
   const [rTitle, setRTitle] = useState('')
   const [rAuthor, setRAuthor] = useState('')
   const [rOutside, setROutside] = useState(false)
+  const [rPaid, setRPaid] = useState(false)
+  const [rPrice, setRPrice] = useState('')
   const [rPlace, setRPlace] = useState('')
   const [rType, setRType] = useState('')           // weekly | monthly_week | monthly_day | tbd
   const [rDays, setRDays] = useState<number[]>([]) // 요일 인덱스 (0=월)
@@ -121,7 +123,7 @@ export default function AdminYard() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title: rTitle.trim(), author_name: rAuthor.trim(),
-          event_place: rPlace.trim(), is_outside: rOutside, contact: rContact.trim(),
+          event_place: rPlace.trim(), is_outside: rOutside, is_paid: rPaid, price: rPrice.trim(), contact: rContact.trim(),
           source_url: rLink.trim(),
           repeat_type: rType, repeat_weekdays: weekdaysMask,
           repeat_weeks: rWeeks.join(','), repeat_week_of_month: rWeeks[0] || 0, repeat_days: rDates,
@@ -305,6 +307,11 @@ export default function AdminYard() {
           <label className="small align-self-center">
             <input type="checkbox" checked={rOutside} onChange={e => setROutside(e.target.checked)} /> 🌏 양평외
           </label>
+          <label className="small align-self-center">
+            <input type="checkbox" checked={rPaid} onChange={e => setRPaid(e.target.checked)} /> 🎟️ 유료
+          </label>
+          <input className="form-control" style={{ maxWidth: 150 }} placeholder="금액"
+            value={rPrice} onChange={e => setRPrice(e.target.value)} disabled={!rPaid} />
         </div>
         <select className="form-select form-select-sm mb-1" value={rType}
           onChange={e => setRType(e.target.value)}>

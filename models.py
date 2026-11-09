@@ -600,6 +600,8 @@ class YardPost(db.Model):
     is_allday = db.Column(db.Boolean, default=False)  # 종일 행사
     event_place = db.Column(db.String(200))         # 행사 장소 (AI 추출)
     is_outside = db.Column(db.Boolean, default=False)  # 양평 외 지역 행사
+    is_paid = db.Column(db.Boolean, default=False)     # 유료 행사 여부
+    price = db.Column(db.String(50))                   # 참가비 (예: 10,000원)
     # 반복 일정 (매주/매월 N째주/정기장 등)
     repeat_type = db.Column(db.String(20))          # 'weekly' | 'monthly_week' | 'monthly_day' | 'tbd'
     repeat_weekdays = db.Column(db.Integer)         # 요일 비트마스크 (월=1<<0 ... 일=1<<6)

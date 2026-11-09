@@ -36,6 +36,8 @@ interface YardItem {
   created_at: string
   category?: string  // event(행사/소식), notice(공지), bid(입찰)
   is_outside?: boolean
+  is_paid?: boolean
+  price?: string
   transit_min?: number | null
 }
 
@@ -636,6 +638,14 @@ export default function YardPage() {
                     )}
 
                     {/* 1차 일정 + 내일정 버튼 (반복 일정이 없을 때만 버튼 표시) */}
+                    {(it.is_paid || it.price || it.category === 'event') && (
+                      <div className="small mb-1">
+                        {it.is_paid || it.price
+                          ? `🎟️ 유료${it.price ? ' ' + it.price : ''}`
+                          : '🎟️ 무료'}
+                      </div>
+                    )}
+
                     {it.event_date_display && (
                       <div className="small mb-1 d-flex justify-content-between align-items-center">
                         <span>📅 {it.event_date_display}</span>

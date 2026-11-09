@@ -330,6 +330,8 @@ def api_yard_list():
             'event_date_display': _event_display(p),
             'event_place': p.event_place or '',
             'is_outside': bool(p.is_outside),
+            'is_paid': bool(p.is_paid),
+            'price': p.price or '',
             'transit_min': _transit_min_from_yp(p, gps_lat, gps_lng),
             'apply_display': _apply_display(p),
             'apply_allday': bool(p.apply_allday),
@@ -530,6 +532,8 @@ def _save_yard(f, p):
     p.is_allday = is_allday
     p.event_place = event_place or None
     p.is_outside = bool(f.get('is_outside'))
+    p.is_paid = bool(f.get('is_paid'))
+    p.price = (str(f.get('price') or '')).strip()[:50] or None
     # 반복 일정
     p.repeat_type = (str(f.get('repeat_type') or '')).strip()[:20] or None
     p.repeat_weekdays = int(f.get('repeat_weekdays') or 0) or None
@@ -623,6 +627,8 @@ def api_yard_admin_list():
         'extra_schedules': _post_schedules(p.id),
             'event_place': p.event_place or '',
             'is_outside': bool(p.is_outside),
+            'is_paid': bool(p.is_paid),
+            'price': p.price or '',
             'category': p.category or 'event',
             'is_approved': bool(p.is_approved), 'is_active': bool(p.is_active),
             'created_at': p.created_at.isoformat() if p.created_at else '',

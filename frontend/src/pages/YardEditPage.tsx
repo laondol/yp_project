@@ -31,6 +31,8 @@ export default function YardEditPage() {
   const [fRepEnd, setFRepEnd] = useState('00:00')       // 반복 종료시간 HH:MM
   const [fPlace, setFPlace] = useState('')
   const [fOutside, setFOutside] = useState(false)
+  const [fPaid, setFPaid] = useState(false)
+  const [fPrice, setFPrice] = useState('')
   const [fApplyStart, setFApplyStart] = useState('')
   const [fApplyEnd, setFApplyEnd] = useState('')
   const [fContent, setFContent] = useState('')
@@ -59,6 +61,8 @@ export default function YardEditPage() {
         } else { setFStartDt(''); setFEndDt('') }
         setFPlace(d.event_place || '')
         setFOutside(!!d.is_outside)
+        setFPaid(!!d.is_paid)
+        setFPrice(d.price || '')
         setFApplyStart(d.apply_start_iso ? d.apply_start_iso.slice(0, 16) : '')
         setFApplyEnd(d.apply_end_iso ? d.apply_end_iso.slice(0, 16) : '')
         setFRepeatType(d.repeat_type || '')
@@ -109,7 +113,7 @@ export default function YardEditPage() {
         repeat_type: fRepeatType, repeat_weekdays: weekdaysMask,
         repeat_weeks: fRepeatWeeks.join(','), repeat_week_of_month: fRepeatWeeks[0] || 0, repeat_days: fRepeatDates,
         repeat_start_time: fRepStart, repeat_end_time: fRepEnd,
-        event_place: fPlace.trim(), is_outside: fOutside, apply_start: fApplyStart, apply_end: fApplyEnd,
+        event_place: fPlace.trim(), is_outside: fOutside, is_paid: fPaid, price: fPrice.trim(), apply_start: fApplyStart, apply_end: fApplyEnd,
         content: fContent.trim(),
         source_url: fLink.trim(), reserve_url: fReserve.trim(), contact: fContact.trim(),
       }
@@ -216,6 +220,13 @@ export default function YardEditPage() {
           <label className="small mb-2 d-block">
             <input type="checkbox" checked={fOutside} onChange={e => setFOutside(e.target.checked)} /> 🌏 양평 외 지역 행사
           </label>
+          <div className="d-flex gap-2 align-items-center mb-2">
+            <label className="small mb-0">
+              <input type="checkbox" checked={fPaid} onChange={e => setFPaid(e.target.checked)} /> 🎟️ 유료 행사
+            </label>
+            <input className="form-control form-control-sm" style={{ maxWidth: 160 }} placeholder="금액 (예: 10,000원)"
+              value={fPrice} onChange={e => setFPrice(e.target.value)} disabled={!fPaid} />
+          </div>
           <div className="row g-2 mb-2">
             <div className="col-6">
               <label className="small text-muted mb-1" title="시간을 입력하지 않으면 종일로 자동 표시됩니다">🗓️ 신청기간 시작</label>
