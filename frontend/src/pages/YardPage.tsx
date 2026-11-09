@@ -273,7 +273,16 @@ export default function YardPage() {
     if (bd) return 1
     return (b.created_at || '').localeCompare(a.created_at || '')
   }
-  const displayItems = showCal ? dayItems : [...filtered].sort(byLatest)
+  // 다가오는 행사: 행사일 오름차순 / 지난 행사: 최근일 내림차순
+  const byDateAsc = (a: YardItem, b: YardItem) => {
+    const ad = a.event_date_iso || ''
+    const bd = b.event_date_iso || ''
+    if (ad && bd) return ad.localeCompare(bd)
+    if (ad) return -1
+    if (bd) return 1
+    return (b.created_at || '').localeCompare(a.created_at || '')
+  }
+  const displayItems = showCal ? dayItems : [...filtered].sort(filter === 'past' ? byLatest : byDateAsc)
   const yardTotalPages = Math.max(1, Math.ceil(displayItems.length / YARD_PAGE_SIZE))
   const pagedItems = showCal ? displayItems : displayItems.slice((yardPage - 1) * YARD_PAGE_SIZE, yardPage * YARD_PAGE_SIZE)
 
