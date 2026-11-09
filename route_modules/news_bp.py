@@ -3,7 +3,7 @@ import requests
 from flask import Blueprint, render_template, request, redirect, url_for, jsonify, session, current_app, send_file
 from datetime import datetime, timezone
 from sqlalchemy import or_
-from models import db, NewsArticle, NewsComment, NewsRecommendation, NewsVote, Post, User, Message, LaborNewsArticle, LaborNewsVote
+from models import db, NewsArticle, NewsComment, NewsRecommendation, NewsVote, Post, User, Message, LaborNewsArticle, LaborNewsVote, NewsSource
 from services.ai_service import call_ai_judge
 from services.point_service import add_points
 from route_modules.common import author_email_for as _author_email, is_legal_manager
@@ -282,6 +282,69 @@ def _translate_worker(app):
         finally:
             db.session.remove()
             _TRANSLATE_STATE['running'] = False
+
+
+def _source_dict(r):
+    return {
+        'id': r.id, 'kind': r.kind, 'name': r.name, 'domain': r.domain or '',
+        'q': r.q or '', 'lang': r.lang or 'en', 'max_items': r.max_items or 5,
+        'category': r.category or '', 'enabled': bool(r.enabled),
+        'region_filter': bool(r.region_filter), 'verify_date': bool(r.verify_date),
+    }
+
+
+@news_bp.route('/admin/news/sources', methods=['GET', 'POST'])
+def admin_news_sources():
+    if session.get('role') not in ['admin', 'leader']:
+        return jsonify({"status": "error", "msg": "권한 없음"}), 403
+    if request.method == 'GET':
+        if NewsSource.query.count() == 0:
+            try:
+                from services.labor_news_collector import _seed_news_sources
+                _seed_news_sources()
+            except Exception as e:
+                print(f'[NEWS_SOURCE] 시드 실패: {e}')
+        rows = NewsSource.query.order_by(NewsSource.kind.asc(), NewsSource.id.asc()).all()
+        return jsonify({"status": "success", "items": [_source_dict(r) for r in rows]})
+
+    data = request.get_json(silent=True) or {}
+    name = (str(data.get('name') or '')).strip()[:100]
+    domain = (str(data.get('domain') or '')).strip()[:200]
+    q = (str(data.get('q') or '')).strip()[:200]
+    kind = (str(data.get('kind') or 'world')).strip()
+    if not name:
+        return jsonify({"status": "error", "msg": "이름을 입력하세요."}), 400
+    if kind not in ('world', 'local', 'official', 'kr_yp'):
+        return jsonify({"status": "error", "msg": "kind 오류"}), 400
+    if not domain and not q:
+        return jsonify({"status": "error", "msg": "도메인 또는 검색어가 필요합니다."}), 400
+    row = NewsSource(
+        kind=kind, name=name, domain=domain, q=q,
+        lang=(str(data.get('lang') or 'en'))[:10],
+        max_items=max(1, min(int(data.get('max_items') or 5), 10)),
+        category=(str(data.get('category') or ''))[:50],
+        region_filter=bool(data.get('region_filter', kind in ('local', 'kr_yp'))),
+        verify_date=bool(data.get('verify_date', kind == 'official')),
+        enabled=True,
+    )
+    db.session.add(row); db.session.commit()
+    return jsonify({"status": "success", "id": row.id, "msg": "소스가 추가되었습니다."})
+
+
+@news_bp.route('/admin/news/sources/<int:sid>', methods=['DELETE', 'POST'])
+def admin_news_source_modify(sid):
+    if session.get('role') not in ['admin', 'leader']:
+        return jsonify({"status": "error", "msg": "권한 없음"}), 403
+    row = NewsSource.query.get(sid)
+    if not row:
+        return jsonify({"status": "error", "msg": "없는 소스"}), 404
+    if request.method == 'DELETE':
+        db.session.delete(row); db.session.commit()
+        return jsonify({"status": "success", "msg": "삭제되었습니다."})
+    data = request.get_json(silent=True) or {}
+    row.enabled = bool(data.get('enabled', not row.enabled))
+    db.session.commit()
+    return jsonify({"status": "success", "enabled": row.enabled})
 
 
 @news_bp.route('/admin/news/translate-untranslated', methods=['POST'])

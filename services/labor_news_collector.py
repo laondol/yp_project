@@ -264,6 +264,46 @@ KR_YP_KEYWORDS = [
 ]
 
 
+def _seed_news_sources():
+    """하드코딩 소스 목록을 DB로 1회 이관"""
+    from models import db, NewsSource
+    if NewsSource.query.count() > 0:
+        return
+    rows = []
+    for x in WORLD_SOURCES:
+        rows.append(NewsSource(kind='world', name=x['name'], domain=x.get('domain', ''), q=x.get('q', ''),
+                               lang=x.get('lang', 'en'), max_items=x.get('max_items', 5),
+                               category=WORLD_CATEGORY_BY_SOURCE.get(x['name'], '')))
+    for x in LOCAL_MEDIA_SOURCES:
+        rows.append(NewsSource(kind='local', name=x['name'], domain=x.get('domain', ''),
+                               max_items=5, region_filter=x.get('region_filter', True)))
+    for x in OFFICIAL_SOURCES:
+        rows.append(NewsSource(kind='official', name=x['name'], domain=x.get('domain', ''),
+                               max_items=5, region_filter=False, verify_date=True))
+    for x in KR_YP_SOURCES:
+        rows.append(NewsSource(kind='kr_yp', name=x['name'], domain=x.get('domain', ''), max_items=5))
+    db.session.add_all(rows)
+    db.session.commit()
+    print(f'[NEWS_SOURCE] 기본 소스 {len(rows)}개 등록')
+
+
+def get_sources(kind):
+    """DB에서 사용중인 소스 로드 (없으면 시드)"""
+    from models import db, NewsSource
+    try:
+        if NewsSource.query.count() == 0:
+            _seed_news_sources()
+        rows = NewsSource.query.filter_by(kind=kind, enabled=True).order_by(NewsSource.id.asc()).all()
+        return [{
+            'name': r.name, 'domain': r.domain or '', 'q': r.q or '', 'lang': r.lang or 'en',
+            'max_items': r.max_items or 5, 'category': r.category or '',
+            'region_filter': bool(r.region_filter), 'verify_date': bool(r.verify_date),
+        } for r in rows]
+    except Exception as e:
+        print(f'[NEWS_SOURCE] 로드 실패({kind}): {e}')
+        return []
+
+
 def collect_labor_news():
     """10개 노동 뉴스 소스에서 자동으로 기사를 수집하여 DB에 저장"""
     from flask import current_app
@@ -430,7 +470,7 @@ def collect_kr_yp_news_rss():
 
     search_queries = ["양평", "경기도 양평"]
 
-    for source in KR_YP_SOURCES:
+    for source in get_sources('kr_yp'):
         for sq in search_queries:
             try:
                 q = f"site:{source['domain']} {sq}"
@@ -537,7 +577,7 @@ def collect_kr_yp_local_rss():
     seen_urls = set()
     now = datetime.now()
 
-    for source in LOCAL_MEDIA_SOURCES + OFFICIAL_SOURCES:
+    for source in get_sources('local') + get_sources('official'):
         try:
             res = requests.get(
                 "https://news.google.com/rss/search",
@@ -762,10 +802,11 @@ def collect_world_news(categories=None):
     now = datetime.now()
 
     # 1) Google News RSS로 각 소스별 수집 (categories 지정 시 해당 지역만)
-    _sources = WORLD_SOURCES
+    _sources = get_sources('world')
     if categories:
         _cats = set(categories)
-        _sources = [x for x in WORLD_SOURCES if WORLD_CATEGORY_BY_SOURCE.get(x['name']) in _cats]
+        _sources = [x for x in _sources
+                    if (x.get('category') or WORLD_CATEGORY_BY_SOURCE.get(x['name'])) in _cats]
     for source in _sources:
         try:
             _hl, _gl, _ceid = ('ko', 'KR', 'KR:ko') if source.get('lang') == 'ko' else ('en', 'US', 'US:en')
@@ -842,7 +883,7 @@ def collect_world_news(categories=None):
                     summary=art_summary,
                     content=art_content,
                     source_url=link,
-                    category=WORLD_CATEGORY_BY_SOURCE.get(source['name'], '세계뉴스'),
+                    category=source.get('category') or WORLD_CATEGORY_BY_SOURCE.get(source['name'], '세계뉴스'),
                     is_selected=False,
                     is_ai_generated=True,
                     world_ai_approved=True,

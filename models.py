@@ -1606,3 +1606,20 @@ class LaonMemberToken(db.Model):
     token_hash = db.Column(db.String(64), nullable=False, index=True)
     active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.now)
+
+
+class NewsSource(db.Model):
+    """뉴스 수집 소스 (관리자 화면에서 추가/삭제)"""
+    __tablename__ = 'news_source'
+    id = db.Column(db.Integer, primary_key=True)
+    kind = db.Column(db.String(20), default='world')  # world | local | official | kr_yp
+    name = db.Column(db.String(100), nullable=False)
+    domain = db.Column(db.String(200), default='')
+    q = db.Column(db.String(200), default='')          # 추가 검색어
+    lang = db.Column(db.String(10), default='en')
+    max_items = db.Column(db.Integer, default=5)
+    category = db.Column(db.String(50), default='')
+    region_filter = db.Column(db.Boolean, default=True)
+    verify_date = db.Column(db.Boolean, default=False)
+    enabled = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.now)

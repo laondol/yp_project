@@ -291,6 +291,51 @@ export default function AdminNews() {
     }
   }
 
+  const [showSources, setShowSources] = useState(false)
+  const [sourceList, setSourceList] = useState<any[]>([])
+  const [nsKind, setNsKind] = useState('world')
+  const [nsName, setNsName] = useState('')
+  const [nsDomain, setNsDomain] = useState('')
+  const [nsQ, setNsQ] = useState('')
+  const [nsCategory, setNsCategory] = useState('')
+  const [nsLang, setNsLang] = useState('en')
+  const [nsMax, setNsMax] = useState(3)
+
+  const loadSources = async () => {
+    const d = await fetch('/admin/news/sources').then(r => r.json()).catch(() => ({}))
+    setSourceList(d.items || [])
+  }
+  const toggleSources = async () => {
+    const next = !showSources
+    setShowSources(next)
+    if (next) await loadSources()
+  }
+  const addSource = async () => {
+    if (!nsName.trim()) { alert('이름을 입력하세요.'); return }
+    const res = await fetch('/admin/news/sources', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: nsKind, name: nsName.trim(), domain: nsDomain.trim(), q: nsQ.trim(),
+        category: nsCategory.trim(), lang: nsLang, max_items: nsMax }),
+    })
+    const d = await res.json().catch(() => ({}))
+    if (d.status === 'success') {
+      setNsName(''); setNsDomain(''); setNsQ(''); setNsCategory('')
+      await loadSources()
+    } else alert(d.msg || '추가 실패')
+  }
+  const delSource = async (id: number) => {
+    if (!window.confirm('이 소스를 삭제할까요? (앞으로 수집하지 않습니다)')) return
+    await fetch(`/admin/news/sources/${id}`, { method: 'DELETE' })
+    await loadSources()
+  }
+  const toggleSource = async (id: number, enabled: boolean) => {
+    await fetch(`/admin/news/sources/${id}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: !enabled }),
+    })
+    await loadSources()
+  }
+
   const handleApprove = async (id: number, approver: 'ai' | 'admin') => {
     setNews(prev => prev.map(n => n.id === id ? { ...n, [approver === 'ai' ? 'ai_approved' : 'admin_approved']: !n[approver === 'ai' ? 'ai_approved' : 'admin_approved'] } : n))
     try {
@@ -361,6 +406,48 @@ export default function AdminNews() {
           {translating ? '⏳ 번역 중...' : '🌐 미번역 일괄 번역(백그라운드)'}
         </button>
         {translateMsg && <span className="small text-muted ms-2">{translateMsg}</span>}
+      </div>
+
+      <div className="mb-3">
+        <button className="btn btn-outline-secondary btn-sm" onClick={toggleSources}>
+          🗂️ 수집 소스 관리 {showSources ? '▲' : '▼'}
+        </button>
+        {showSources && (
+          <div className="card border-0 shadow-sm mt-2 p-3">
+            <div className="table-responsive" style={{ maxHeight: 300, overflowY: 'auto' }}>
+              <table className="table table-sm align-middle mb-2">
+                <thead><tr><th>구분</th><th>이름</th><th>도메인/검색어</th><th>사용</th><th>삭제</th></tr></thead>
+                <tbody>
+                  {sourceList.map(src => (
+                    <tr key={src.id}>
+                      <td className="small text-muted">{src.kind}</td>
+                      <td className="small">{src.name}</td>
+                      <td className="small text-truncate" style={{ maxWidth: 220 }}>{src.domain || src.q}</td>
+                      <td><input type="checkbox" checked={!!src.enabled} onChange={() => toggleSource(src.id, src.enabled)} /></td>
+                      <td><button className="btn btn-sm btn-outline-danger py-0 px-1" onClick={() => delSource(src.id)}>🗑️</button></td>
+                    </tr>
+                  ))}
+                  {sourceList.length === 0 && <tr><td colSpan={5} className="text-center text-muted small">소스가 없습니다.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+            <div className="d-flex gap-2 flex-wrap align-items-center border-top pt-2">
+              <select className="form-select form-select-sm" style={{ maxWidth: 110 }} value={nsKind} onChange={e => setNsKind(e.target.value)}>
+                <option value="world">world</option><option value="local">local</option>
+                <option value="official">official</option><option value="kr_yp">kr_yp</option>
+              </select>
+              <input className="form-control form-control-sm" style={{ maxWidth: 130 }} placeholder="이름" value={nsName} onChange={e => setNsName(e.target.value)} />
+              <input className="form-control form-control-sm" style={{ maxWidth: 180 }} placeholder="도메인 (예: example.com)" value={nsDomain} onChange={e => setNsDomain(e.target.value)} />
+              <input className="form-control form-control-sm" style={{ maxWidth: 170 }} placeholder="검색어(선택)" value={nsQ} onChange={e => setNsQ(e.target.value)} />
+              <input className="form-control form-control-sm" style={{ maxWidth: 110 }} placeholder="분류" value={nsCategory} onChange={e => setNsCategory(e.target.value)} />
+              <select className="form-select form-select-sm" style={{ maxWidth: 90 }} value={nsLang} onChange={e => setNsLang(e.target.value)}>
+                <option value="en">영어</option><option value="ko">한국어</option>
+              </select>
+              <input type="number" className="form-control form-control-sm" style={{ maxWidth: 80 }} min={1} max={10} value={nsMax} onChange={e => setNsMax(Number(e.target.value))} />
+              <button className="btn btn-sm btn-primary" onClick={addSource}>+ 추가</button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* URL Import + Action Buttons (hidden on 'all' tab) */}
