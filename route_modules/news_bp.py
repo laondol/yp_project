@@ -829,7 +829,7 @@ def api_news():
         q = q.filter(NewsArticle.category == sub)
     if src:
         q = q.filter(NewsArticle.source_name == src)
-    articles = q.order_by(NewsArticle.created_at.desc()).paginate(page=page, per_page=20, error_out=False)
+    articles = q.order_by(NewsArticle.created_at.desc()).paginate(page=page, per_page=21, error_out=False)
     return jsonify({
         'items': [{
             'id': a.id, 'title': a.title, 'summary': a.summary,

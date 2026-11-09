@@ -49,6 +49,8 @@ export default function YardPage() {
   const [items, setItems] = useState<YardItem[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('event')
+  const [yardPage, setYardPage] = useState(1)
+  const YARD_PAGE_SIZE = 21
   const [tab, setTab] = useState<'event' | 'bid'>('event')
   const [view, setView] = useState<'list' | 'cal'>('cal')
   const [calY, setCalY] = useState(() => new Date().getFullYear())
@@ -272,6 +274,10 @@ export default function YardPage() {
     return (b.created_at || '').localeCompare(a.created_at || '')
   }
   const displayItems = showCal ? dayItems : [...filtered].sort(byLatest)
+  const yardTotalPages = Math.max(1, Math.ceil(displayItems.length / YARD_PAGE_SIZE))
+  const pagedItems = showCal ? displayItems : displayItems.slice((yardPage - 1) * YARD_PAGE_SIZE, yardPage * YARD_PAGE_SIZE)
+
+  useEffect(() => { setYardPage(1) }, [filter, tab, view])
 
   const vote = (it: YardItem, v: 'like' | 'dislike') => {
     if (!me) { alert('로그인 후 이용하세요.'); return }
@@ -537,6 +543,24 @@ export default function YardPage() {
               )}
             </>
           )}
+          {!showCal && displayItems.length > 0 && yardTotalPages > 1 && (
+            <nav className="mt-3">
+              <ul className="pagination justify-content-center flex-nowrap" style={{ overflowX: 'auto' }}>
+                <li className={`page-item ${yardPage <= 1 ? 'disabled' : ''}`}>
+                  <button className="page-link" onClick={() => setYardPage(p => Math.max(1, p - 1))}>◀</button>
+                </li>
+                {Array.from({ length: yardTotalPages }).map((_, i) => (
+                  <li key={i} className={`page-item ${yardPage === i + 1 ? 'active' : ''}`}>
+                    <button className="page-link" onClick={() => setYardPage(i + 1)}>{i + 1}</button>
+                  </li>
+                ))}
+                <li className={`page-item ${yardPage >= yardTotalPages ? 'disabled' : ''}`}>
+                  <button className="page-link" onClick={() => setYardPage(p => Math.min(yardTotalPages, p + 1))}>▶</button>
+                </li>
+              </ul>
+            </nav>
+          )}
+
           {displayItems.length === 0 ? (
             showCal ? null : (
               <div className="text-center py-5 text-muted">
@@ -546,7 +570,7 @@ export default function YardPage() {
             )
           ) : (
             <div className="row g-3">
-              {displayItems.map(it => {
+              {pagedItems.map(it => {
             const isPast = !!it.is_past
             return (
               <div key={it.id} className="col-12 col-md-6 col-lg-4" style={{ minWidth: 340 }}>

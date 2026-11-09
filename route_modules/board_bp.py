@@ -260,7 +260,7 @@ def api_posts():
     q = Post.query
     if category: q = q.filter(Post.category == category)
     if status_filter: q = q.filter(Post.status == status_filter)
-    posts = q.order_by(Post.created_at.desc()).paginate(page=page, per_page=20, error_out=False)
+    posts = q.order_by(Post.created_at.desc()).paginate(page=page, per_page=21, error_out=False)
     items = []
     for p in posts.items:
         item = {
