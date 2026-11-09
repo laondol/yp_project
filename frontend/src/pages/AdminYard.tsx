@@ -408,7 +408,7 @@ export default function AdminYard() {
           <>
           <div className="d-flex flex-wrap gap-3">
             {pendingSlice.map(p => (
-              <div key={p.id} style={{ flex: '0 1 340px', maxWidth: 340, minWidth: 280 }}>
+              <div key={p.id} style={{ flex: '0 0 340px', maxWidth: '100%' }}>
                 <div className="card border-0 shadow-sm h-100" style={{ borderRadius: 16 }}>
                   <div className="card-body p-3 d-flex flex-column">
                     <div className="small text-muted mb-1">#{p.db_id} · 수집 {formatKST(p.created_at, { month: '2-digit', day: '2-digit' })}</div>
@@ -512,7 +512,7 @@ export default function AdminYard() {
           <>
           <div className="d-flex flex-wrap gap-3">
             {approvedSlice.map(p => (
-              <div key={p.id} style={{ flex: '0 1 340px', maxWidth: 340, minWidth: 280 }}>
+              <div key={p.id} style={{ flex: '0 0 340px', maxWidth: '100%' }}>
                 <div className="card border-0 shadow-sm h-100" style={{ borderRadius: 16 }}>
                   <div className="card-body p-3 d-flex flex-column">
                     <div className="small text-muted mb-1">#{p.db_id} · 등록 {formatKST(p.created_at, { month: '2-digit', day: '2-digit' })}</div>
