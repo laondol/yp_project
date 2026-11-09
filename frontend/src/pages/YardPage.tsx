@@ -638,12 +638,8 @@ export default function YardPage() {
                     )}
 
                     {/* 1차 일정 + 내일정 버튼 (반복 일정이 없을 때만 버튼 표시) */}
-                    {(it.is_paid || it.price || it.category === 'event') && (
-                      <div className="small mb-1">
-                        {it.is_paid || it.price
-                          ? `🎟️ 유료${it.price ? ' ' + it.price : ''}`
-                          : '🎟️ 무료'}
-                      </div>
+                    {(it.is_paid || it.price) && (
+                      <div className="small mb-1">🎟️ 유료{it.price ? ' ' + it.price : ''}</div>
                     )}
 
                     {it.event_date_display && (

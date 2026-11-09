@@ -206,10 +206,22 @@ export default function AdminYard() {
     if (!end) return false
     return new Date(end).getTime() < Date.now()
   }
-  const approvedFiltered = approved.filter(p => approvedTab === 'past' ? isPastItem(p) : !isPastItem(p))
-  const pendingPages = Math.ceil(pending.length / PAGE_SIZE)
+  const byEventAsc = (a: YardAdminItem, b: YardAdminItem) => {
+    const ad = a.event_date_iso || '', bd = b.event_date_iso || ''
+    if (ad && bd) return ad.localeCompare(bd)
+    if (ad) return -1
+    if (bd) return 1
+    return (a.created_at || '').localeCompare(b.created_at || '')
+  }
+  const byEventDesc = (a: YardAdminItem, b: YardAdminItem) => byEventAsc(b, a)
+  // 승인 대기: 수집된 순서(오래된 것 먼저)
+  const pendingSorted = [...pending].sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''))
+  const approvedFiltered = approved
+    .filter(p => approvedTab === 'past' ? isPastItem(p) : !isPastItem(p))
+    .sort(approvedTab === 'past' ? byEventDesc : byEventAsc)
+  const pendingPages = Math.ceil(pendingSorted.length / PAGE_SIZE)
   const approvedPages = Math.ceil(approvedFiltered.length / APPROVED_PAGE_SIZE)
-  const pendingSlice = pending.slice((pendingPage - 1) * PAGE_SIZE, pendingPage * PAGE_SIZE)
+  const pendingSlice = pendingSorted.slice((pendingPage - 1) * PAGE_SIZE, pendingPage * PAGE_SIZE)
   const approvedSlice = approvedFiltered.slice((approvedPage - 1) * APPROVED_PAGE_SIZE, approvedPage * APPROVED_PAGE_SIZE)
 
   const [winWidth, setWinWidth] = useState(window.innerWidth)
