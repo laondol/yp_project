@@ -91,6 +91,7 @@ export default function AdminYard() {
   // 🔁 반복일정 빠른 등록
   const [rTitle, setRTitle] = useState('')
   const [rAuthor, setRAuthor] = useState('')
+  const [rOutside, setROutside] = useState(false)
   const [rPlace, setRPlace] = useState('')
   const [rType, setRType] = useState('')           // weekly | monthly_week | monthly_day | tbd
   const [rDays, setRDays] = useState<number[]>([]) // 요일 인덱스 (0=월)
@@ -108,6 +109,7 @@ export default function AdminYard() {
   const APPROVED_PAGE_SIZE = 21
   const [pendingPage, setPendingPage] = useState(1)
   const [approvedPage, setApprovedPage] = useState(1)
+  const [approvedTab, setApprovedTab] = useState<'current' | 'past'>('current')
 
   const handleRepeatCreate = async () => {
     if (!rTitle.trim()) { alert('제목을 입력하세요.'); return }
@@ -119,7 +121,7 @@ export default function AdminYard() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title: rTitle.trim(), author_name: rAuthor.trim(),
-          event_place: rPlace.trim(), contact: rContact.trim(),
+          event_place: rPlace.trim(), is_outside: rOutside, contact: rContact.trim(),
           source_url: rLink.trim(),
           repeat_type: rType, repeat_weekdays: weekdaysMask,
           repeat_weeks: rWeeks.join(','), repeat_week_of_month: rWeeks[0] || 0, repeat_days: rDates,
@@ -197,10 +199,16 @@ export default function AdminYard() {
 
   const pending = items.filter(i => !i.is_approved)
   const approved = items.filter(i => i.is_approved)
+  const isPastItem = (p: YardAdminItem) => {
+    const end = p.event_end_iso || p.event_date_iso
+    if (!end) return false
+    return new Date(end).getTime() < Date.now()
+  }
+  const approvedFiltered = approved.filter(p => approvedTab === 'past' ? isPastItem(p) : !isPastItem(p))
   const pendingPages = Math.ceil(pending.length / PAGE_SIZE)
-  const approvedPages = Math.ceil(approved.length / APPROVED_PAGE_SIZE)
+  const approvedPages = Math.ceil(approvedFiltered.length / APPROVED_PAGE_SIZE)
   const pendingSlice = pending.slice((pendingPage - 1) * PAGE_SIZE, pendingPage * PAGE_SIZE)
-  const approvedSlice = approved.slice((approvedPage - 1) * APPROVED_PAGE_SIZE, approvedPage * APPROVED_PAGE_SIZE)
+  const approvedSlice = approvedFiltered.slice((approvedPage - 1) * APPROVED_PAGE_SIZE, approvedPage * APPROVED_PAGE_SIZE)
 
   const [winWidth, setWinWidth] = useState(window.innerWidth)
   useEffect(() => {
@@ -294,6 +302,9 @@ export default function AdminYard() {
             value={rAuthor} onChange={e => setRAuthor(e.target.value)} />
           <input className="form-control" style={{ maxWidth: 240 }} placeholder="📍 장소"
             value={rPlace} onChange={e => setRPlace(e.target.value)} />
+          <label className="small align-self-center">
+            <input type="checkbox" checked={rOutside} onChange={e => setROutside(e.target.checked)} /> 🌏 양평외
+          </label>
         </div>
         <select className="form-select form-select-sm mb-1" value={rType}
           onChange={e => setRType(e.target.value)}>
@@ -465,7 +476,15 @@ export default function AdminYard() {
 
       {/* 공개중 */}
       <div className="card border-0 shadow-sm mb-4 p-3" style={{ borderRadius: 16, borderLeft: '4px solid #27ae60' }}>
-        <h6 className="fw-bold mb-3">✅ 마당에 공개 중 <span className="badge bg-success">{approved.length}</span></h6>
+        <div className="d-flex justify-content-between align-items-center mb-3">
+          <h6 className="fw-bold mb-0">✅ 마당에 공개 중 <span className="badge bg-success">{approvedFiltered.length}</span></h6>
+          <div className="btn-group">
+            <button className={`btn btn-sm ${approvedTab === 'current' ? 'btn-success' : 'btn-outline-success'}`}
+              onClick={() => { setApprovedTab('current'); setApprovedPage(1) }}>공개중</button>
+            <button className={`btn btn-sm ${approvedTab === 'past' ? 'btn-secondary' : 'btn-outline-secondary'}`}
+              onClick={() => { setApprovedTab('past'); setApprovedPage(1) }}>지난거</button>
+          </div>
+        </div>
         {loading ? (
           <div className="text-center py-3 text-muted"><div className="spinner-border spinner-border-sm" /></div>
         ) : approved.length === 0 ? (

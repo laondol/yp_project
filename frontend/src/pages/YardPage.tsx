@@ -35,6 +35,8 @@ interface YardItem {
   distance_km?: number | null
   created_at: string
   category?: string  // event(행사/소식), notice(공지), bid(입찰)
+  is_outside?: boolean
+  transit_min?: number | null
 }
 
 interface YardComment {
@@ -51,7 +53,7 @@ export default function YardPage() {
   const [filter, setFilter] = useState('event')
   const [yardPage, setYardPage] = useState(1)
   const YARD_PAGE_SIZE = 21
-  const [tab, setTab] = useState<'event' | 'bid'>('event')
+  const [tab, setTab] = useState<'event' | 'bid' | 'outside'>('event')
   const [view, setView] = useState<'list' | 'cal'>('cal')
   const [calY, setCalY] = useState(() => new Date().getFullYear())
   const [calM, setCalM] = useState(() => new Date().getMonth())
@@ -224,6 +226,7 @@ export default function YardPage() {
   }
 
   const filtered = items.filter(i => {
+    if (tab === 'outside') return !!i.is_outside && !i.is_past
     if (tab === 'bid') return (i.category === 'bid' || i.category === 'notice') && !i.is_past
     if (i.category === 'bid' || i.category === 'notice') return false
     return filter === 'event' ? (i.category === 'event' || i.kind === 'event') && !i.is_past :
@@ -282,7 +285,18 @@ export default function YardPage() {
     if (bd) return 1
     return (b.created_at || '').localeCompare(a.created_at || '')
   }
-  const displayItems = showCal ? dayItems : [...filtered].sort(filter === 'past' ? byLatest : byDateAsc)
+  // 양평외: 같은 날짜면 양평에서 대중교통 소요시간이 짧은 순
+  const byOutsideTransit = (a: YardItem, b: YardItem) => {
+    const ad = a.event_date_iso || ''
+    const bd = b.event_date_iso || ''
+    if (ad && bd && ad.slice(0, 10) === bd.slice(0, 10)) {
+      return (a.transit_min ?? 9999) - (b.transit_min ?? 9999)
+    }
+    return byDateAsc(a, b)
+  }
+  const displayItems = showCal
+    ? dayItems
+    : [...filtered].sort(tab === 'outside' ? byOutsideTransit : (filter === 'past' ? byLatest : byDateAsc))
   const yardTotalPages = Math.max(1, Math.ceil(displayItems.length / YARD_PAGE_SIZE))
   const pagedItems = showCal ? displayItems : displayItems.slice((yardPage - 1) * YARD_PAGE_SIZE, yardPage * YARD_PAGE_SIZE)
 
@@ -459,6 +473,12 @@ export default function YardPage() {
           </button>
         </li>
         <li className="nav-item">
+          <button className={`nav-link ${tab === 'outside' ? 'active fw-bold' : ''}`}
+            onClick={() => { setTab('outside'); setFilter('all'); setView('list') }}>
+            🌏 양평외
+          </button>
+        </li>
+        <li className="nav-item">
           <button className={`nav-link ${tab === 'bid' ? 'active fw-bold' : ''}`}
             onClick={() => { setTab('bid'); setFilter('all') }}>
             📋 입찰·공지
@@ -586,7 +606,7 @@ export default function YardPage() {
                 <div className="card border-0 shadow-sm h-100" style={{ borderRadius: 16 }}>
                   <div className="card-body p-3 d-flex flex-column">
                     {/* 제목 (맨위) */}
-                    <h6 className="fw-bold mb-2">{it.title}</h6>
+                    <h6 className="fw-bold mb-2">{it.is_outside && <span className="badge bg-info text-dark me-1">양평외</span>}{it.title}</h6>
 
                     {/* ⭐ 지나간 행사 배지 + 후기 (클릭 시 공유마당에서 후기 목록 표시) */}
                     {isPast && (

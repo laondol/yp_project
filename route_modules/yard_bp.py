@@ -263,6 +263,20 @@ def api_yard_reviews():
     return jsonify({'items': out})
 
 
+def _transit_min_from_yp(p, gps_lat=None, gps_lng=None):
+    """양평(또는 현재 위치) → 행사장 대중교통 소요시간 추정(분)"""
+    try:
+        from services.transit import estimate_transit_time_rough
+        if not (p.latitude and p.longitude):
+            return None
+        if gps_lat and gps_lng:
+            return int(estimate_transit_time_rough(gps_lat, gps_lng, p.latitude, p.longitude))
+        # 기준점: 양평읍 중심
+        return int(estimate_transit_time_rough(37.485, 127.54, p.latitude, p.longitude))
+    except Exception:
+        return None
+
+
 @yard_bp.route('/api/yard', methods=['GET'])
 def api_yard_list():
     """마당 목록(일반 회원): 승인된 소식 + 마을행사.
@@ -315,6 +329,8 @@ def api_yard_list():
             'like_count': p.like_count or 0, 'dislike_count': p.dislike_count or 0,
             'event_date_display': _event_display(p),
             'event_place': p.event_place or '',
+            'is_outside': bool(p.is_outside),
+            'transit_min': _transit_min_from_yp(p, gps_lat, gps_lng),
             'apply_display': _apply_display(p),
             'apply_allday': bool(p.apply_allday),
             'contact': p.contact or '',
@@ -513,6 +529,7 @@ def _save_yard(f, p):
     p.event_end = event_end
     p.is_allday = is_allday
     p.event_place = event_place or None
+    p.is_outside = bool(f.get('is_outside'))
     # 반복 일정
     p.repeat_type = (str(f.get('repeat_type') or '')).strip()[:20] or None
     p.repeat_weekdays = int(f.get('repeat_weekdays') or 0) or None
@@ -605,6 +622,7 @@ def api_yard_admin_list():
         'repeat_end': p.repeat_end_time.strftime('%H:%M') if p.repeat_end_time else '',
         'extra_schedules': _post_schedules(p.id),
             'event_place': p.event_place or '',
+            'is_outside': bool(p.is_outside),
             'category': p.category or 'event',
             'is_approved': bool(p.is_approved), 'is_active': bool(p.is_active),
             'created_at': p.created_at.isoformat() if p.created_at else '',
