@@ -44,6 +44,24 @@ def _source_from_title(title, fallback='네이버'):
     return m.group(1).strip() if m else fallback
 
 
+VIDEO_BLOCK_HOSTS = (
+    'youtube.com', 'youtu.be', 'vimeo.com', 'tiktok.com', 'instagram.com',
+    'facebook.com', 'fb.watch', 'dailymotion.com', 'twitch.tv', 'naver.com/video',
+    'tv.kakao.com', 'afreecatv.com', 'porn', 'xvideos', 'xnxx',
+)
+VIDEO_BLOCK_EXTS = ('.mp4', '.m3u8', '.webm', '.avi', '.mov', '.mkv', '.flv')
+
+
+def _is_video_url(url):
+    """동영상/비텍스트 링크 차단"""
+    u = (url or '').lower()
+    if not u:
+        return False
+    if any(h in u for h in VIDEO_BLOCK_HOSTS):
+        return True
+    return any(u.split('?')[0].endswith(e) for e in VIDEO_BLOCK_EXTS)
+
+
 def _needs_translation(text):
     """한글 비율이 낮으면 번역 대상 (영어·중국어·일본어·러시아어 등)"""
     t = text or ''
@@ -188,7 +206,6 @@ WORLD_SOURCES = [
     {"name": "밴쿠버조선(캐나다)", "domain": "vanchosun.com", "lang": "ko", "max_items": 3},
     # 키워드 기반 교포 소식 (전용 매체가 없는 지역)
     {"name": "ABC호주", "domain": "abc.net.au", "max_items": 3},
-    {"name": "Yle(핀란드)", "domain": "yle.fi", "max_items": 3},
     {"name": "NRK(노르웨이)", "domain": "nrk.no", "max_items": 3},
     {"name": "TASS(러시아)", "domain": "tass.com", "max_items": 3},
     {"name": "아프리카 교포(에티오피아·탄자니아)", "q": "에티오피아 한인 OR 탄자니아 한인 OR 아프리카 교포", "lang": "ko", "max_items": 3},
@@ -214,7 +231,7 @@ WORLD_CATEGORY_BY_SOURCE = {
     '재외동포신문': '미국', '미주중앙일보': '미국', '미주한국일보': '미국', '월드코리안': '미국',
     '재일민단': '일본', '흑룡강신문(중국동포)': '중국', '밴쿠버조선(캐나다)': '캐나다',
     '중남미 교포': '중남미', '호주 교포': '호주',
-    'ABC호주': '호주', 'Yle(핀란드)': '북유럽', 'NRK(노르웨이)': '북유럽', 'TASS(러시아)': '러시아',
+    'ABC호주': '호주', 'NRK(노르웨이)': '북유럽', 'TASS(러시아)': '러시아',
     '대한뉴스(KTV)': '대한민국뉴스', '아리랑TV': '대한민국뉴스',
 }
 
@@ -311,7 +328,7 @@ def collect_labor_news():
                     source_url=url,
                     source_name=source['name'],
                     category="정책정보",
-                    is_selected=True,
+                    is_selected=False,
                     is_ai_generated=True,
                     ai_reason=f"자동 수집: {source['name']} ({now.strftime('%m/%d')})",
                     created_by=None,
@@ -385,7 +402,7 @@ def collect_labor_news_rss():
                     source_url=link,
                     source_name=source['name'],
                     category="정책정보",
-                    is_selected=True,
+                    is_selected=False,
                     is_ai_generated=True,
                     ai_reason=f"자동 수집(RSS): {source['name']} ({now.strftime('%m/%d')})",
                     created_by=None,
@@ -450,7 +467,7 @@ def collect_kr_yp_news_rss():
                     if len(title) < 5:
                         continue
 
-                    if _news_url_blocked(link):
+                    if _news_url_blocked(link) or _is_video_url(link):
                         continue
                     existing = NewsArticle.query.filter_by(source_url=link).first()
                     if existing:
@@ -465,10 +482,9 @@ def collect_kr_yp_news_rss():
                         content=f"<p>{desc[:1000]}</p>",
                         source_url=link,
                         category=_kr_category(title, desc),
-                        is_selected=True,
+                        is_selected=False,
                         is_ai_generated=True,
                         kr_yp_ai_approved=True,
-                        kr_yp_admin_approved=True,
                         ai_reason=f"자동수집(RSS): {source['name']} ({now.strftime('%m/%d')})",
                     )
                     db.session.add(article)
@@ -572,7 +588,7 @@ def collect_kr_yp_local_rss():
                 if _is_junk_title(title):
                     continue
 
-                if _news_url_blocked(link):
+                if _news_url_blocked(link) or _is_video_url(link):
                     continue
                 existing = NewsArticle.query.filter_by(source_url=link).first()
                 if existing:
@@ -592,10 +608,9 @@ def collect_kr_yp_local_rss():
                     content=f"<p>{desc[:1000]}</p>",
                     source_url=link,
                     category=_kr_category(title, desc),
-                    is_selected=True,
+                    is_selected=False,
                     is_ai_generated=True,
                     kr_yp_ai_approved=True,
-                    kr_yp_admin_approved=True,
                     ai_reason=f"자동수집(RSS·지역언론): {source['name']} ({now.strftime('%m/%d')})",
                 )
                 db.session.add(article)
@@ -688,7 +703,7 @@ def collect_kr_yp_news():
                 if not title or len(title) < 5:
                     continue
 
-                if _news_url_blocked(url):
+                if _news_url_blocked(url) or _is_video_url(url):
                     continue
                 existing = NewsArticle.query.filter_by(source_url=url).first()
                 if existing:
@@ -706,10 +721,9 @@ def collect_kr_yp_news():
                     content=f"<p>{desc[:1000]}</p>",
                     source_url=url,
                     category=category,
-                    is_selected=True,
+                    is_selected=False,
                     is_ai_generated=True,
                     kr_yp_ai_approved=True,
-                    kr_yp_admin_approved=True,
                     ai_reason=f"자동수집: {sq} ({now.strftime('%m/%d')})",
                 )
                 db.session.add(article)
@@ -785,7 +799,7 @@ def collect_world_news(categories=None):
                 if len(title) < 5:
                     continue
 
-                if _news_url_blocked(link):
+                if _news_url_blocked(link) or _is_video_url(link):
                     continue
                 existing = NewsArticle.query.filter_by(source_url=link).first()
                 if existing:
@@ -829,10 +843,9 @@ def collect_world_news(categories=None):
                     content=art_content,
                     source_url=link,
                     category=WORLD_CATEGORY_BY_SOURCE.get(source['name'], '세계뉴스'),
-                    is_selected=True,
+                    is_selected=False,
                     is_ai_generated=True,
                     world_ai_approved=True,
-                    world_admin_approved=True,
                     ai_reason=f"자동수집: {source['name']} ({now.strftime('%m/%d')})",
                 )
                 db.session.add(article)
@@ -887,7 +900,7 @@ def collect_world_news(categories=None):
                     if not title or len(title) < 5:
                         continue
 
-                    if _news_url_blocked(url):
+                    if _news_url_blocked(url) or _is_video_url(url):
                         continue
                     existing = NewsArticle.query.filter_by(source_url=url).first()
                     if existing:
@@ -904,10 +917,9 @@ def collect_world_news(categories=None):
                         content=f"<p>{desc[:1000]}</p>",
                         source_url=url,
                         category=category,
-                        is_selected=True,
+                        is_selected=False,
                         is_ai_generated=True,
                         kr_yp_ai_approved=True,
-                        kr_yp_admin_approved=True,
                         ai_reason=f"자동수집: 네이버 국내뉴스 ({now.strftime('%m/%d')})",
                     )
                     db.session.add(article)

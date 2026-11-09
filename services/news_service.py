@@ -210,9 +210,12 @@ def ai_triage_pending_news(batch_limit=60):
         a.ai_score = score
         base = (a.ai_reason or "").strip()
         a.ai_reason = f"[선별 {score}] {reason}" + (f" | {base}" if base else "")
+        if score >= 60:
+            a.is_selected = True
+            a.kr_yp_admin_approved = True
         n += 1
     db.session.commit()
-    print(f"[TRIAGE] AI 선별 완료: {n}건 채점 (대상 {len(pending)}건)")
+    print(f"[TRIAGE] AI 선별 완료: {n}건 채점 (60점 이상 자동게재)")
     return n
 
 def cleanup_unselected_news(days=30):
@@ -341,9 +344,13 @@ def ai_triage_world_news(batch_limit=100):
         a.ai_score = score
         base = (a.ai_reason or "").strip()
         a.ai_reason = f"[선별 {score}] {reason}" + (f" | {base}" if base else "")
+        # 60점 이상만 자동 게재, 미만은 관리자 확인 후 게재
+        if score >= 60:
+            a.is_selected = True
+            a.world_admin_approved = True
         n += 1
     db.session.commit()
-    print(f"[TRIAGE_WORLD] AI 선별 완료: {n}건 채점 (대상 {len(pending)}건)")
+    print(f"[TRIAGE_WORLD] AI 선별 완료: {n}건 채점 (60점 이상 자동게재)")
     return n
 
 def ai_summarize_url(text):
