@@ -104,7 +104,7 @@ export default function AdminYard() {
   const [rMsg, setRMsg] = useState('')
   const [rMsgOk, setRMsgOk] = useState(false)
 
-  const PAGE_SIZE = 10
+  const PAGE_SIZE = 21
   const APPROVED_PAGE_SIZE = 21
   const [pendingPage, setPendingPage] = useState(1)
   const [approvedPage, setApprovedPage] = useState(1)
@@ -376,9 +376,9 @@ export default function AdminYard() {
           <div className="text-center text-muted small py-2">승인 대기 중인 소식이 없습니다.</div>
         ) : (
           <>
-          <div className="row g-3">
+          <div className="d-flex flex-wrap gap-3">
             {pendingSlice.map(p => (
-              <div key={p.id} className="col-12 col-md-6 col-lg-4" style={{ minWidth: 340 }}>
+              <div key={p.id} style={{ flex: '1 1 340px', maxWidth: '100%', minWidth: 300 }}>
                 <div className="card border-0 shadow-sm h-100" style={{ borderRadius: 16 }}>
                   <div className="card-body p-3 d-flex flex-column">
                     <div className="small text-muted mb-1">#{p.db_id} · 수집 {formatKST(p.created_at, { month: '2-digit', day: '2-digit' })}</div>
@@ -472,9 +472,9 @@ export default function AdminYard() {
           <div className="text-center text-muted small py-2">공개 중인 소식이 없습니다.</div>
         ) : (
           <>
-          <div className="row g-3">
+          <div className="d-flex flex-wrap gap-3">
             {approvedSlice.map(p => (
-              <div key={p.id} className="col-12 col-md-6 col-lg-4" style={{ minWidth: 340 }}>
+              <div key={p.id} style={{ flex: '1 1 340px', maxWidth: '100%', minWidth: 300 }}>
                 <div className="card border-0 shadow-sm h-100" style={{ borderRadius: 16 }}>
                   <div className="card-body p-3 d-flex flex-column">
                     <div className="small text-muted mb-1">#{p.db_id} · 등록 {formatKST(p.created_at, { month: '2-digit', day: '2-digit' })}</div>
