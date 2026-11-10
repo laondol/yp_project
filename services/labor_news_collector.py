@@ -548,21 +548,48 @@ def _naver_verify_pubdate(title):
         sec = current_app.config.get('NAVER_SEARCH_CLIENT_SECRET', '')
         if not cid or not sec:
             return None
-        q = re.sub(r'<[^>]+>', '', title or '')[:100]
+        q = re.sub(r'<[^>]+>', '', title or '')
+        q = re.sub(r'\s+-\s+[^-]{1,30}$', '', q)   # " - 매체명" 제거
+        q = re.sub(r'\s+', ' ', q).strip()[:100]
         if not q:
             return None
         r = requests.get(
             "https://openapi.naver.com/v1/search/news.json",
             headers={"X-Naver-Client-Id": cid, "X-Naver-Client-Secret": sec},
-            params={"query": q, "display": 10, "sort": "date"}, timeout=10,
+            params={"query": q, "display": 10, "sort": "sim"}, timeout=10,
         )
         if r.status_code != 200:
             return None
-        for it in r.json().get('items', []):
+        def _match(items):
+            key = re.sub(r'[^가-힣A-Za-z0-9]', '', q)[:20]
+            if not key:
+                return None
+            for it in items:
+                t = re.sub(r'<[^>]+>', '', it.get('title', ''))
+                k = re.sub(r'[^가-힣A-Za-z0-9]', '', t)
+                if key in k or (k and k[:20] == key):
+                    return parsedate_to_datetime(it.get('pubDate', ''))
+            return None
+
+        d = _match(r.json().get('items', []))
+        if d is not None:
+            return d
+        # 2차: 특수문자 제거 후 핵심 키워드로 재검색
+        q2 = re.sub(r'[^가-힣A-Za-z0-9 ]', ' ', q)
+        q2 = ' '.join([w for w in q2.split() if len(w) >= 2][:6])
+        if not q2 or q2 == q:
+            return None
+        r2 = requests.get(
+            "https://openapi.naver.com/v1/search/news.json",
+            headers={"X-Naver-Client-Id": cid, "X-Naver-Client-Secret": sec},
+            params={"query": q2, "display": 10, "sort": "sim"}, timeout=10,
+        )
+        if r2.status_code != 200:
+            return None
+        for it in r2.json().get('items', []):
             t = re.sub(r'<[^>]+>', '', it.get('title', ''))
-            if not t:
-                continue
-            if q[:20] in t or t[:20] in q:
+            nk = re.sub(r'[^가-힣A-Za-z0-9]', '', q2)[:14]
+            if nk and nk in re.sub(r'[^가-힣A-Za-z0-9]', '', t):
                 return parsedate_to_datetime(it.get('pubDate', ''))
         return None
     except Exception:
