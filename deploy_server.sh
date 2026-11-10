@@ -1,17 +1,17 @@
 #!/bin/bash
 # ============================================================
-# 양평서버 안전 배포 스크립트 (v3)
+# 양평서버 안전 배포 스크립트 (v4)
 # 사용법 (서버): bash deploy_server.sh [옵션]
-#   --dry-run        점검만 (반영 안 함)
-#   --no-build       프론트 빌드 생략
-#   --force          변경 없어도 강제 배포
-#   --skip-db        DB 백업 생략
+#   --dry-run     점검만 (반영 안 함)
+#   --no-build    프론트 빌드 생략
+#   --force       변경 없어도 강제 배포
+#   --skip-db     DB 백업 생략
 #
-# 안전 원칙:
-#   1) 빌드 실패 → 서비스 그대로 유지하고 중단
-#   2) 코드 반영 후 반드시 "실행 중 코드" 검증 (파일만 바뀌고 메모리는 옛 코드인 경우 차단)
-#   3) 검증 실패 → 이전 커밋 + 이전 dist로 자동 롤백
-#   4) 모든 로그 파일 저장
+# 핵심: 커밋을 여러 번 쌓아도 "한 번의 pull"로 모두 반영되도록:
+#   1) origin/dev 최신으로 강제 동기화 (모든 커밋 반영)
+#   2) 프론트 빌드/복사 (git에 없는 dist 반영)
+#   3) 재기동 후 /api/version 의 커밋 == HEAD 인지 확인
+#   4) 불일치 시 컨테이너 강제 재생성, 그래도 실패하면 자동 롤백
 # ============================================================
 set -Eeuo pipefail
 cd "$(dirname "$0")"
@@ -33,11 +33,10 @@ for a in "$@"; do
 done
 
 echo "============================================================"
-echo " 양평서버 안전 배포 v3   $(date '+%Y-%m-%d %H:%M:%S')"
+echo " 양평서버 안전 배포 v4   $(date '+%Y-%m-%d %H:%M:%S')"
 echo " 로그: $LOG"
 echo "============================================================"
 
-# ---------------- 유틸 ----------------
 http_code() { curl -s -o /dev/null -m 5 -w "%{http_code}" "$1" || echo "000"; }
 
 wait_http() { # url tries label
@@ -54,31 +53,9 @@ wait_http() { # url tries label
   return 1
 }
 
-runtime_ok() {
-  # 실행 중 코드가 최신인지 확인 (파일이 아니라 프로세스 기준)
-  docker exec yp_flask python -c "
-import inspect, sys
-import route_modules.news_bp as m
-src = inspect.getsource(m.api_news)
-ok_pg = 'per_page=21' in src.replace(' ', '')
-import run
-has_tr = any('translate-untranslated' in str(r) for r in run.app.url_map.iter_rules())
-print('  실행코드 확인 → 21건:', ok_pg, '/ 번역라우트:', has_tr)
-sys.exit(0 if (ok_pg and has_tr) else 1)
-" >/dev/null 2>&1
-}
-
-verify_runtime() {
-  echo "  실행 중 코드 검증..."
-  if runtime_ok; then
-    docker exec yp_flask python -c "
-import inspect
-import route_modules.news_bp as m
-print('  ok: per_page=21', 'per_page=21' in inspect.getsource(m.api_news).replace(' ',''))
-" 2>/dev/null || true
-    return 0
-  fi
-  return 1
+running_commit() {
+  curl -s -m 5 "http://127.0.0.1:5000/api/version" 2>/dev/null \
+    | python3 -c "import sys,json;print(json.load(sys.stdin).get('commit',''))" 2>/dev/null || true
 }
 
 rollback() {
@@ -115,7 +92,7 @@ PREV_HEAD=$(git rev-parse HEAD)
 DIST_BACKUP=""
 echo "  현재 HEAD: $PREV_HEAD"
 
-# ---------------- 2) 코드 확인 ----------------
+# ---------------- 2) 원격 확인 ----------------
 echo "[2/9] 원격 코드 확인"
 git fetch origin dev
 REMOTE_HEAD=$(git rev-parse origin/dev)
@@ -126,9 +103,10 @@ if [ "$PREV_HEAD" = "$REMOTE_HEAD" ] && [ "$FORCE" = "0" ]; then
   exit 0
 fi
 
-CHANGED=$(git diff --name-only "$PREV_HEAD..$REMOTE_HEAD" || true)
-echo "  변경 파일:"; echo "$CHANGED" | sed 's/^/    /' | head -40
+echo "  반영될 커밋:"
+git log --oneline "$PREV_HEAD..$REMOTE_HEAD" | sed 's/^/    /' | head -30
 
+CHANGED=$(git diff --name-only "$PREV_HEAD..$REMOTE_HEAD" || true)
 NEED_RESTART=0
 echo "$CHANGED" | grep -qE '(\.py$|requirements\.txt$|Dockerfile)' && NEED_RESTART=1
 FRONT_CHANGED=0
@@ -140,14 +118,14 @@ if [ "$DRY" = "1" ]; then
   exit 0
 fi
 
-# ---------------- 3) 프론트 빌드 ----------------
+# ---------------- 3) 프론트 빌드 (서비스 무중단) ----------------
 echo "[3/9] 프론트엔드 빌드"
 if [ "$NO_BUILD" = "1" ]; then
   echo "  --no-build: 생략"
 elif [ "$FRONT_CHANGED" = "0" ] && [ "$FORCE" = "0" ]; then
   echo "  프론트 변경 없음 → 생략"
 else
-  command -v npm >/dev/null || { echo "❌ npm 없음 → WSL에서 빌드 후 dist 복사"; exit 1; }
+  command -v npm >/dev/null || { echo "❌ npm 없음 → WSL에서 빌드 후 dist 복사 필요 (서비스는 그대로)"; exit 1; }
   if ! ( cd frontend && npm run build ); then
     echo "❌ 빌드 실패 → 서비스는 그대로 유지 (중단)"; exit 1
   fi
@@ -180,17 +158,21 @@ if [ -d frontend/dist ]; then
   echo "  dist 컨테이너 반영"
 fi
 
-# ---------------- 6) 재기동 + 실행코드 검증 ----------------
+# ---------------- 6) 재기동 + 실행 커밋 검증 ----------------
 echo "[6/9] 서비스 재기동"
 if [ "$NEED_RESTART" = "1" ]; then
   docker restart yp_flask
-  sleep 8
-  if ! verify_runtime; then
-    echo "  ⚠️ 재시작만으로 반영 안 됨 → 컨테이너 재생성"
-    docker compose up -d flask_app >/dev/null 2>&1 || docker restart yp_flask
+  sleep 10
+  RUNNING=$(running_commit)
+  echo "  실행 중 커밋: ${RUNNING:-응답없음} (기대: $(git rev-parse --short HEAD))"
+  if [ "$RUNNING" != "$(git rev-parse --short HEAD)" ]; then
+    echo "  ⚠️ 실행 코드가 최신이 아님 → 컨테이너 강제 재생성"
+    docker compose up -d --force-recreate flask_app >/dev/null 2>&1 || docker restart yp_flask
     sleep 12
-    if ! verify_runtime; then
-      echo "❌ 실행 코드가 최신이 아님"
+    RUNNING=$(running_commit)
+    echo "  재확인 커밋: ${RUNNING:-응답없음}"
+    if [ "$RUNNING" != "$(git rev-parse --short HEAD)" ]; then
+      echo "❌ 실행 코드 반영 실패"
       rollback
       echo "배포 중단 (로그: $LOG)"; exit 1
     fi
@@ -208,7 +190,6 @@ FAIL=0
 wait_http "http://127.0.0.1:5000/" 20 "사이트" || FAIL=1
 wait_http "http://127.0.0.1:5000/yard" 15 "마당" || FAIL=1
 wait_http "http://127.0.0.1:5000/api/news?category=world" 15 "소식 API" || FAIL=1
-
 if [ "$FAIL" = "1" ]; then
   rollback
   echo "배포 중단 (로그: $LOG)"; exit 1
