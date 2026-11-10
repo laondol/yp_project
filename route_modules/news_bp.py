@@ -2,7 +2,7 @@ import os
 import requests
 from flask import Blueprint, render_template, request, redirect, url_for, jsonify, session, current_app, send_file
 from datetime import datetime, timezone
-from sqlalchemy import or_
+from sqlalchemy import or_, func
 from models import db, NewsArticle, NewsComment, NewsRecommendation, NewsVote, Post, User, Message, LaborNewsArticle, LaborNewsVote, NewsSource
 from services.ai_service import call_ai_judge
 from services.point_service import add_points
@@ -892,7 +892,8 @@ def api_news():
         q = q.filter(NewsArticle.category == sub)
     if src:
         q = q.filter(NewsArticle.source_name == src)
-    articles = q.order_by(NewsArticle.created_at.desc()).paginate(page=page, per_page=21, error_out=False)
+    _order_dt = func.coalesce(NewsArticle.published_at, NewsArticle.created_at)
+    articles = q.order_by(_order_dt.desc(), NewsArticle.source_name.asc(), NewsArticle.id.desc()).paginate(page=page, per_page=21, error_out=False)
     return jsonify({
         'items': [{
             'id': a.id, 'title': a.title, 'summary': a.summary,
