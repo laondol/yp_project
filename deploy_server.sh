@@ -111,6 +111,11 @@ NEED_RESTART=0
 echo "$CHANGED" | grep -qE '(\.py$|requirements\.txt$|Dockerfile)' && NEED_RESTART=1
 FRONT_CHANGED=0
 echo "$CHANGED" | grep -qE '^frontend/' && FRONT_CHANGED=1
+if [ "$FORCE" = "1" ]; then
+  NEED_RESTART=1
+  FRONT_CHANGED=1
+  echo "  --force: 빌드·재시작 강제"
+fi
 echo "  파이썬 변경: $NEED_RESTART / 프론트 변경: $FRONT_CHANGED"
 
 if [ "$DRY" = "1" ]; then
