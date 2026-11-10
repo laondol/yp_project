@@ -900,7 +900,13 @@ def api_news():
     if src:
         q = q.filter(NewsArticle.source_name == src)
     _order_dt = func.coalesce(NewsArticle.published_at, NewsArticle.created_at)
-    articles = q.order_by(_order_dt.desc(), NewsArticle.source_name.asc(), NewsArticle.id.desc()).paginate(page=page, per_page=21, error_out=False)
+    _order_day = func.date(_order_dt)
+    articles = q.order_by(
+        _order_day.desc(),          # 1) 발행 날짜(일 단위) 최신
+        NewsArticle.source_name.asc(),  # 2) 같은 날짜면 출처순
+        _order_dt.desc(),           # 3) 같은 출처면 최신 시각
+        NewsArticle.id.desc(),
+    ).paginate(page=page, per_page=21, error_out=False)
     return jsonify({
         'items': [{
             'id': a.id, 'title': a.title, 'summary': a.summary,
