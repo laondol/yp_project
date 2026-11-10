@@ -1,52 +1,85 @@
-import json, re
+import json
+import os, re
 from datetime import datetime
 from openai import OpenAI
 
 MOTIF_MODEL = "gemini-flash-lite-latest"
 
+def _provider_conf(provider):
+    from flask import current_app
+    if provider == 'groq':
+        return (
+            current_app.config.get("GROQ_API_KEY", ""),
+            current_app.config.get("GROQ_BASE_URL", "https://api.groq.com/openai/v1"),
+            current_app.config.get("GROQ_MODEL", "openai/gpt-oss-120b"),
+        )
+    if provider == 'openrouter':
+        return (
+            os.getenv('OPENROUTER_API_KEY', ''),
+            os.getenv('OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1'),
+            os.getenv('OPENROUTER_MODEL', ''),
+        )
+    return (
+        current_app.config.get("MOTIF_API_KEY", ""),
+        current_app.config.get("MOTIF_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/"),
+        MOTIF_MODEL,
+    )
+
+
+def _motif_call(provider, system, user, format_json, timeout, max_tokens):
+    key, base_url, model = _provider_conf(provider)
+    if not key or not model:
+        return None
+    client = OpenAI(api_key=key, base_url=base_url)
+    kwargs = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        "timeout": timeout,
+        "max_tokens": max_tokens,
+    }
+    if format_json:
+        kwargs["response_format"] = {"type": "json_object"}
+    resp = client.chat.completions.create(**kwargs)
+    content = resp.choices[0].message.content or ""
+    if format_json:
+        t = content.strip()
+        if t.startswith("```"):
+            t = t.split("\n", 1)[1] if "\n" in t else t[3:]
+            if t.endswith("```"):
+                t = t[:-3]
+            t = t.strip()
+            if t.startswith("json"):
+                t = t[4:].strip()
+        while "<think>" in t and "</think>" in t:
+            a0 = t.find("<think>"); e0 = t.find("</think>") + len("</think>")
+            t = (t[:a0] + t[e0:]).strip()
+        return json.loads(t)
+    while "<think>" in content and "</think>" in content:
+        a0 = content.find("<think>"); e0 = content.find("</think>") + len("</think>")
+        content = (content[:a0] + content[e0:]).strip()
+    return content
+
+
 def _motif_text(system, user, format_json=False, timeout=120, max_tokens=2000, provider='gemini'):
-    try:
-        from flask import current_app
-        if provider == 'groq':
-            key = current_app.config.get("GROQ_API_KEY", "")
-            base_url = current_app.config.get("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
-            model = current_app.config.get("GROQ_MODEL", "openai/gpt-oss-120b")
-        else:
-            key = current_app.config.get("MOTIF_API_KEY", "")
-            base_url = current_app.config.get("MOTIF_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/")
-            model = MOTIF_MODEL
-        client = OpenAI(api_key=key, base_url=base_url)
-        kwargs = {
-            "model": model,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user}
-            ],
-            "timeout": timeout,
-            "max_tokens": max_tokens,
-        }
-        if format_json:
-            kwargs["response_format"] = {"type": "json_object"}
-        resp = client.chat.completions.create(**kwargs)
-        content = resp.choices[0].message.content or ""
-        if format_json:
-            t = content.strip()
-            if t.startswith("```"):
-                t = t.split("\n", 1)[1] if "\n" in t else t[3:]
-                if t.endswith("```"):
-                    t = t[:-3]
-                t = t.strip()
-                if t.startswith("json"):
-                    t = t[4:].strip()
-            while "<think>" in t and "</think>" in t:
-                s = t.find("<think>"); e = t.find("</think>") + len("</think>"); t = (t[:s] + t[e:]).strip()
-            return json.loads(t)
-        while "<think>" in content and "</think>" in content:
-            s = content.find("<think>"); e = content.find("</think>") + len("</think>"); content = (content[:s] + content[e:]).strip()
-        return content
-    except Exception as e:
-        print(f"[NewsService] Motif 오류: {e}")
-        return {} if format_json else None
+    """LLM 호출: 지정 provider 실패 시 Gemini → Groq → OpenRouter 순 자동 대체"""
+    chain = [provider] + [p for p in ('gemini', 'groq', 'openrouter') if p != provider]
+    empty = {} if format_json else None
+    last_err = None
+    for p in chain:
+        try:
+            result = _motif_call(p, system, user, format_json, timeout, max_tokens)
+            if result:
+                return result
+        except Exception as e:
+            last_err = e
+            print(f"[NewsService] {p} 오류: {str(e)[:120]}")
+    if last_err:
+        print(f"[NewsService] 모든 AI 실패: {str(last_err)[:120]}")
+    return empty
+
 
 def ai_search_news(news_type='world', trending_context='', labor_only=False):
     trending_note = ""
@@ -125,7 +158,7 @@ def ai_translate_and_format(title, content, source_lang="en"):
 }}
 원본 제목: {title}
 원본 내용: {content[:3000]}"""
-    result = _motif_text(system, prompt, format_json=True, provider='groq')
+    result = _motif_text(system, prompt, format_json=True, provider='gemini')
     if not (isinstance(result, dict) and result.get('title')):
         result = _motif_text(system, prompt, format_json=True, provider='gemini')
     if not result:
@@ -182,7 +215,7 @@ def ai_triage_pending_news(batch_limit=60):
 {_json.dumps(articles, ensure_ascii=False)}
 
 출력 형식: {{"articles": [{{"id": 1, "score": 90, "reason": "사유"}}]}}"""
-        result = _motif_text(system, prompt, format_json=True, provider='groq', max_tokens=4000)
+        result = _motif_text(system, prompt, format_json=True, provider='gemini', max_tokens=4000)
         if not (isinstance(result, dict) and result.get("articles")):
             result = _motif_text(system, prompt, format_json=True, provider='gemini', max_tokens=4000)
         if isinstance(result, list):
@@ -207,9 +240,6 @@ def ai_triage_pending_news(batch_limit=60):
             continue
         score, reason = r
         score = max(0, min(100, score))
-        if not a.published_at:
-            score = min(score, 50)
-            reason = (reason + ' · 발행일 없음')[:60]
         a.ai_score = score
         base = (a.ai_reason or "").strip()
         a.ai_reason = f"[선별 {score}] {reason}" + (f" | {base}" if base else "")
@@ -319,7 +349,7 @@ def ai_triage_world_news(batch_limit=100):
 {_json.dumps(articles, ensure_ascii=False)}
 
 출력 형식: {{"articles": [{{"id": 1, "score": 90, "reason": "사유"}}]}}"""
-        result = _motif_text(system, prompt, format_json=True, provider='groq', max_tokens=4000)
+        result = _motif_text(system, prompt, format_json=True, provider='gemini', max_tokens=4000)
         if not (isinstance(result, dict) and result.get("articles")):
             result = _motif_text(system, prompt, format_json=True, provider='gemini', max_tokens=4000)
         if isinstance(result, list):
@@ -344,9 +374,6 @@ def ai_triage_world_news(batch_limit=100):
             continue
         score, reason = r
         score = max(0, min(100, score))
-        if not a.published_at:
-            score = min(score, 50)
-            reason = (reason + ' · 발행일 없음')[:60]
         a.ai_score = score
         base = (a.ai_reason or "").strip()
         a.ai_reason = f"[선별 {score}] {reason}" + (f" | {base}" if base else "")
@@ -369,7 +396,7 @@ def ai_summarize_url(text):
   "is_useful": true/false
 }}
 내용: {text[:3000]}"""
-    return _motif_text(system, prompt, format_json=True, provider='groq')
+    return _motif_text(system, prompt, format_json=True, provider='gemini')
 
 def clean_cjk_text(title, summary='', content=''):
     """한자/일본어를 한국어로 변환. 불가피하면 괄호에 한국어 발음 추가."""
@@ -387,7 +414,7 @@ def clean_cjk_text(title, summary='', content=''):
 
 JSON 형식:
 {{"title": "수정된 제목", "summary": "수정된 요약", "content": "수정된 본문"}}"""
-    result = _motif_text(system, prompt, format_json=True, provider='groq')
+    result = _motif_text(system, prompt, format_json=True, provider='gemini')
     if not result:
         return title, summary, content
     return (
