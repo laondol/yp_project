@@ -347,6 +347,37 @@ def admin_news_source_modify(sid):
     return jsonify({"status": "success", "enabled": row.enabled})
 
 
+@news_bp.route('/admin/news/<int:news_id>/published', methods=['POST'])
+def admin_news_set_published(news_id):
+    """관리자: 발행일 직접 수정"""
+    if session.get('role') not in ['admin', 'leader']:
+        return jsonify({"status": "error", "msg": "권한 없음"}), 403
+    a = NewsArticle.query.get_or_404(news_id)
+    data = request.get_json(silent=True) or {}
+    raw = (str(data.get('published_at') or '')).strip()
+    if raw:
+        try:
+            a.published_at = datetime.fromisoformat(raw)
+        except Exception:
+            return jsonify({"status": "error", "msg": "날짜 형식 오류"}), 400
+        # 점수가 없으면 재채점 대상으로
+        if not a.ai_score:
+            a.ai_score = 0
+        # 60점 이상이면 게재
+        if (a.ai_score or 0) >= 60:
+            a.is_selected = True
+            WORLD = ('미국','중국','러시아','영국','프랑스','동남아시아','중앙아시아','일본','북유럽','서유럽','남아프리카','북아프리카','동유럽','남유럽','호주','UN','유네스코','중동','캐나다','중남미','세계뉴스','환경뉴스','건강정보','복지정보','농업정보','관광소식')
+            if a.category in WORLD:
+                a.world_admin_approved = True
+            else:
+                a.kr_yp_admin_approved = True
+    else:
+        a.published_at = None
+    a.updated_at = datetime.now()
+    db.session.commit()
+    return jsonify({"status": "success", "published_at": a.published_at.isoformat() if a.published_at else ''})
+
+
 @news_bp.route('/admin/news/translate-untranslated', methods=['POST'])
 def admin_news_translate_untranslated():
     """미번역 기사 번역을 백그라운드로 시작 (즉시 응답)"""

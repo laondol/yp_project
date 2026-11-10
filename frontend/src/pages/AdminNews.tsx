@@ -548,21 +548,32 @@ export default function AdminNews() {
                       ) : (<span className="text-muted">-</span>)}
                     </td>
                     <td><span className="badge bg-secondary" style={{ cursor: 'pointer' }} onClick={() => { setCategoryFilter(item.category); setPage(1) }} title="이 분류만 보기">{item.category}</span></td>
-                    <td className="text-start small" style={{ whiteSpace: 'nowrap' }}>
-                      {item.published_at || item.created_at ? (
+                    <td className="text-start small" style={{ whiteSpace: 'nowrap', cursor: 'pointer' }}
+                      title="클릭하여 발행일 수정"
+                      onClick={async () => {
+                        const cur = (item.published_at || '').slice(0, 16)
+                        const v = window.prompt('발행일 (YYYY-MM-DDTHH:MM, 비우면 없음)', cur)
+                        if (v === null) return
+                        const res = await fetch(`/admin/news/${item.id}/published`, {
+                          method: 'POST', headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ published_at: v.trim() }),
+                        })
+                        const d = await res.json().catch(() => ({}))
+                        if (d.status === 'success') fetchNews()
+                        else alert(d.msg || '수정 실패')
+                      }}>
+                      {item.published_at ? (
                         <div>
                           <div className="text-dark">
-                            📅 {formatKST((item.published_at || item.created_at) as string, { year: '2-digit', month: '2-digit', day: '2-digit' })}
+                            📅 {formatKST(item.published_at, { year: '2-digit', month: '2-digit', day: '2-digit' })}
                           </div>
-                          <div className="text-muted">
-                            {formatKST((item.published_at || item.created_at) as string, { hour: '2-digit', minute: '2-digit' })}
-                            {typeof item.ai_score === 'number' && item.ai_score > 0 && (
-                              <span className="badge bg-success ms-1">{item.ai_score}점</span>
-                            )}
-                          </div>
+                          <div className="text-muted">{formatKST(item.published_at, { hour: '2-digit', minute: '2-digit' })}</div>
                         </div>
                       ) : (
-                        <span className="text-muted">-</span>
+                        <div>
+                          <div className="text-danger">발행일 없음</div>
+                          <div className="text-muted">수집 {formatKST(item.created_at, { year: '2-digit', month: '2-digit', day: '2-digit' })}</div>
+                        </div>
                       )}
                     </td>
                     <td>

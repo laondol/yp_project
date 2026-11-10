@@ -29,14 +29,8 @@ def main():
             a.kr_yp_admin_approved = False
             n_low += 1
 
-        # 발행일 없는 기사: 50점 상한 + 미게재
-        n_nodate = 0
-        for a in NewsArticle.query.filter(NewsArticle.published_at.is_(None)).all():
-            a.ai_score = min((a.ai_score or 0), 50)
-            a.is_selected = False
-            a.world_admin_approved = False
-            a.kr_yp_admin_approved = False
-            n_nodate += 1
+        # 발행일 없는 기사는 그대로 둠 (회원 목록은 수집일로 표시, 관리자 화면은 '발행일 없음')
+        n_nodate = NewsArticle.query.filter(NewsArticle.published_at.is_(None)).count()
 
         high = NewsArticle.query.filter(NewsArticle.ai_score >= 60, NewsArticle.published_at.isnot(None)).all()
         n_high = 0
@@ -49,7 +43,7 @@ def main():
             n_high += 1
 
         db.session.commit()
-        print(f'미게재(60점 미만): {n_low}건 / 발행일없음(50점·미게재): {n_nodate}건 / 자동게재: {n_high}건')
+        print(f'미게재(60점 미만): {n_low}건 / 발행일 없음: {n_nodate}건 / 자동게재: {n_high}건')
         print('현재 게재중:', NewsArticle.query.filter(NewsArticle.is_selected == True).count())
 
 

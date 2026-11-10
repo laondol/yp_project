@@ -189,11 +189,17 @@ def api_admin_news():
     if src:
         q = q.filter(NewsArticle.source_name == src)
     total = q.count()
-    if tab == 'world':
-        from sqlalchemy import func as _f
-        items = q.order_by(_f.coalesce(NewsArticle.ai_score, 0).desc(), NewsArticle.created_at.desc()).offset((page-1)*per_page).limit(per_page).all()
-    else:
-        items = q.order_by(NewsArticle.created_at.desc()).offset((page-1)*per_page).limit(per_page).all()
+    from sqlalchemy import func as _f, case as _case
+    _eff = _f.coalesce(NewsArticle.published_at, NewsArticle.created_at)
+    _no_pub = _case((NewsArticle.published_at.is_(None), 1), else_=0)
+    # 발행일 있는 기사 먼저(날짜 최신) → 없으면 맨 뒤(수집일 기준) → 같은 날짜면 출처순
+    items = q.order_by(
+        _no_pub.asc(),
+        _f.date(_eff).desc(),
+        NewsArticle.source_name.asc(),
+        _eff.desc(),
+        NewsArticle.id.desc(),
+    ).offset((page-1)*per_page).limit(per_page).all()
     world_cats = {'미국','중국','러시아','영국','프랑스','동남아시아','중앙아시아','일본','북유럽','서유럽','남아프리카','북아프리카','동유럽','남유럽','호주','UN','유네스코','중동','캐나다','중남미','세계뉴스','환경뉴스','건강정보','복지정보','농업정보','관광소식'}
     kr_yp_cats = {'양평','경기','정치','경제','사회','교육','환경','노동','복지','의료','문화','대한민국뉴스','양평소식','정책정보','지역소식'}
     def _approval(a):
