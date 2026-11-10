@@ -20,6 +20,7 @@ export default function AdminNewsEdit({ type = 'news' }: Props) {
   const [sourceUrl, setSourceUrl] = useState('')
   const [sourceName, setSourceName] = useState('')
   const [category, setCategory] = useState('세계뉴스')
+  const [publishedAt, setPublishedAt] = useState('')
   const [aiReason, setAiReason] = useState('')
   const [isSelected, setIsSelected] = useState(false)
   const [image, setImage] = useState<File | null>(null)
@@ -40,6 +41,7 @@ export default function AdminNewsEdit({ type = 'news' }: Props) {
         setSourceUrl(data.source_url || '')
         setSourceName(data.source_name || '')
         setCategory(data.category || '세계뉴스')
+        setPublishedAt((data.published_at || '').slice(0, 16))
         setAiReason(data.ai_reason || '')
         setIsSelected(data.is_selected || false)
         if (data.image_path) setExistingImage(data.image_path)
@@ -80,6 +82,7 @@ export default function AdminNewsEdit({ type = 'news' }: Props) {
       fd.append('source_url', sourceUrl)
       fd.append('source_name', sourceName)
       fd.append('category', category)
+      fd.append('published_at', publishedAt)
       fd.append('ai_reason', aiReason)
       if (isSelected) fd.append('is_selected', 'on')
       if (image) fd.append('image', image)
@@ -120,6 +123,12 @@ export default function AdminNewsEdit({ type = 'news' }: Props) {
             <label className="form-label fw-bold">출처</label>
             <input type="text" className="form-control" value={sourceName} onChange={e => setSourceName(e.target.value)} placeholder="뉴스 출처명" />
           </div>
+        </div>
+
+        <div className="mb-3">
+          <label className="form-label fw-bold">발행일 (보도시점)</label>
+          <input type="datetime-local" className="form-control" value={publishedAt} onChange={e => setPublishedAt(e.target.value)} />
+          <div className="form-text">비어 있으면 AI 50점 상한·미게재 처리됩니다.</div>
         </div>
 
         <div className="mb-3">

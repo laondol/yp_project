@@ -536,6 +536,7 @@ def api_admin_news_detail(news_id):
         'source_name': article.source_name or '',
         'category': article.category or '세계뉴스',
         'ai_reason': article.ai_reason or '',
+        'published_at': article.published_at.isoformat() if article.published_at else '',
         'is_selected': article.is_selected or False,
         'image_path': article.image_path or '',
     })
@@ -569,6 +570,12 @@ def admin_news_edit(news_id):
         article.source_name = request.form.get('source_name', '')
         article.category = request.form.get('category', '세계뉴스')
         article.ai_reason = request.form.get('ai_reason', '')
+        _pub = (request.form.get('published_at') or '').strip()
+        if _pub:
+            try:
+                article.published_at = datetime.fromisoformat(_pub)
+            except Exception:
+                pass
         article.is_selected = 'is_selected' in request.form
         article.updated_at = datetime.now()
         if 'image' in request.files:
