@@ -571,7 +571,7 @@ export default function AdminNews() {
                         </div>
                       ) : (
                         <div>
-                          <div className="text-danger">발행일 없음</div>
+                          <div className="text-warning">수집일</div>
                           <div className="text-muted">수집 {formatKST(item.created_at, { year: '2-digit', month: '2-digit', day: '2-digit' })}</div>
                         </div>
                       )}

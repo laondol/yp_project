@@ -240,6 +240,9 @@ def ai_triage_pending_news(batch_limit=60):
             continue
         score, reason = r
         score = max(0, min(100, score))
+        if not a.published_at:
+            score = max(0, score - 10)
+            reason = (reason + ' · 수집일 기준')[:60]
         a.ai_score = score
         base = (a.ai_reason or "").strip()
         a.ai_reason = f"[선별 {score}] {reason}" + (f" | {base}" if base else "")
@@ -374,6 +377,9 @@ def ai_triage_world_news(batch_limit=100):
             continue
         score, reason = r
         score = max(0, min(100, score))
+        if not a.published_at:
+            score = max(0, score - 10)
+            reason = (reason + ' · 수집일 기준')[:60]
         a.ai_score = score
         base = (a.ai_reason or "").strip()
         a.ai_reason = f"[선별 {score}] {reason}" + (f" | {base}" if base else "")

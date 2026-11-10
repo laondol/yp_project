@@ -29,8 +29,18 @@ def main():
             a.kr_yp_admin_approved = False
             n_low += 1
 
-        # 발행일 없는 기사는 그대로 둠 (회원 목록은 수집일로 표시, 관리자 화면은 '발행일 없음')
-        n_nodate = NewsArticle.query.filter(NewsArticle.published_at.is_(None)).count()
+        # 발행일 없는 기사: -10점(1회) + 관리 자동 채택(회원 공개, '수집일'로 표시)
+        n_nodate = 0
+        for a in NewsArticle.query.filter(NewsArticle.published_at.is_(None)).all():
+            if '수집일' not in (a.ai_reason or ''):
+                a.ai_score = max(0, (a.ai_score or 0) - 10)
+                a.ai_reason = ((a.ai_reason or '') + ' · 수집일 기준')[:200]
+            a.is_selected = True
+            if a.category in WORLD:
+                a.world_admin_approved = True
+            else:
+                a.kr_yp_admin_approved = True
+            n_nodate += 1
 
         high = NewsArticle.query.filter(NewsArticle.ai_score >= 60, NewsArticle.published_at.isnot(None)).all()
         n_high = 0
