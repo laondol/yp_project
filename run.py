@@ -1,7 +1,8 @@
 import os
+from datetime import datetime
 from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'))
-from flask import Flask, send_file, send_from_directory, request
+from flask import Flask, send_file, send_from_directory, request, jsonify
 from flask_migrate import Migrate
 from config import Config
 from models import db, User
@@ -442,6 +443,40 @@ def block_legacy_attachment_paths():
     # 일반 첨부파일은 /files/ 다운로드 라우트로만 제공한다.
     if request.path.startswith('/static/uploads/general_files'):
         return 'Not Found', 404
+
+_APP_STARTED_AT = datetime.now().isoformat(timespec='seconds')
+
+
+def _current_commit():
+    """실행 중 코드의 커밋 (git 바이너리 없이 .git에서 읽음)"""
+    try:
+        root = os.path.dirname(os.path.abspath(__file__))
+        head_path = os.path.join(root, '.git', 'HEAD')
+        with open(head_path, 'r', encoding='utf-8') as f:
+            head = f.read().strip()
+        if head.startswith('ref: '):
+            ref_path = os.path.join(root, '.git', head[5:].strip())
+            if os.path.exists(ref_path):
+                with open(ref_path, 'r', encoding='utf-8') as f:
+                    return f.read().strip()[:7]
+            packed = os.path.join(root, '.git', 'packed-refs')
+            if os.path.exists(packed):
+                ref = head[5:].strip()
+                with open(packed, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        parts = line.strip().split(' ')
+                        if len(parts) == 2 and parts[1] == ref:
+                            return parts[0][:7]
+        return head[:7] or 'unknown'
+    except Exception:
+        return 'unknown'
+
+
+@app.route('/api/version')
+def api_version():
+    """실행 중인 코드 버전 (배포 검증용)"""
+    return jsonify({"commit": _current_commit(), "started_at": _APP_STARTED_AT})
+
 
 @app.route('/robots.txt')
 def robots_txt():
