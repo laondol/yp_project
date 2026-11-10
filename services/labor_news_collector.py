@@ -596,6 +596,65 @@ def _naver_verify_pubdate(title):
         return None
 
 
+DATE_HINT_WORDS = ('승인', '입력', '발행', '보도', '배포', '게시', '등록', '작성', '송고', '일자', '기준일', '보도시점')
+
+
+def _fetch_page_pubdate(url):
+    """원문 페이지(구글 링크 제외)에서 발행일 추출"""
+    import re as _re
+    from datetime import datetime as _dt
+    u = (url or '').strip()
+    if not u.startswith('http') or 'news.google.com' in u:
+        return None
+    try:
+        r = requests.get(u, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
+        if r.status_code != 200:
+            return None
+        html = r.text[:600000]
+        for pat in (
+            r'article:published_time"\s+content="([^"]+)"',
+            r'"datePublished"\s*:\s*"([^"]+)"',
+            r'<time[^>]+datetime="([^"]+)"',
+        ):
+            m = _re.search(pat, html)
+            if m:
+                raw = m.group(1).replace('Z', '+00:00')
+                try:
+                    d = _dt.fromisoformat(raw)
+                    return d.astimezone(_dt.now().astimezone().tzinfo).replace(tzinfo=None) if d.tzinfo else d
+                except Exception:
+                    pass
+        return _extract_date_from_text(_re.sub(r'<script[\s\S]*?</script>', ' ', html))
+    except Exception:
+        return None
+
+
+def _extract_date_from_text(text):
+    """본문에서 '승인/입력/발행/보도…' 근처의 날짜를 발행일 후보로 추출"""
+    import re as _re
+    from datetime import datetime as _dt
+    t = _re.sub(r'<[^>]+>', ' ', text or '')
+    if not t:
+        return None
+    # 날짜 패턴: 2026-11-10 / 2026.11.10 / 2026년 11월 10일 (+ 시:분)
+    pat = _re.compile(r'(20\d{2})\s*[-.년/]\s*(\d{1,2})\s*[-.월/]\s*(\d{1,2})\s*일?(?:\s*(\d{1,2})\s*[:시]\s*(\d{1,2})?\s*분?)?')
+    for m in pat.finditer(t):
+        start = max(0, m.start() - 40)
+        ctx = t[start:m.start()]
+        if not any(w in ctx for w in DATE_HINT_WORDS):
+            continue
+        try:
+            y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            hh = int(m.group(4) or 0)
+            mm = int(m.group(5) or 0)
+            if not (1 <= mo <= 12 and 1 <= d <= 31 and 0 <= hh <= 23 and 0 <= mm <= 59):
+                continue
+            return _dt(y, mo, d, hh, mm)
+        except Exception:
+            continue
+    return None
+
+
 def _google_verify_pubdate(title):
     """제목으로 구글 뉴스 RSS를 재조회해 실제 발행일 확인 (구글 링크 기사 대응)"""
     try:
