@@ -523,9 +523,8 @@ export default function AdminNews() {
                   <th style={{ width: '12%' }}>기사 날짜</th>
                   <th style={{ width: '8%' }}>원본링크</th>
                   <th style={{ width: '4%' }}>AI</th>
-                  <th style={{ width: '9%' }}>채자(AI) <input type="checkbox" checked={news.length > 0 && news.every(n => !!n.ai_approved)} onChange={handleApproveAllAI} title="현재 페이지 AI 전체 채택" /></th>
+                  <th style={{ width: '18%' }}>채자(AI) <input type="checkbox" checked={news.length > 0 && news.every(n => !!n.ai_approved)} onChange={handleApproveAllAI} title="현재 페이지 AI 전체 채택" /></th>
                   <th style={{ width: '10%' }}>채자(관리) <input type="checkbox" checked={news.length > 0 && news.every(n => !!n.admin_approved)} onChange={handleApproveAll} title="현재 페이지 전체 채택" /></th>
-                  <th style={{ width: '8%' }}>등록일</th>
                   <th style={{ width: '10%' }}>관리</th>
                 </tr>
               </thead>
@@ -576,14 +575,15 @@ export default function AdminNews() {
                       )}
                     </td>
                     <td>{item.ai_generated ? '🤖' : '✏️'}</td>
-                    <td>
-                      <button
-                        className={`btn btn-sm ${item.ai_approved ? 'btn-success' : 'btn-outline-secondary'}`}
-                        style={{ minWidth: 44 }}
-                        onClick={() => handleApprove(item.id, 'ai')}
-                      >
-                        {item.ai_approved ? '✅' : '⭕'}
-                      </button>
+                    <td className="small text-start" style={{ maxWidth: 220 }}>
+                      <div className="d-flex align-items-start gap-1">
+                        <span className={`badge ${((item.ai_score ?? 0) >= 60) ? 'bg-success' : 'bg-secondary'}`} style={{ flexShrink: 0 }}>
+                          {item.ai_score ?? 0}점
+                        </span>
+                        <span className="text-muted" title={item.ai_reason || ''} style={{ lineHeight: 1.3 }}>
+                          {(item.ai_reason || '-').replace(/^\[선별 \d+\]\s*/, '').slice(0, 45)}
+                        </span>
+                      </div>
                     </td>
                     <td>
                       <button
@@ -593,11 +593,6 @@ export default function AdminNews() {
                       >
                         {item.admin_approved ? '✅' : '⭕'}
                       </button>
-                    </td>
-                    <td className="small text-muted">
-                      {item.published_at ? `개재 ${formatKST(item.published_at, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}` : ''}
-                      {item.published_at && item.created_at ? <br /> : ''}
-                      {item.created_at ? `수집 ${formatKST(item.created_at, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}` : '-'}
                     </td>
                     <td>
                       <button className={`btn btn-sm ${item.is_selected ? 'btn-outline-success' : 'btn-outline-secondary'} me-1`} onClick={() => handleToggle(item.id)} title={item.is_selected ? '표시중' : '비활성'}>
