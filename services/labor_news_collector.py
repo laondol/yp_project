@@ -596,6 +596,34 @@ def _naver_verify_pubdate(title):
         return None
 
 
+def _google_verify_pubdate(title):
+    """제목으로 구글 뉴스 RSS를 재조회해 실제 발행일 확인 (구글 링크 기사 대응)"""
+    try:
+        q = re.sub(r'<[^>]+>', '', title or '')
+        q = re.sub(r'\s+-\s+[^-]{1,30}$', '', q).strip()
+        q = re.sub(r'[^가-힣A-Za-z0-9 ]', ' ', q)
+        q = ' '.join([w for w in q.split() if len(w) >= 2][:8])
+        if not q:
+            return None
+        r = requests.get(
+            "https://news.google.com/rss/search",
+            params={'q': q, 'hl': 'ko', 'gl': 'KR', 'ceid': 'KR:ko'},
+            headers={'User-Agent': 'Mozilla/5.0'}, timeout=15,
+        )
+        if r.status_code != 200:
+            return None
+        root = ET.fromstring(r.content)
+        key = re.sub(r'[^가-힣A-Za-z0-9]', '', q)[:14]
+        for it in root.findall('.//item'):
+            t = re.sub(r'<[^>]+>', '', it.findtext('title', ''))
+            k = re.sub(r'[^가-힣A-Za-z0-9]', '', t)
+            if key and (key in k or k[:14] == key):
+                return parsedate_to_datetime(it.findtext('pubDate', ''))
+        return None
+    except Exception:
+        return None
+
+
 def collect_kr_yp_local_rss():
     """양평 지역 언론·옥천신문·공식 기관 사이트를 Google News RSS로 수집 (API 키 불필요, 항상 실행)"""
     from models import db, NewsArticle

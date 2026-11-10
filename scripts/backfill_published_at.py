@@ -13,7 +13,7 @@ sys.path.insert(0, '/yp_project')
 
 from run import app
 from models import db, NewsArticle
-from services.labor_news_collector import _naver_verify_pubdate, _pub_naive
+from services.labor_news_collector import _naver_verify_pubdate, _google_verify_pubdate, _pub_naive
 
 
 def main():
@@ -30,7 +30,7 @@ def main():
         filled = 0
         for i, a in enumerate(rows, 1):
             title = re.sub(r'^\[[^\]]+\]\s*', '', a.title or '')
-            d = _naver_verify_pubdate(title)
+            d = _naver_verify_pubdate(title) or _google_verify_pubdate(title)
             if d is None:
                 continue
             a.published_at = _pub_naive(d.strftime('%a, %d %b %Y %H:%M:%S %z')) if d.tzinfo else d

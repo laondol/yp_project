@@ -215,6 +215,9 @@ def admin_news_approve(news_id, tab, approver):
             article.kr_yp_ai_approved = not article.kr_yp_ai_approved
         elif approver == 'admin':
             article.kr_yp_admin_approved = not article.kr_yp_admin_approved
+    # 관리자가 채택하면 발행일이 없을 때 수집일을 발행일로 자동 설정
+    if approver == 'admin' and (article.world_admin_approved or article.kr_yp_admin_approved) and not article.published_at and article.created_at:
+        article.published_at = article.created_at
     article.updated_at = datetime.now()
     db.session.commit()
     return jsonify({"status": "success"})
@@ -468,6 +471,8 @@ def admin_news_approve_all():
                 a.world_admin_approved = value
             elif tab == 'kr_yp' or (tab == 'all' and not is_world):
                 a.kr_yp_admin_approved = value
+            if value and not a.published_at and a.created_at:
+                a.published_at = a.created_at
         a.updated_at = datetime.now()
         n += 1
     db.session.commit()
