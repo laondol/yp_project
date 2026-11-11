@@ -14,6 +14,7 @@ interface YardAdminItem {
   event_date_iso?: string; event_end_iso?: string; event_place?: string
   extra_schedules?: { id: number; display: string }[]
   is_approved: boolean; is_active: boolean
+  is_past?: boolean
   category?: string
   created_at: string
 }
@@ -202,6 +203,7 @@ export default function AdminYard() {
   const pending = items.filter(i => !i.is_approved)
   const approved = items.filter(i => i.is_approved)
   const isPastItem = (p: YardAdminItem) => {
+    if (typeof p.is_past === 'boolean') return p.is_past
     const end = p.event_end_iso || p.event_date_iso
     if (!end) return false
     return new Date(end).getTime() < Date.now()

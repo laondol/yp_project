@@ -604,8 +604,18 @@ def api_yard_admin_list():
     """관리자: 승인 대기 + 승인됨 전체 목록"""
     if not _require_admin():
         return jsonify({"status": "error", "msg": "권한 없음"}), 403
+    from datetime import datetime as _dt
+    now = _dt.now()
     out = []
     for p in YardPost.query.filter_by(is_active=True).order_by(YardPost.created_at.desc()).limit(300).all():
+        _scheds = _post_schedules(p.id)
+        _end = p.event_end or p.event_date
+        _primary_past = bool(_end and _end < now)
+        _extra_ongoing = any(
+            s.get('event_start_iso') and _dt.fromisoformat(s['event_start_iso']) >= now
+            for s in _scheds
+        )
+        _is_past = _primary_past and not _extra_ongoing
         out.append({
             'id': f'p{p.id}', 'db_id': p.id,
             'title': p.title, 'content': p.content or '',
@@ -631,6 +641,7 @@ def api_yard_admin_list():
             'price': p.price or '',
             'category': p.category or 'event',
             'is_approved': bool(p.is_approved), 'is_active': bool(p.is_active),
+            'is_past': _is_past,
             'created_at': p.created_at.isoformat() if p.created_at else '',
         })
     return jsonify({'items': out})
