@@ -201,10 +201,8 @@ def admin_news_approve(news_id, tab, approver):
         return jsonify({"status": "error", "msg": "권한 없음"}), 403
     article = NewsArticle.query.get_or_404(news_id)
     if tab == 'all':
-        if article.category in ('세계뉴스', '환경뉴스', '건강정보', '복지정보', '농업정보', '관광소식'):
-            tab = 'world'
-        else:
-            tab = 'kr_yp'
+        WORLD_SET = {'미국','중국','러시아','영국','프랑스','동남아시아','중앙아시아','일본','북유럽','서유럽','남아프리카','북아프리카','동유럽','남유럽','호주','UN','유네스코','중동','캐나다','중남미','세계뉴스','환경뉴스','건강정보','복지정보','농업정보','관광소식'}
+        tab = 'world' if article.category in WORLD_SET else 'kr_yp'
     if tab == 'world':
         if approver == 'ai':
             article.world_ai_approved = not article.world_ai_approved
@@ -217,7 +215,10 @@ def admin_news_approve(news_id, tab, approver):
             article.kr_yp_admin_approved = not article.kr_yp_admin_approved
     article.updated_at = datetime.now()
     db.session.commit()
-    resp = jsonify({"status": "success"})
+    resp = jsonify({"status": "success",
+                    "world_admin_approved": bool(article.world_admin_approved),
+                    "kr_yp_admin_approved": bool(article.kr_yp_admin_approved),
+                    "is_selected": bool(article.is_selected)})
     resp.headers['Cache-Control'] = 'no-store'
     return resp
 

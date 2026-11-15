@@ -162,7 +162,6 @@ OFFICIAL_SOURCES = [
 ]
 
 WORLD_SOURCES = [
-    {"name": "AP", "domain": "apnews.com", "query": "site:apnews.com"},
     {"name": "로이터", "domain": "reuters.com", "query": "site:reuters.com"},
     {"name": "AFP", "domain": "afp.com", "query": "site:afp.com"},
     {"name": "워싱턴포스트", "domain": "washingtonpost.com", "query": "site:washingtonpost.com"},
@@ -214,7 +213,7 @@ WORLD_SOURCES = [
 ]
 
 WORLD_CATEGORY_BY_SOURCE = {
-    'AP': '미국', '워싱턴포스트': '미국',
+    '워싱턴포스트': '미국',
     '로이터': '영국', 'BBC': '영국', '더가디언': '영국',
     'AFP': '프랑스', '프랑스24': '프랑스',
     '알자지라': '중동',
@@ -368,7 +367,7 @@ def collect_labor_news():
                     source_url=url,
                     source_name=source['name'],
                     category="정책정보",
-                    is_selected=False,
+                    is_selected=True,
                     is_ai_generated=True,
                     ai_reason=f"자동 수집: {source['name']} ({now.strftime('%m/%d')})",
                     created_by=None,
@@ -442,7 +441,7 @@ def collect_labor_news_rss():
                     source_url=link,
                     source_name=source['name'],
                     category="정책정보",
-                    is_selected=False,
+                    is_selected=True,
                     is_ai_generated=True,
                     ai_reason=f"자동 수집(RSS): {source['name']} ({now.strftime('%m/%d')})",
                     created_by=None,
@@ -522,9 +521,10 @@ def collect_kr_yp_news_rss():
                         content=f"<p>{desc[:1000]}</p>",
                         source_url=link,
                         category=_kr_category(title, desc),
-                        is_selected=False,
+                        is_selected=True,
                         is_ai_generated=True,
                         kr_yp_ai_approved=True,
+                        kr_yp_admin_approved=True,
                         ai_reason=f"자동수집(RSS): {source['name']} ({now.strftime('%m/%d')})",
                     )
                     db.session.add(article)
@@ -762,9 +762,10 @@ def collect_kr_yp_local_rss():
                     content=f"<p>{desc[:1000]}</p>",
                     source_url=link,
                     category=_kr_category(title, desc),
-                    is_selected=False,
+                    is_selected=True,
                     is_ai_generated=True,
                     kr_yp_ai_approved=True,
+                    kr_yp_admin_approved=True,
                     ai_reason=f"자동수집(RSS·지역언론): {source['name']} ({now.strftime('%m/%d')})",
                 )
                 db.session.add(article)
@@ -875,9 +876,10 @@ def collect_kr_yp_news():
                     content=f"<p>{desc[:1000]}</p>",
                     source_url=url,
                     category=category,
-                    is_selected=False,
+                    is_selected=True,
                     is_ai_generated=True,
                     kr_yp_ai_approved=True,
+                    kr_yp_admin_approved=True,
                     ai_reason=f"자동수집: {sq} ({now.strftime('%m/%d')})",
                 )
                 db.session.add(article)
@@ -998,9 +1000,10 @@ def collect_world_news(categories=None):
                     content=art_content,
                     source_url=link,
                     category=source.get('category') or WORLD_CATEGORY_BY_SOURCE.get(source['name'], '세계뉴스'),
-                    is_selected=False,
+                    is_selected=True,
                     is_ai_generated=True,
                     world_ai_approved=True,
+                    world_admin_approved=True,
                     ai_reason=f"자동수집: {source['name']} ({now.strftime('%m/%d')})",
                 )
                 db.session.add(article)
@@ -1072,9 +1075,10 @@ def collect_world_news(categories=None):
                         content=f"<p>{desc[:1000]}</p>",
                         source_url=url,
                         category=category,
-                        is_selected=False,
+                        is_selected=True,
                         is_ai_generated=True,
                         kr_yp_ai_approved=True,
+                        kr_yp_admin_approved=True,
                         ai_reason=f"자동수집: 네이버 국내뉴스 ({now.strftime('%m/%d')})",
                     )
                     db.session.add(article)
