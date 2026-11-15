@@ -185,7 +185,7 @@ def admin_news_ai_suggest():
         traceback.print_exc()
         return jsonify({"status": "error", "msg": f"서버 오류: {str(e)}"}), 500
 
-@news_bp.route('/admin/news/toggle/<int:news_id>')
+@news_bp.route('/admin/news/toggle/<int:news_id>', methods=['GET', 'POST'])
 def admin_news_toggle(news_id):
     if session.get('role') not in ['admin', 'leader']:
         return jsonify({"status": "error", "msg": "권한 없음"}), 403
@@ -195,7 +195,7 @@ def admin_news_toggle(news_id):
     db.session.commit()
     return jsonify({"status": "success", "is_selected": article.is_selected})
 
-@news_bp.route('/admin/news/approve/<int:news_id>/<string:tab>/<string:approver>')
+@news_bp.route('/admin/news/approve/<int:news_id>/<string:tab>/<string:approver>', methods=['GET', 'POST'])
 def admin_news_approve(news_id, tab, approver):
     if session.get('role') not in ['admin', 'leader']:
         return jsonify({"status": "error", "msg": "권한 없음"}), 403
@@ -217,7 +217,9 @@ def admin_news_approve(news_id, tab, approver):
             article.kr_yp_admin_approved = not article.kr_yp_admin_approved
     article.updated_at = datetime.now()
     db.session.commit()
-    return jsonify({"status": "success"})
+    resp = jsonify({"status": "success"})
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp
 
 _TRANSLATE_STATE = {'running': False, 'done': 0, 'failed': 0, 'total': 0}
 
@@ -471,7 +473,9 @@ def admin_news_approve_all():
         a.updated_at = datetime.now()
         n += 1
     db.session.commit()
-    return jsonify({"status": "success", "count": n})
+    resp = jsonify({"status": "success", "count": n})
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp
 
 @news_bp.route('/admin/news/delete/<int:news_id>', methods=['POST'])
 def admin_news_delete(news_id):

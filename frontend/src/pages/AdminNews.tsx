@@ -339,7 +339,7 @@ export default function AdminNews() {
   const handleApprove = async (id: number, approver: 'ai' | 'admin') => {
     setNews(prev => prev.map(n => n.id === id ? { ...n, [approver === 'ai' ? 'ai_approved' : 'admin_approved']: !n[approver === 'ai' ? 'ai_approved' : 'admin_approved'] } : n))
     try {
-      const res = await fetch(`/admin/news/approve/${id}/${tab}/${approver}`)
+      const res = await fetch(`/admin/news/approve/${id}/${tab}/${approver}`, { method: 'POST', cache: 'no-store' })
       const data = await res.json()
       if (!(data.status === 'success' || data.success)) {
         setNews(prev => prev.map(n => n.id === id ? { ...n, [approver === 'ai' ? 'ai_approved' : 'admin_approved']: !n[approver === 'ai' ? 'ai_approved' : 'admin_approved'] } : n))
@@ -353,7 +353,7 @@ export default function AdminNews() {
 
   const handleToggle = async (id: number) => {
     try {
-      const res = await fetch(`/admin/news/toggle/${id}`)
+      const res = await fetch(`/admin/news/toggle/${id}`, { method: 'POST', cache: 'no-store' })
       const data = await res.json()
       if (data.status === 'success' || data.success) {
         fetchNews()
