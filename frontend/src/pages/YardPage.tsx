@@ -5,6 +5,7 @@ import ShareReport from './ShareReport'
 import ShareEdit from './ShareEdit'
 import AuthorName from '../components/AuthorName'
 import { useAuth } from '../contexts/AuthContext'
+import useNoCopy from '../lib/noCopy'
 
 interface YardExtraSchedule {
   id: number; display: string
@@ -48,6 +49,7 @@ interface YardComment {
 }
 
 export default function YardPage() {
+  useNoCopy()
   const navigate = useNavigate()
   const { user: authUser } = useAuth()
   const [items, setItems] = useState<YardItem[]>([])

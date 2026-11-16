@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
+import useNoCopy from '../lib/noCopy'
 
 interface YardDetail {
   id: number; title: string; content: string
@@ -9,6 +10,7 @@ interface YardDetail {
 }
 
 export default function YardDetail() {
+  useNoCopy()
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const [post, setPost] = useState<YardDetail | null>(null)

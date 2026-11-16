@@ -492,6 +492,11 @@ def spa_fallback(path):
     # SPA 클라이언트 라우트 직접접속/새로고침 지원 (API·정적자산은 개별 라우트가 우선)
     if path.startswith('api/'):
         return 'Not Found', 404
+    # 마당은 회원 전용: 비로그인 직접 접근(검색·링크 공유) 차단
+    if path == 'yard' or path.startswith('yard/'):
+        from flask import session as _fs, redirect as _fr
+        if not _fs.get('user_id'):
+            return _fr('/login?next=/%s' % path, code=302)
     _dist = os.path.join(app.root_path, 'frontend', 'dist')
     _file = os.path.normpath(os.path.join(_dist, path))
     # dist 내부 실제 파일이면 우선 서빙 (경로 탈출 방지)
@@ -512,6 +517,8 @@ def security_headers(resp):
     resp.headers['X-Frame-Options'] = 'SAMEORIGIN'
     resp.headers['X-XSS-Protection'] = '1; mode=block'
     resp.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    if request.path.startswith('/yard') or request.path.startswith('/api/yard'):
+        resp.headers['X-Robots-Tag'] = 'noindex, nofollow, noarchive'
     if resp.mimetype == 'text/html':
         resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
         resp.headers['Pragma'] = 'no-cache'

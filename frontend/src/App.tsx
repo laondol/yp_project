@@ -173,8 +173,8 @@ export default function App() {
             <Route path="/terms" element={<TermsPage />} />
             <Route path="/charter" element={<CharterPage />} />
             <Route path="/share" element={<ShareList />} />
-            <Route path="/yard" element={<YardPage />} />
-            <Route path="/yard/:id" element={<YardDetail />} />
+            <Route path="/yard" element={<ProtectedRoute><YardPage /></ProtectedRoute>} />
+            <Route path="/yard/:id" element={<ProtectedRoute><YardDetail /></ProtectedRoute>} />
             <Route path="/yard/edit" element={<ProtectedRoute><YardEditPage /></ProtectedRoute>} />
             <Route path="/admin/yard" element={<ProtectedRoute><AdminYard /></ProtectedRoute>} />
             <Route path="/share/detail/:id" element={<ShareDetail />} />

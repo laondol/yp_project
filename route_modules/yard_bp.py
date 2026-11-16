@@ -8,6 +8,13 @@ from datetime import datetime, timedelta
 
 yard_bp = Blueprint('yard_bp', __name__)
 
+
+@yard_bp.before_request
+def _require_login():
+    """마당은 회원 전용 — 모든 API는 로그인 후 이용"""
+    if not session.get('user_id'):
+        return jsonify({"status": "error", "msg": "로그인 후 이용할 수 있습니다."}), 401
+
 _WEEKDAYS_KR = ['월', '화', '수', '목', '금', '토', '일']
 _WEEKDAY_KR = {'월': 0, '화': 1, '수': 2, '목': 3, '금': 4, '토': 5, '일': 6}
 
@@ -279,7 +286,7 @@ def _transit_min_from_yp(p, gps_lat=None, gps_lng=None):
 
 @yard_bp.route('/api/yard', methods=['GET'])
 def api_yard_list():
-    """마당 목록(일반 회원): 승인된 소식 + 마을행사.
+    """마당 목록(회원 전용): 승인된 소식 + 마을행사.
     - 지난 행사는 숨기지 않고 is_past 플래그로 전달 (후기 모드)
     - GPS(lat/lng) 제공 시: 좌표 있는 행사는 가까운 순 우선 정렬"""
     from datetime import datetime as _dt
