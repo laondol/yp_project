@@ -35,6 +35,10 @@ export default function AdminNews() {
   const [error, setError] = useState('')
   const [page, setPage] = useState(1)
   const [categoryFilter, setCategoryFilter] = useState('')
+  const [scopeFilter, setScopeFilter] = useState('')
+  const [topicFilter, setTopicFilter] = useState('')
+  const [scopes, setScopes] = useState<string[]>([])
+  const [topics, setTopics] = useState<string[]>([])
   const [categories, setCategories] = useState<string[]>([])
   const [catMenu, setCatMenu] = useState<{ x: number; y: number } | null>(null)
   const [sourceFilter, setSourceFilter] = useState('')
@@ -74,12 +78,14 @@ export default function AdminNews() {
     setLoading(true)
     setError('')
     try {
-      const res = await fetch(`/api/admin/news?tab=${tab}&page=${page}${categoryFilter ? `&category=${encodeURIComponent(categoryFilter)}` : ''}${sourceFilter ? `&source=${encodeURIComponent(sourceFilter)}` : ''}`, { cache: 'no-store' })
+      const res = await fetch(`/api/admin/news?tab=${tab}&page=${page}${categoryFilter ? `&category=${encodeURIComponent(categoryFilter)}` : ''}${scopeFilter ? `&scope=${encodeURIComponent(scopeFilter)}` : ''}${topicFilter ? `&topic=${encodeURIComponent(topicFilter)}` : ''}${sourceFilter ? `&source=${encodeURIComponent(sourceFilter)}` : ''}`, { cache: 'no-store' })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = await res.json()
       setNews(data.items ?? [])
       setTotalPages(data.total_pages ?? 1)
       setCategories(data.categories ?? [])
+      setScopes(data.scopes ?? [])
+      setTopics(data.topics ?? [])
       setSources(data.sources ?? [])
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : '불러오기 실패')
@@ -94,7 +100,7 @@ export default function AdminNews() {
 
   useEffect(() => {
     fetchNews()
-  }, [tab, page, categoryFilter, sourceFilter])
+  }, [tab, page, categoryFilter, sourceFilter, scopeFilter, topicFilter])
 
   const handleImportUrl = async () => {
     if (!importUrl.trim()) return
@@ -496,6 +502,25 @@ export default function AdminNews() {
               {tab === 'world' ? '🌐 영문 검색 → 해외 기사 중심' : '🇰🇷 국내 검색 → 한국 뉴스 중심'} (자동 가져오기)
             </small>
           </div>
+        </div>
+      )}
+
+      {tab === 'kr_yp' && (
+        <div className="d-flex gap-2 mb-2 flex-wrap">
+          <select className="form-select form-select-sm" style={{ maxWidth: 150 }} value={scopeFilter}
+            onChange={e => { setScopeFilter(e.target.value); setPage(1) }}>
+            <option value="">지역: 전체</option>
+            {(scopes.length ? scopes : ['양평', '그외', '전체']).map(v => (
+              <option key={v} value={v}>{v === '전체' ? '전국' : v}</option>
+            ))}
+          </select>
+          <select className="form-select form-select-sm" style={{ maxWidth: 150 }} value={topicFilter}
+            onChange={e => { setTopicFilter(e.target.value); setPage(1) }}>
+            <option value="">주제: 전체</option>
+            {topics.map(v => <option key={v} value={v}>{v}</option>)}
+          </select>
+          <button className="btn btn-sm btn-outline-secondary"
+            onClick={() => { setScopeFilter(''); setTopicFilter(''); setPage(1) }}>초기화</button>
         </div>
       )}
 

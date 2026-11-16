@@ -2,7 +2,7 @@ import os
 import requests
 from flask import Blueprint, render_template, request, redirect, url_for, jsonify, session, current_app, send_file
 from datetime import datetime, timezone
-from sqlalchemy import or_, func
+from sqlalchemy import or_, func, case
 from models import db, NewsArticle, NewsComment, NewsRecommendation, NewsVote, Post, User, Message, LaborNewsArticle, LaborNewsVote, NewsSource
 from services.ai_service import call_ai_judge
 from services.point_service import add_points
@@ -453,7 +453,12 @@ def admin_news_approve_all():
         if tab == 'world':
             q = q.filter(NewsArticle.category.in_(WORLD))
         elif tab == 'kr_yp':
-            q = q.filter(NewsArticle.category.in_(KR))
+            q = q.filter(or_(
+                NewsArticle.category.in_(KR),
+                NewsArticle.category.like('양평 %'),
+                NewsArticle.category.like('그외 %'),
+                NewsArticle.category.like('전체 %'),
+            ))
         if cat:
             q = q.filter(NewsArticle.category == cat)
         if src:
@@ -660,7 +665,12 @@ def admin_news_clean_cjk():
     if tab == 'world':
         query = query.filter(NewsArticle.category.in_(['미국','중국','러시아','영국','프랑스','동남아시아','중앙아시아','일본','북유럽','서유럽','남아프리카','북아프리카','동유럽','남유럽','호주','UN','유네스코','중동','캐나다','중남미','세계뉴스','환경뉴스','건강정보','복지정보','농업정보','관광소식']))
     elif tab == 'kr_yp':
-        query = query.filter(NewsArticle.category.in_(['양평','경기','정치','경제','사회','교육','환경','노동','복지','의료','문화','대한민국뉴스','양평소식','정책정보','지역소식']))
+        query = query.filter(or_(
+            NewsArticle.category.in_(['양평','경기','정치','경제','사회','교육','환경','노동','복지','의료','문화','대한민국뉴스','양평소식','정책정보','지역소식']),
+            NewsArticle.category.like('양평 %'),
+            NewsArticle.category.like('그외 %'),
+            NewsArticle.category.like('전체 %'),
+        ))
     articles = query.all()
     count = 0
     for a in articles:
@@ -907,8 +917,14 @@ def api_news():
     kr_yp_cats = ['양평','경기','정치','경제','사회','교육','환경','노동','복지','의료','문화','대한민국뉴스','양평소식','정책정보','지역소식']
     world_cats = ['미국','중국','러시아','영국','프랑스','동남아시아','중앙아시아','일본','북유럽','서유럽','남아프리카','북아프리카','동유럽','남유럽','호주','UN','유네스코','중동','캐나다','중남미','세계뉴스','환경뉴스','건강정보','복지정보','농업정보','관광소식']
     if category == 'kr_yp':
-        q = NewsArticle.query.filter(
+        _kr_cond = or_(
             NewsArticle.category.in_(kr_yp_cats),
+            NewsArticle.category.like('양평 %'),
+            NewsArticle.category.like('그외 %'),
+            NewsArticle.category.like('전체 %'),
+        )
+        q = NewsArticle.query.filter(
+            _kr_cond,
             or_(NewsArticle.is_selected == True, NewsArticle.kr_yp_admin_approved == True)
         )
     elif category == 'world':
@@ -927,6 +943,18 @@ def api_news():
             or_(NewsArticle.is_selected == True, NewsArticle.world_admin_approved == True, NewsArticle.kr_yp_admin_approved == True)
         )
     from sqlalchemy import func as _f
+    scope = (request.args.get('scope') or '').strip()
+    topic = (request.args.get('topic') or '').strip()
+    # 선택지 목록은 필터 적용 전에 계산
+    _cats_all = [c for (c,) in q.with_entities(NewsArticle.category).distinct().order_by(NewsArticle.category).all()]
+    _scopes = sorted({c.split(' ', 1)[0] for c in _cats_all if ' ' in c})
+    from services.labor_news_collector import TOPIC_ORDER as _TOPIC_ORDER
+    _topics = list(_TOPIC_ORDER)
+    if category == 'kr_yp':
+        if scope:
+            q = q.filter(NewsArticle.category.like(scope + ' %'))
+        if topic:
+            q = q.filter(NewsArticle.category.like('% ' + topic))
     _cats = [c for (c,) in q.with_entities(NewsArticle.category).distinct().order_by(NewsArticle.category).all()]
     _srcs = [x for (x,) in q.with_entities(NewsArticle.source_name).distinct().order_by(NewsArticle.source_name).all() if x]
     sub = (request.args.get('sub') or '').strip()
@@ -937,12 +965,31 @@ def api_news():
         q = q.filter(NewsArticle.source_name == src)
     _order_dt = func.coalesce(NewsArticle.published_at, NewsArticle.created_at)
     _order_day = func.date(_order_dt)
-    articles = q.order_by(
-        _order_day.desc(),          # 1) 발행 날짜(일 단위) 최신
-        NewsArticle.source_name.asc(),  # 2) 같은 날짜면 출처순
-        _order_dt.desc(),           # 3) 같은 출처면 최신 시각
-        NewsArticle.id.desc(),
-    ).paginate(page=page, per_page=21, error_out=False)
+
+    if category == 'kr_yp':
+        # 양평 → 정부/전국 정책 → 인접 지역 → 그 외 순
+        _yang_title = NewsArticle.title.ilike('%양평%')
+        _yang_summary = NewsArticle.summary.ilike('%양평%')
+        _gov = or_(*[NewsArticle.title.ilike(f'%{k}%') for k in
+                     ('정부', '국회', '부처', '장관', '전국', '정책', '지원금', '개편', '법안', '대통령실')] +
+                   [NewsArticle.summary.ilike(f'%{k}%') for k in ('전국', '정부', '지원금')])
+        _near = or_(*[NewsArticle.title.ilike(f'%{k}%') for k in
+                      ('경기', '여주', '광주', '하남', '남양주', '가평', '홍천', '횡성', '원주', '이천')])
+        _tier = case((_yang_title, 0), (_yang_summary, 1), (_gov, 2), (_near, 3), else_=4)
+        articles = q.order_by(
+            _tier.asc(),
+            _order_day.desc(),
+            NewsArticle.source_name.asc(),
+            _order_dt.desc(),
+            NewsArticle.id.desc(),
+        ).paginate(page=page, per_page=21, error_out=False)
+    else:
+        articles = q.order_by(
+            _order_day.desc(),
+            NewsArticle.source_name.asc(),
+            _order_dt.desc(),
+            NewsArticle.id.desc(),
+        ).paginate(page=page, per_page=21, error_out=False)
     return jsonify({
         'items': [{
             'id': a.id, 'title': a.title, 'summary': a.summary,
@@ -955,7 +1002,7 @@ def api_news():
         'page': articles.page,
         'pages': articles.pages,
         'total': articles.total,
-        'categories': _cats,
+        'categories': _cats, 'scopes': _scopes, 'topics': _topics, 'scope': scope, 'topic': topic,
         'sources': _srcs,
         'sub': sub,
         'source': src,
@@ -999,7 +1046,12 @@ def kr_yp_news():
     news_list = NewsArticle.query.filter(
         NewsArticle.is_selected == True,
         NewsArticle.kr_yp_admin_approved == True,
-        NewsArticle.category.in_(['양평','경기','정치','경제','사회','교육','환경','노동','복지','의료','문화','대한민국뉴스','양평소식','정책정보','지역소식'])
+        db.or_(
+            NewsArticle.category.in_(['양평','경기','정치','경제','사회','교육','환경','노동','복지','의료','문화','대한민국뉴스','양평소식','정책정보','지역소식']),
+            NewsArticle.category.like('양평 %'),
+            NewsArticle.category.like('그외 %'),
+            NewsArticle.category.like('전체 %'),
+        )
     ).order_by(NewsArticle.like_count.desc(), NewsArticle.created_at.desc()).paginate(page=page, per_page=12, error_out=False)
     return _serve_spa()
 

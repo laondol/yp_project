@@ -176,9 +176,13 @@ def ai_triage_pending_news(batch_limit=60):
     from models import db, NewsArticle
     cutoff = datetime.now() - timedelta(days=7)
     KR_YP_CATS = ['양평','경기','정치','경제','사회','교육','환경','노동','복지','의료','문화','대한민국뉴스','양평소식','정책정보','지역소식']
+    from sqlalchemy import or_ as _or
     pending = (NewsArticle.query
                .filter(NewsArticle.is_ai_generated == True,
-                       NewsArticle.category.in_(KR_YP_CATS),
+                       _or(NewsArticle.category.in_(KR_YP_CATS),
+                           NewsArticle.category.like('양평 %'),
+                           NewsArticle.category.like('그외 %'),
+                           NewsArticle.category.like('전체 %')),
                        NewsArticle.created_at >= cutoff,
                        db.or_(NewsArticle.ai_score == 0, NewsArticle.ai_score.is_(None)))
                .order_by(NewsArticle.created_at.desc())

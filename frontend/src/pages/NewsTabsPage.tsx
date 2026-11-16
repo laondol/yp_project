@@ -41,6 +41,10 @@ export default function NewsTabsPage() {
   const [src, setSrc] = useState('')
   const [categories, setCategories] = useState<string[]>([])
   const [sources, setSources] = useState<string[]>([])
+  const [scopes, setScopes] = useState<string[]>([])
+  const [topics, setTopics] = useState<string[]>([])
+  const [scope, setScope] = useState('')
+  const [topic, setTopic] = useState('')
 
   const [winWidth, setWinWidth] = useState(window.innerWidth)
   useEffect(() => {
@@ -70,6 +74,8 @@ export default function NewsTabsPage() {
       if (tab) params.set('category', tab)
       if (sub) params.set('sub', sub)
       if (src) params.set('source', src)
+      if (scope) params.set('scope', scope)
+      if (topic) params.set('topic', topic)
       params.set('page', String(page))
       const res = await fetch(`/api/news?${params.toString()}`)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -80,6 +86,8 @@ export default function NewsTabsPage() {
         setTotal(data.total || 0)
         setCategories(data.categories ?? [])
         setSources(data.sources ?? [])
+        setScopes(data.scopes ?? [])
+        setTopics(data.topics ?? [])
       } else {
         setArticles(Array.isArray(data) ? data : [])
         setTotalPages(1)
@@ -88,9 +96,9 @@ export default function NewsTabsPage() {
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : '불러오기 실패')
     } finally { setLoading(false) }
-  }, [tab, page, sub, src])
+  }, [tab, page, sub, src, scope, topic])
 
-  useEffect(() => { setPage(1); setSub(''); setSrc('') }, [tab])
+  useEffect(() => { setPage(1); setSub(''); setSrc(''); setScope(''); setTopic('') }, [tab])
   useEffect(() => { load() }, [load])
 
   const handleVote = async (id: number, vote: 'like' | 'dislike') => {
@@ -126,11 +134,28 @@ export default function NewsTabsPage() {
       </ul>
 
       <div className="d-flex gap-2 mb-3 flex-wrap">
-        <select className="form-select form-select-sm" style={{ maxWidth: 170 }} value={sub}
-          onChange={e => { setSub(e.target.value); setPage(1) }}>
-          <option value="">분류: 전체</option>
-          {categories.map(c => <option key={c} value={c}>{c}</option>)}
-        </select>
+        {tab === 'kr_yp' ? (
+          <>
+            <select className="form-select form-select-sm" style={{ maxWidth: 150 }} value={scope}
+              onChange={e => { setScope(e.target.value); setPage(1) }}>
+              <option value="">지역: 전체</option>
+              {(scopes.length ? scopes : ['양평', '그외', '전체']).map(v => (
+                <option key={v} value={v}>{v === '전체' ? '전국' : v}</option>
+              ))}
+            </select>
+            <select className="form-select form-select-sm" style={{ maxWidth: 150 }} value={topic}
+              onChange={e => { setTopic(e.target.value); setPage(1) }}>
+              <option value="">주제: 전체</option>
+              {topics.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </>
+        ) : (
+          <select className="form-select form-select-sm" style={{ maxWidth: 170 }} value={sub}
+            onChange={e => { setSub(e.target.value); setPage(1) }}>
+            <option value="">분류: 전체</option>
+            {categories.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        )}
         <select className="form-select form-select-sm" style={{ maxWidth: 190 }} value={src}
           onChange={e => { setSrc(e.target.value); setPage(1) }}>
           <option value="">출처: 전체</option>

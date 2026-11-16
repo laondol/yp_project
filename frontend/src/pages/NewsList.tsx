@@ -25,18 +25,24 @@ export default function NewsList() {
   const [src, setSrc] = useState('')
   const [categories, setCategories] = useState<string[]>([])
   const [sources, setSources] = useState<string[]>([])
+  const [scopes, setScopes] = useState<string[]>([])
+  const [topics, setTopics] = useState<string[]>([])
+  const [scope, setScope] = useState('')
+  const [topic, setTopic] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true); setError('')
     try {
-      const data = await newsApi.list(tab || undefined, page, sub || undefined, src || undefined)
+      const data = await newsApi.list(tab || undefined, page, sub || undefined, src || undefined, scope || undefined, topic || undefined)
       setArticles(Array.isArray(data.items) ? data.items : [])
       setCategories(data.categories ?? [])
       setSources(data.sources ?? [])
+      setScopes(data.scopes ?? [])
+      setTopics(data.topics ?? [])
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : '불러오기 실패')
     } finally { setLoading(false) }
-  }, [tab, page, sub, src])
+  }, [tab, page, sub, src, scope, topic])
 
   useEffect(() => { load() }, [load])
 
@@ -70,7 +76,7 @@ export default function NewsList() {
         {TABS.map(t => (
           <li className="nav-item" key={t.key}>
             <button className={`nav-link ${tab === t.key ? 'active' : ''}`}
-              onClick={() => { setSub(''); setSrc(''); setSearchParams(t.key ? { category: t.key } : {}) }}>
+              onClick={() => { setSub(''); setSrc(''); setScope(''); setTopic(''); setSearchParams(t.key ? { category: t.key } : {}) }}>
               {t.label}
             </button>
           </li>
@@ -78,11 +84,28 @@ export default function NewsList() {
       </ul>
 
       <div className="d-flex gap-2 mb-3 flex-wrap">
-        <select className="form-select form-select-sm" style={{ maxWidth: 160 }} value={sub}
-          onChange={e => { setSub(e.target.value); setSearchParams(tab ? { category: tab, page: '1' } : { page: '1' }) }}>
-          <option value="">분류: 전체</option>
-          {categories.map(c => <option key={c} value={c}>{c}</option>)}
-        </select>
+        {tab === 'kr_yp' ? (
+          <>
+            <select className="form-select form-select-sm" style={{ maxWidth: 150 }} value={scope}
+              onChange={e => { setScope(e.target.value); setSearchParams(tab ? { category: tab, page: '1' } : { page: '1' }) }}>
+              <option value="">지역: 전체</option>
+              {(scopes.length ? scopes : ['양평', '그외', '전체']).map(v => (
+                <option key={v} value={v}>{v === '전체' ? '전국' : v}</option>
+              ))}
+            </select>
+            <select className="form-select form-select-sm" style={{ maxWidth: 150 }} value={topic}
+              onChange={e => { setTopic(e.target.value); setSearchParams(tab ? { category: tab, page: '1' } : { page: '1' }) }}>
+              <option value="">주제: 전체</option>
+              {topics.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </>
+        ) : (
+          <select className="form-select form-select-sm" style={{ maxWidth: 160 }} value={sub}
+            onChange={e => { setSub(e.target.value); setSearchParams(tab ? { category: tab, page: '1' } : { page: '1' }) }}>
+            <option value="">분류: 전체</option>
+            {categories.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        )}
         <select className="form-select form-select-sm" style={{ maxWidth: 180 }} value={src}
           onChange={e => { setSrc(e.target.value); setSearchParams(tab ? { category: tab, page: '1' } : { page: '1' }) }}>
           <option value="">출처: 전체</option>

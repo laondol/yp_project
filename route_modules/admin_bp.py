@@ -176,14 +176,30 @@ def api_admin_news():
     per_page = 20
     cat = (request.args.get('category') or '').strip()
     src = (request.args.get('source') or '').strip()
+    scope = (request.args.get('scope') or '').strip()
+    topic = (request.args.get('topic') or '').strip()
     q = NewsArticle.query.filter(NewsArticle.labor_only != True)
     if tab == 'world':
         q = q.filter(NewsArticle.category.in_(['미국','중국','러시아','영국','프랑스','동남아시아','중앙아시아','일본','북유럽','서유럽','남아프리카','북아프리카','동유럽','남유럽','호주','UN','유네스코','중동','캐나다','중남미','세계뉴스','환경뉴스','건강정보','복지정보','농업정보','관광소식']))
     elif tab == 'kr_yp':
-        q = q.filter(NewsArticle.category.in_(['양평','경기','정치','경제','사회','교육','환경','노동','복지','의료','문화','대한민국뉴스','양평소식','정책정보','지역소식']))
+        from sqlalchemy import or_ as _or2
+        q = q.filter(_or2(
+            NewsArticle.category.in_(['양평','경기','정치','경제','사회','교육','환경','노동','복지','의료','문화','대한민국뉴스','양평소식','정책정보','지역소식']),
+            NewsArticle.category.like('양평 %'),
+            NewsArticle.category.like('그외 %'),
+            NewsArticle.category.like('전체 %'),
+        ))
     from sqlalchemy import func as _f2
     cats = [c for (c,) in q.with_entities(NewsArticle.category).distinct().order_by(NewsArticle.category).all()]
+    scopes = sorted({c.split(' ', 1)[0] for c in cats if ' ' in c})
+    from services.labor_news_collector import TOPIC_ORDER as _TOPIC_ORDER
+    topics = list(_TOPIC_ORDER)
     sources = [x for (x,) in q.with_entities(NewsArticle.source_name).distinct().order_by(NewsArticle.source_name).all() if x]
+    if tab == 'kr_yp':
+        if scope:
+            q = q.filter(NewsArticle.category.like(scope + ' %'))
+        if topic:
+            q = q.filter(NewsArticle.category.like('% ' + topic))
     if cat:
         q = q.filter(NewsArticle.category == cat)
     if src:
@@ -209,7 +225,7 @@ def api_admin_news():
             return a.kr_yp_ai_approved, a.kr_yp_admin_approved
         if a.category in world_cats:
             return a.world_ai_approved, a.world_admin_approved
-        if a.category in kr_yp_cats:
+        if a.category in kr_yp_cats or (a.category or '').startswith(('양평 ', '그외 ', '전체 ')):
             return a.kr_yp_ai_approved, a.kr_yp_admin_approved
         return a.is_selected, a.is_selected
     return jsonify({'items': [{
@@ -223,7 +239,7 @@ def api_admin_news():
         'is_selected': getattr(a, 'is_selected', False),
         'ai_score': a.ai_score or 0,
         'source_name': a.source_name or '',
-    } for a in items], 'total_pages': max(1, (total + per_page - 1) // per_page), 'categories': cats, 'category': cat, 'sources': sources, 'source': src})
+    } for a in items], 'total_pages': max(1, (total + per_page - 1) // per_page), 'categories': cats, 'category': cat, 'scopes': scopes, 'topics': topics, 'sources': sources, 'source': src})
 
 @admin_bp.route('/api/admin/pending-letters')
 def api_admin_pending_letters():
