@@ -43,10 +43,6 @@ import AdminUsers from './pages/AdminUsers'
 import AdminNews from './pages/AdminNews'
 import YardPage from './pages/YardPage'
 import YardDetail from './pages/YardDetail'
-import JogukBannerPage from './pages/JogukBannerPage'
-import JogukMemberPage from './pages/JogukMemberPage'
-import JogukAdminPage from './pages/JogukAdminPage'
-import JogukCandidatesPage from './pages/JogukCandidatesPage'
 import YardEditPage from './pages/YardEditPage'
 import AdminYard from './pages/AdminYard'
 import AdminShareReports from './pages/AdminShareReports'
@@ -179,10 +175,6 @@ export default function App() {
             <Route path="/share" element={<ShareList />} />
             <Route path="/yard" element={<ProtectedRoute><YardPage /></ProtectedRoute>} />
             <Route path="/yard/:id" element={<ProtectedRoute><YardDetail /></ProtectedRoute>} />
-            <Route path="/rebuild/member" element={<JogukMemberPage />} />
-            <Route path="/rebuild/candidates" element={<JogukCandidatesPage />} />
-            <Route path="/rebuild/:token" element={<JogukBannerPage />} />
-            <Route path="/admin/rebuild" element={<RoleRoute roles={['admin']}><JogukAdminPage /></RoleRoute>} />
             <Route path="/yard/edit" element={<ProtectedRoute><YardEditPage /></ProtectedRoute>} />
             <Route path="/admin/yard" element={<ProtectedRoute><AdminYard /></ProtectedRoute>} />
             <Route path="/share/detail/:id" element={<ShareDetail />} />

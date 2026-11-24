@@ -27,7 +27,6 @@ export interface ContentEditorHandle {
   setLocation: (loc: LocationValue) => void
   setContent: (html: string) => void
   focus: () => void
-  insertText: (text: string) => void
 }
 
 interface ContentEditorProps {
@@ -123,18 +122,6 @@ const ContentEditor = forwardRef<ContentEditorHandle, ContentEditorProps>(functi
       if (editorRef.current) editorRef.current.innerHTML = html
     },
     focus: () => editorRef.current?.focus(),
-    insertText: (text: string) => {
-      const el = editorRef.current
-      if (!el) return
-      el.focus()
-      const sel = window.getSelection()
-      const inside = sel && sel.rangeCount > 0 && el.contains(sel.anchorNode as Node)
-      if (!inside) {
-        el.insertAdjacentText('beforeend', text)
-        return
-      }
-      document.execCommand('insertText', false, text)
-    },
   }), [lat, lng, addr])
 
   const execCmd = useCallback((cmd: string) => {

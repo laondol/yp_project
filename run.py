@@ -28,7 +28,6 @@ from route_modules.guide_bp import guide_bp
 from route_modules.did_bp import did_bp
 from route_modules.note_bp import note_bp
 from route_modules.yard_bp import yard_bp
-from route_modules.joguk_bp import joguk_bp
 from route_modules.discussion_bp import discussion_bp
 from werkzeug.security import generate_password_hash
 import sys
@@ -78,7 +77,6 @@ def create_app():
     app.register_blueprint(admin_bp)
     app.register_blueprint(news_bp)
     app.register_blueprint(yard_bp)
-    app.register_blueprint(joguk_bp)
 
     app.register_blueprint(search_bp)
     app.register_blueprint(message_bp)

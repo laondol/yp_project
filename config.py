@@ -65,8 +65,6 @@ class Config:
     SMTP_USERNAME = os.getenv('SMTP_USERNAME', '')
     SMTP_PASSWORD = os.getenv('SMTP_PASSWORD', '')
     MAIL_FROM = os.getenv('MAIL_FROM', 'yp@unocum.kr')
-    JOGUK_ADMIN_EMAIL = os.getenv('JOGUK_ADMIN_EMAIL', 'laon.cafe@gmail.com')
-    JOGUK_PUBLIC_BASE = os.getenv('JOGUK_PUBLIC_BASE', '')
     SITE_URL = os.getenv('SITE_URL', 'https://unocum.kr')
 
     # OAuth2
