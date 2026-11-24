@@ -379,6 +379,12 @@ export default function NavBar() {
                    {user?.role === 'leader' && host !== 'unocum.kr' && (
                      <li><a className="dropdown-item" href="/admin/page-managers">🔑 페이지관리자</a></li>
                    )}
+                   {user?.role === 'admin' && (
+                     <li><a className="dropdown-item" href="/admin/rebuild">조국혁신당 여주·양평 지역위원회</a></li>
+                   )}
+                   {user?.role === 'admin' && (
+                     <li><a className="dropdown-item" href="/admin/rebuild?tab=candidates">현안 후보</a></li>
+                   )}
                    {/* 쪽지 발송은 관리 메뉴에서 제외 — 마을지기는 마을관리 페이지의 쪽지 탭 사용 */}
                  </ul>
                </li>

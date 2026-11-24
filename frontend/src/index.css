@@ -78,3 +78,8 @@ div.container[style*="max-width"] {
 .share-desc p { margin-bottom: 0.5rem; }
 .share-desc table { max-width: 100%; border-collapse: collapse; }
 .share-desc table td, .share-desc table th { border: 1px solid #dee2e6; padding: 4px 8px; }
+
+/* rebuild 게시판: 사이트 상단/하단 크롬 숨김 */
+body.joguk-clean .navbar,
+body.joguk-clean footer { display: none !important; }
+body.joguk-clean { background: #f6f7f9; }

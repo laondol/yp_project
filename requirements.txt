@@ -15,3 +15,4 @@ authlib
 psycopg2-binary  # LGPL-3.0 with exceptions - dynamic linking only, no modifications
 pywebpush
 piexif
+qrcode[pil]

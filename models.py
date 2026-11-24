@@ -1623,3 +1623,309 @@ class NewsSource(db.Model):
     verify_date = db.Column(db.Boolean, default=False)
     enabled = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.now)
+
+
+# ============================================================
+# 조국혁신당 여주·양평 지역위원회 게시판
+# ============================================================
+
+class JogukAccount(db.Model):
+    """게시판 전용 계정 (사이트 회원과 분리). 이름·주소는 저장하지 않는다."""
+    __tablename__ = 'joguk_account'
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(200), unique=True, nullable=False, index=True)
+    password_hash = db.Column(db.String(255), nullable=False)
+    status = db.Column(db.String(20), default='pending', index=True)  # pending|approved|offline|rejected
+    email_verified = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    verified_at = db.Column(db.DateTime)
+    approved_at = db.Column(db.DateTime)
+    approved_by = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    approved_note = db.Column(db.String(200), default='')
+
+
+class JogukToken(db.Model):
+    """이메일 인증 / 매직링크 / 승인 링크 토큰"""
+    __tablename__ = 'joguk_token'
+    id = db.Column(db.Integer, primary_key=True)
+    account_id = db.Column(db.Integer, db.ForeignKey('joguk_account.id'), nullable=True, index=True)
+    kind = db.Column(db.String(20), nullable=False)  # verify|login|approve|reject
+    token_hash = db.Column(db.String(64), nullable=False, index=True)
+    expires_at = db.Column(db.DateTime)
+    used_at = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+
+class JogukBanner(db.Model):
+    """현수막 게시판 글 (QR 진입, 개별 글 공개)"""
+    __tablename__ = 'joguk_banner'
+    id = db.Column(db.Integer, primary_key=True)
+    token = db.Column(db.String(32), unique=True, nullable=False, index=True)
+    title = db.Column(db.String(200), nullable=False)
+    summary = db.Column(db.String(300), default='')
+    body = db.Column(db.Text, default='')
+    image_path = db.Column(db.String(300), default='')
+    like_count = db.Column(db.Integer, default=0)
+    view_count = db.Column(db.Integer, default=0)
+    is_public = db.Column(db.Boolean, default=True, index=True)
+    created_by = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+
+class JogukComment(db.Model):
+    """현수막 게시판 비밀 댓글 (작성자만 열람)"""
+    __tablename__ = 'joguk_comment'
+    id = db.Column(db.Integer, primary_key=True)
+    banner_id = db.Column(db.Integer, db.ForeignKey('joguk_banner.id'), nullable=False, index=True)
+    account_id = db.Column(db.Integer, db.ForeignKey('joguk_account.id'), nullable=True, index=True)
+    email = db.Column(db.String(200), default='')
+    masked_email = db.Column(db.String(200), default='')
+    password_hash = db.Column(db.String(255), default='')
+    is_anonymous = db.Column(db.Boolean, default=False, index=True)
+    content = db.Column(db.Text, default='')
+    link_url = db.Column(db.String(500), default='')
+    drawing_path = db.Column(db.String(300), default='')
+    files_json = db.Column(db.Text, default='[]')
+    like_count = db.Column(db.Integer, default=0)
+    status = db.Column(db.String(20), default='visible', index=True)  # visible|hidden|flagged
+    ai_reason = db.Column(db.String(300), default='')
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+
+class JogukTopic(db.Model):
+    """게시판 주제 (일반 11 + 지역현안 3)"""
+    __tablename__ = 'joguk_topic'
+    id = db.Column(db.Integer, primary_key=True)
+    group_name = db.Column(db.String(20), default='일반')  # 일반|현안
+    name = db.Column(db.String(50), unique=True, nullable=False)
+    description = db.Column(db.String(300), default='')
+    sort_order = db.Column(db.Integer, default=0)
+    active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+
+class JogukIssue(db.Model):
+    """주제별 공론 안건"""
+    __tablename__ = 'joguk_issue'
+    id = db.Column(db.Integer, primary_key=True)
+    topic_id = db.Column(db.Integer, db.ForeignKey('joguk_topic.id'), nullable=False, index=True)
+    title = db.Column(db.String(200), nullable=False)
+    body = db.Column(db.Text, default='')
+    status = db.Column(db.String(20), default='open', index=True)  # open|closed
+    result_summary = db.Column(db.Text, default='')
+    vote_yes = db.Column(db.Integer, default=0)
+    vote_no = db.Column(db.Integer, default=0)
+    created_by = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    closed_at = db.Column(db.DateTime)
+
+
+class JogukIssueVote(db.Model):
+    """공론 안건 찬반 투표 (1인 1표)"""
+    __tablename__ = 'joguk_issue_vote'
+    id = db.Column(db.Integer, primary_key=True)
+    issue_id = db.Column(db.Integer, db.ForeignKey('joguk_issue.id'), nullable=False, index=True)
+    account_id = db.Column(db.Integer, db.ForeignKey('joguk_account.id'), nullable=False, index=True)
+    stance = db.Column(db.String(10), nullable=False)  # yes|no
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    __table_args__ = (db.UniqueConstraint('issue_id', 'account_id', name='uq_joguk_issue_vote'),)
+
+
+class JogukIssueComment(db.Model):
+    """공론 안건 당원 의견"""
+    __tablename__ = 'joguk_issue_comment'
+    id = db.Column(db.Integer, primary_key=True)
+    issue_id = db.Column(db.Integer, db.ForeignKey('joguk_issue.id'), nullable=False, index=True)
+    account_id = db.Column(db.Integer, db.ForeignKey('joguk_account.id'), nullable=False, index=True)
+    stance = db.Column(db.String(10), default='')  # yes|no|''
+    content = db.Column(db.Text, default='')
+    status = db.Column(db.String(20), default='visible')
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+
+class JogukCard(db.Model):
+    """좌(중앙당)·우(지역위) 카드 배너"""
+    __tablename__ = 'joguk_card'
+    id = db.Column(db.Integer, primary_key=True)
+    side = db.Column(db.String(10), default='central', index=True)  # central|local
+    title = db.Column(db.String(200), nullable=False)
+    subtitle = db.Column(db.String(200), default='')
+    body = db.Column(db.Text, default='')
+    link_url = db.Column(db.String(500), default='')
+    sort_order = db.Column(db.Integer, default=0)
+    active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+
+class JogukStat(db.Model):
+    """상단 통계 (수동 입력)"""
+    __tablename__ = 'joguk_stat'
+    id = db.Column(db.Integer, primary_key=True)
+    key = db.Column(db.String(40), unique=True, nullable=False)
+    label = db.Column(db.String(60), default='')
+    value = db.Column(db.String(60), default='')
+    sort_order = db.Column(db.Integer, default=0)
+
+
+class JogukPost(db.Model):
+    """당원게시판 일반 글 (에디터 본문·그림·첨부)"""
+    __tablename__ = 'joguk_post'
+    id = db.Column(db.Integer, primary_key=True)
+    topic_id = db.Column(db.Integer, db.ForeignKey('joguk_topic.id'), nullable=False, index=True)
+    account_id = db.Column(db.Integer, db.ForeignKey('joguk_account.id'), nullable=False, index=True)
+    title = db.Column(db.String(200), nullable=False)
+    content = db.Column(db.Text, default='')
+    drawing_data = db.Column(db.Text, default='')
+    like_count = db.Column(db.Integer, default=0)
+    view_count = db.Column(db.Integer, default=0)
+    status = db.Column(db.String(20), default='visible', index=True)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+
+class JogukPostComment(db.Model):
+    """당원게시판 글 댓글"""
+    __tablename__ = 'joguk_post_comment'
+    id = db.Column(db.Integer, primary_key=True)
+    post_id = db.Column(db.Integer, db.ForeignKey('joguk_post.id'), nullable=False, index=True)
+    account_id = db.Column(db.Integer, db.ForeignKey('joguk_account.id'), nullable=False, index=True)
+    content = db.Column(db.Text, default='')
+    status = db.Column(db.String(20), default='visible')
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+
+class JogukCommittee(db.Model):
+    """운영위원 (안건 후보 심의 권한)"""
+    __tablename__ = 'joguk_committee'
+    id = db.Column(db.Integer, primary_key=True)
+    account_id = db.Column(db.Integer, db.ForeignKey('joguk_account.id'), unique=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+
+class JogukIssueMeta(db.Model):
+    """안건 부가 정보 (원 제안글·심의기간·공론기간)"""
+    __tablename__ = 'joguk_issue_meta'
+    id = db.Column(db.Integer, primary_key=True)
+    issue_id = db.Column(db.Integer, db.ForeignKey('joguk_issue.id'), unique=True, nullable=False)
+    post_id = db.Column(db.Integer, db.ForeignKey('joguk_post.id'), nullable=True)
+    review_until = db.Column(db.DateTime, nullable=True)
+    public_until = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+
+class JogukPostLike(db.Model):
+    """게시글 찬성표 (후보 도달 시점 계산용)"""
+    __tablename__ = 'joguk_post_like'
+    id = db.Column(db.Integer, primary_key=True)
+    post_id = db.Column(db.Integer, db.ForeignKey('joguk_post.id'), nullable=False, index=True)
+    account_id = db.Column(db.Integer, db.ForeignKey('joguk_account.id'), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    __table_args__ = (db.UniqueConstraint('post_id', 'account_id', name='uq_joguk_post_like'),)
+
+
+class JogukPostLifecycle(db.Model):
+    """게시글 만료 관리 (한 달 경과 후 유지/숨김)"""
+    __tablename__ = 'joguk_post_lifecycle'
+    id = db.Column(db.Integer, primary_key=True)
+    post_id = db.Column(db.Integer, db.ForeignKey('joguk_post.id'), unique=True, nullable=False)
+    warned_at = db.Column(db.DateTime, nullable=True)
+    expire_at = db.Column(db.DateTime, nullable=True)
+    keep_until = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+
+class JogukCandidate(db.Model):
+    """안건 후보 (찬성 기준 도달) — 심의 만료일 관리"""
+    __tablename__ = 'joguk_candidate'
+    id = db.Column(db.Integer, primary_key=True)
+    post_id = db.Column(db.Integer, db.ForeignKey('joguk_post.id'), unique=True, nullable=False)
+    expires_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+
+class JogukCandidateVote(db.Model):
+    __tablename__ = 'joguk_candidate_vote'
+    id = db.Column(db.Integer, primary_key=True)
+    post_id = db.Column(db.Integer, db.ForeignKey('joguk_post.id'), nullable=False, index=True)
+    account_id = db.Column(db.Integer, db.ForeignKey('joguk_account.id'), nullable=False)
+    stance = db.Column(db.String(10), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    __table_args__ = (db.UniqueConstraint('post_id', 'account_id', name='uq_joguk_candidate_vote'),)
+
+
+class JogukCandidateComment(db.Model):
+    __tablename__ = 'joguk_candidate_comment'
+    id = db.Column(db.Integer, primary_key=True)
+    post_id = db.Column(db.Integer, db.ForeignKey('joguk_post.id'), nullable=False, index=True)
+    account_id = db.Column(db.Integer, db.ForeignKey('joguk_account.id'), nullable=False)
+    content = db.Column(db.Text, default='')
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+
+class JogukBannerMeta(db.Model):
+    """현수막 진행 상태 (작성 → 게시 → 완료)"""
+    __tablename__ = 'joguk_banner_meta'
+    id = db.Column(db.Integer, primary_key=True)
+    banner_id = db.Column(db.Integer, db.ForeignKey('joguk_banner.id'), unique=True, nullable=False)
+    status = db.Column(db.String(20), default='draft', index=True)  # draft|posted|done
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+
+class JogukBannerAssign(db.Model):
+    """현수막 게시 담당 당원 및 게시 기록(사진·위치)"""
+    __tablename__ = 'joguk_banner_assign'
+    id = db.Column(db.Integer, primary_key=True)
+    banner_id = db.Column(db.Integer, db.ForeignKey('joguk_banner.id'), nullable=False, index=True)
+    account_id = db.Column(db.Integer, db.ForeignKey('joguk_account.id'), nullable=False, index=True)
+    photo_path = db.Column(db.String(300), default='')
+    lat = db.Column(db.String(30), default='')
+    lng = db.Column(db.String(30), default='')
+    memo = db.Column(db.String(300), default='')
+    posted_at = db.Column(db.DateTime, nullable=True)
+    done_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    __table_args__ = (db.UniqueConstraint('banner_id', 'account_id', name='uq_joguk_banner_assign'),)
+
+
+class JogukBannerPoster(db.Model):
+    """현수막 게시자로 지정된 당원"""
+    __tablename__ = 'joguk_banner_poster'
+    id = db.Column(db.Integer, primary_key=True)
+    account_id = db.Column(db.Integer, db.ForeignKey('joguk_account.id'), unique=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+
+class JogukConsent(db.Model):
+    """개인정보 수집·이용 동의 기록 (가입/댓글)"""
+    __tablename__ = 'joguk_consent'
+    id = db.Column(db.Integer, primary_key=True)
+    kind = db.Column(db.String(20), default='signup', index=True)  # signup|comment
+    account_id = db.Column(db.Integer, db.ForeignKey('joguk_account.id'), nullable=True, index=True)
+    comment_id = db.Column(db.Integer, db.ForeignKey('joguk_comment.id'), nullable=True, index=True)
+    version = db.Column(db.String(20), default='2026-11-23')
+    items = db.Column(db.Text, default='')
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+
+class JogukAccessLog(db.Model):
+    """게시판 접속기록 (개인정보처리시스템 접속기록 보관)"""
+    __tablename__ = 'joguk_access_log'
+    id = db.Column(db.Integer, primary_key=True)
+    account_id = db.Column(db.Integer, nullable=True, index=True)
+    email_hash = db.Column(db.String(64), default='', index=True)
+    action = db.Column(db.String(30), default='', index=True)
+    ip = db.Column(db.String(64), default='')
+    user_agent = db.Column(db.String(300), default='')
+    created_at = db.Column(db.DateTime, default=datetime.now, index=True)
+
+
+class JogukLoginLock(db.Model):
+    """로그인 실패 횟수 / 일시 잠금"""
+    __tablename__ = 'joguk_login_lock'
+    id = db.Column(db.Integer, primary_key=True)
+    email_key = db.Column(db.String(64), unique=True, nullable=False, index=True)
+    fails = db.Column(db.Integer, default=0)
+    first_fail_at = db.Column(db.DateTime, nullable=True)
+    locked_until = db.Column(db.DateTime, nullable=True)

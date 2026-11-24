@@ -1925,6 +1925,10 @@ def _find_schedule_conflict(uid, start, end, exclude_id=None):
             continue
         if getattr(s, 'busy', True) is False:
             continue
+        # 이동/귀가(자동 경로) 일정은 충돌로 보지 않음 — 항상 덧붙여 생성
+        _title = (s.title or '')
+        if '이동' in _title or '귀가' in _title:
+            continue
         s_start, s_end = _schedule_time_range(s.event_date, s.end_date, bool(s.is_allday))
         if s_start is None:
             continue
@@ -2092,7 +2096,9 @@ def bot_schedule():
     _is_rec = bool(data.get('is_recurring'))
     _end_date = end_date
     _busy = bool(data.get('busy', True))
-    if _busy:
+    _new_title = (data.get('title') or '')
+    _is_move_new = ('이동' in _new_title) or ('귀가' in _new_title)
+    if _busy and not _is_move_new:
         try:
             _start_dt = datetime.fromisoformat(data.get('event_date', ''))
         except Exception:
@@ -3115,7 +3121,8 @@ def bot_schedule_update():
         s.repeat_infinite = False
         s.repeat_end_date = None
     _busy_now = True if s.busy is None else bool(s.busy)
-    if _busy_now:
+    _is_move_now = ('이동' in (s.title or '')) or ('귀가' in (s.title or ''))
+    if _busy_now and not _is_move_now:
         _st, _en = _schedule_time_range(s.event_date, s.end_date, bool(s.is_allday))
         _conf = _find_schedule_conflict(uid, _st, _en, exclude_id=s.id)
         if _conf:
