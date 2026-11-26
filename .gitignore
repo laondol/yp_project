@@ -86,3 +86,6 @@ uploads_*.tgz
 
 # 모바일 앱 (별도 Git 저장소 — 백엔드 저장소에서는 추적하지 않음)
 yp_app/
+
+# 서버 임시 파이썬 라이브러리 (requirements 재빌드 전 긴급 설치분)
+.pylibs/
