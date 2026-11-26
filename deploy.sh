@@ -52,9 +52,15 @@ docker exec -e FLASK_APP=run.py $FLASK_CONTAINER flask db upgrade || {
 echo "[5/6] Preparing frontend..."
 if command -v npm >/dev/null 2>&1 && [ -d "frontend/node_modules" ]; then
     echo "  -> Building frontend..."
-    (cd frontend && npm run build)
+    (cd frontend && npm run build) || { echo "  !! frontend build failed"; exit 1; }
 else
-    echo "  -> npm/node_modules unavailable; using existing frontend/dist."
+    echo "  -> 서버에 npm 없음 → Docker(node:20-alpine)로 빌드"
+    docker run --rm \
+      -v "$PWD/frontend:/app" \
+      -v yp_node_modules:/app/node_modules \
+      -w /app -e NODE_OPTIONS=--max-old-space-size=2048 \
+      node:20-alpine sh -c "npm ci --no-audit --no-fund && npm run build" \
+      || { echo "  !! Docker frontend build failed"; exit 1; }
 fi
 if [ -d "frontend/dist" ]; then
     docker cp frontend/dist/. $FLASK_CONTAINER:/yp_project/frontend/dist/

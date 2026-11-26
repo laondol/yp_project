@@ -136,13 +136,21 @@ if [ "$NO_BUILD" = "1" ]; then
 elif [ "$FRONT_CHANGED" = "0" ] && [ "$FORCE" = "0" ]; then
   echo "  프론트 변경 없음 → 생략"
 else
-  if ! command -v npm >/dev/null 2>&1; then
-    echo "  ⚠️ npm 없음 → 프론트 빌드 생략 (기존 dist 유지)"
-  elif ! ( cd frontend && npm run build ); then
-    echo "  ⚠️ 빌드 실패 → 기존 dist 유지하고 배포 계속"
+  if command -v npm >/dev/null 2>&1; then
+    if ! ( cd frontend && npm run build ); then
+      echo "❌ 프론트 빌드 실패 → 서비스는 그대로 (중단)"; exit 1
+    fi
   else
-    echo "  빌드 성공"
+    echo "  서버에 npm 없음 → Docker(node:20-alpine)로 빌드"
+    if ! docker run --rm \
+      -v "$PROJECT_DIR/frontend:/app" \
+      -v yp_node_modules:/app/node_modules \
+      -w /app -e NODE_OPTIONS=--max-old-space-size=2048 \
+      node:20-alpine sh -c "npm ci --no-audit --no-fund && npm run build"; then
+      echo "❌ Docker 빌드 실패 → 서비스는 그대로 (중단)"; exit 1
+    fi
   fi
+  echo "  빌드 성공"
 fi
 
 # ---------------- 4) 백업 ----------------
