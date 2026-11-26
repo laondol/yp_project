@@ -565,7 +565,9 @@ def _schedule(graph, path, deadline, o_walk, d_walk, o_name, d_name):
         'arrival': _hm(arrival),
         'distance_km': round(dist_km, 1),
         'source': 'yp_graph',
-        'estimated': True,
+        # 실제 정류장·노선으로 계산한 경로 → '추정' 아님 (출발시각만 배차 보간)
+        'estimated': False,
+        'time_source': 'timetable',
         'transfers': transfers,
         'walk_min': walk_total,
         'note': '양평 버스 시간표 기반 자체 계산',

@@ -745,9 +745,11 @@ export default function SchedulePage() {
                           <small className="fw-bold">🕐 {r.departure || ''} 출발 → {r.arrival || ''} 도착</small>
                           <small className="text-muted" style={{ fontSize: 11 }}>총 {totalH > 0 ? `${totalH}시간${totalM}분` : `${totalM}분`} · {r.distance_km}km</small>
                         </div>
-                        {r.estimate && (
+                        {(r.estimate || r.source === 'estimate') ? (
                           <div className="badge bg-warning text-dark mb-1" style={{ fontSize: 10 }}>⚠ 정확 경로 미제공 (추정)</div>
-                        )}
+                        ) : (['yp_graph', 'rail_seoul', 'bus_seoul', 'bus_link', 'seoul', 'yp_bus', 'train', 'odsay'].includes(r.source) ? (
+                          <div className="badge bg-info text-dark mb-1" style={{ fontSize: 10 }}>공공데이터·시간표 기반</div>
+                        ) : null)}
                         {rows.length > 0 ? rows : (
                           <div className="text-muted" style={{ fontSize: 11 }}>{r.narrative || '경로 정보가 없습니다.'}</div>
                         )}
