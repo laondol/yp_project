@@ -362,6 +362,32 @@ def _build_from_odcloud():
     return {'stops': stops, 'routes': routes, 'by_stop': by_stop, 'source': 'odcloud'}
 
 
+def _merge_odcloud(graph):
+    """GBIS 데이터가 일부만 있어도 양평 시간표(odcloud) 노선을 함께 사용해 커버리지 보장"""
+    if not graph:
+        return graph
+    try:
+        extra = _build_from_odcloud()
+    except Exception:
+        return graph
+    if not extra:
+        return graph
+    seen = {(r['no'], r['keys'][0], r['keys'][-1]) for r in graph.get('routes', [])}
+    for r in extra['routes']:
+        sig = (r['no'], r['keys'][0], r['keys'][-1])
+        if sig in seen:
+            continue
+        seen.add(sig)
+        for k in r['keys']:
+            if k not in graph['stops']:
+                graph['stops'][k] = extra['stops'].get(k, {'name': k, 'lat': None, 'lng': None})
+        ri = len(graph['routes'])
+        graph['routes'].append(r)
+        for k in set(r['keys']):
+            graph['by_stop'].setdefault(k, []).append(ri)
+    return graph
+
+
 def _build_transfer_map(stops):
     """0.45km 이내 정류장 도보 환승 링크 (격자 기반)"""
     grid = {}
@@ -407,6 +433,8 @@ def build_graph(force=False):
             graph = None
         if not graph:
             graph = _build_from_odcloud() or {'stops': {}, 'routes': [], 'by_stop': {}, 'source': 'none'}
+        else:
+            graph = _merge_odcloud(graph)
         graph['tmap'] = _build_transfer_map(graph['stops'])
 
         _cache['graph'] = graph
