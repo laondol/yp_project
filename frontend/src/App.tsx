@@ -25,6 +25,7 @@ import PsychoList from './pages/PsychoList'
 import PsychoDetail from './pages/PsychoDetail'
 import PsychoWrite from './pages/PsychoWrite'
 import PsychoSchedule from './pages/PsychoSchedule'
+import PublicBikeGuidePage from './pages/PublicBikeGuidePage'
 import VillagePage from './pages/VillagePage'
 import VillageEventList from './pages/VillageEventList'
 import VillageEventDetail from './pages/VillageEventDetail'
@@ -194,6 +195,7 @@ export default function App() {
             <Route path="/service/psycho" element={<ServicePsychoPage />} />
             <Route path="/service/psycho/edit" element={<ProtectedRoute><ServicePsychoEditPage /></ProtectedRoute>} />
             <Route path="/service/ramp" element={<ServiceRampPage />} />
+            <Route path="/guide/public-bike" element={<PublicBikeGuidePage />} />
 
             {/* 위젯 에디터 */}
             <Route path="/widget-editor" element={<ProtectedRoute><WidgetDemoPage /></ProtectedRoute>} />

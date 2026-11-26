@@ -83,3 +83,6 @@ private_uploads/
 # 비밀/백업 파일 (커밋 금지)
 .env_b
 uploads_*.tgz
+
+# 모바일 앱 (별도 Git 저장소 — 백엔드 저장소에서는 추적하지 않음)
+yp_app/

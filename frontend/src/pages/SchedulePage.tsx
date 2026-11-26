@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import Loading from '../components/common/Loading'
 import ErrorMessage from '../components/common/ErrorMessage'
 import EmptyState from '../components/common/EmptyState'
+import RouteEditorModal from '../components/RouteEditorModal'
+import { samePlace, canonicalPlace } from '../lib/routeChain'
 import { formatKST } from '../utils/format';
 
 interface ScheduleItem {
@@ -12,6 +14,7 @@ interface ScheduleItem {
   repeat_infinite?: boolean; repeat_weekdays?: number; repeat_week_of_month?: number
   repeat_month_of_year?: number; reminder_minutes?: number; exceptions?: string
   content?: string; departure_location?: string; return_location?: string
+  estimated?: boolean; route_source?: string; kind?: string
 }
 
 const DAYS = ['일', '월', '화', '수', '목', '금', '토']
@@ -30,8 +33,8 @@ export default function SchedulePage() {
   const [showDelModal, setShowDelModal] = useState<number | string | null>(null)
   const [expandedRoute, setExpandedRoute] = useState<number | string | null>(null)
   const [liveDetail, setLiveDetail] = useState<Record<string, any>>({})
-  const [editRoute, setEditRoute] = useState<any>(null)
-  const [savingRoute, setSavingRoute] = useState(false)
+  const [routeEditor, setRouteEditor] = useState<ScheduleItem | null>(null)
+  const [tracking, setTracking] = useState<any>(null)
   const [saving, setSaving] = useState(false)
   const [shareSchedule, setShareSchedule] = useState<ScheduleItem | null>(null)
   const [shareUsers, setShareUsers] = useState<{id:number;username:string;real_name?:string}[]>([])
@@ -175,6 +178,74 @@ export default function SchedulePage() {
     setFormReminder(s.reminder_minutes || 0)
     setShowForm(true)
     setTimeout(() => formRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
+  }
+
+  const startTrack = async (s: any) => {
+    let r: any = null
+    try { r = JSON.parse(s.content || 'null') } catch { r = null }
+    if (!r || !r.from_lat) { alert('경로 좌표가 없습니다.'); return }
+    if (!navigator.geolocation) { alert('이 브라우저는 위치를 지원하지 않습니다.'); return }
+    try {
+      const d = await fetch(`/api/bot/route/${s.id}/track/start`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+        body: JSON.stringify({ from_name: s.departure_location, to_name: s.location,
+          from_lat: r.from_lat, from_lng: r.from_lng, to_lat: r.to_lat, to_lng: r.to_lng }),
+      }).then(x => x.json())
+      if (!d.id) { alert(d.error || '기록 시작 실패'); return }
+      const buf: any[] = []
+      const last = { t: 0 }
+      const watchId = navigator.geolocation.watchPosition(pos => {
+        const now = Date.now()
+        if (now - last.t < 10000) return
+        last.t = now
+        buf.push({ lat: pos.coords.latitude, lng: pos.coords.longitude, ts: now })
+      }, () => {}, { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 })
+      const timer = setInterval(() => {
+        if (!buf.length) return
+        const points = buf.splice(0, buf.length)
+        fetch(`/api/bot/route/track/${d.id}/append`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+          body: JSON.stringify({ points }),
+        }).catch(() => {})
+      }, 30000)
+      setTracking({ rid: d.id, sid: s.id, watchId, timer, startedAt: Date.now() })
+    } catch { alert('기록 시작 실패') }
+  }
+
+  const stopTrack = async () => {
+    if (!tracking) return
+    navigator.geolocation.clearWatch(tracking.watchId)
+    clearInterval(tracking.timer)
+    try {
+      const d = await fetch(`/api/bot/route/track/${tracking.rid}/stop`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+        body: '{}',
+      }).then(x => x.json())
+      if (d.status === 'ok') alert(`기록 완료: ${d.duration_min}분 / ${d.distance_km}km`)
+    } catch { alert('기록 종료 실패') }
+    setTracking(null)
+  }
+
+  const showActuals = async (s: any) => {
+    try {
+      const d = await fetch(`/api/bot/route/${s.id}/actuals`, { credentials: 'include' }).then(x => x.json())
+      if (d.stats) alert(`내 실측 기록\n평균 ${d.stats.avg}분 · 중앙값 ${d.stats.median}분\n${d.stats.count}회 (최근 6개월)`)
+      else alert('아직 이 경로의 실측 기록이 없습니다.')
+    } catch { alert('조회 실패') }
+  }
+
+  // 경로 일정과 같은 날짜의 모일정(도착 목표) 시각을 찾는다.
+  const routeTargetTime = (r: ScheduleItem): string => {
+    const day = (r.event_date || '').slice(0, 10)
+    if (!day) return ''
+    const baseTitle = (r.title || '').replace(/\s*이동$/, '').trim()
+    const base = schedules.find(x => {
+      if (String(x.id) === String(r.id)) return false
+      if (!x.event_date || x.event_date.slice(0, 10) !== day) return false
+      if (/이동|귀가/.test(x.title || '')) return false
+      return (!!r.location && x.location === r.location) || (!!baseTitle && x.title === baseTitle)
+    })
+    return base?.event_date?.slice(11, 16) || ''
   }
 
   const handleSave = async () => {
@@ -403,6 +474,23 @@ export default function SchedulePage() {
                       : '!3m1!4b1!4m6!4m5!2m3!6e1!7e2!8j' + (arrTs || '') + '!3e3'
                     // 도보 단계가 있으면 해당 단계 도착 좌표를 나침반 목적지/경유점으로 자동 입력
                     const steps = r.steps || []
+                    // 구간별 승차/하차 시각 (없으면 출발시각 기준으로 계산)
+                    const _toMin = (t: any) => {
+                      const m = String(t || '').match(/^(\d{1,2}):(\d{2})/)
+                      return m ? Number(m[1]) * 60 + Number(m[2]) : null
+                    }
+                    const _toHM = (m: number) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`
+                    let _cursor = _toMin(r.departure)
+                    const stepTicks = steps.map((st: any) => {
+                      const dm = _toMin(st.departure) ?? _cursor
+                      if (dm == null) return { dep: '', arr: '' }
+                      const am = _toMin(st.arrival) ?? (dm + (Number(st.time_min) || 0))
+                      _cursor = am
+                      return { dep: st.departure || _toHM(dm), arr: st.arrival || _toHM(am) }
+                    })
+                    const rideSteps = steps
+                      .map((st: any, i: number) => ({ st, i }))
+                      .filter(({ st }: any) => /버스|지하철|전철|기차|열차/.test(st.mode || ''))
                     const walkSteps = steps.filter((st: any) => (st.mode || '').includes('도보'))
                     const compassWaypoints: any[] = []
                     walkSteps.forEach((st: any, wi: number) => {
@@ -498,10 +586,18 @@ export default function SchedulePage() {
                     let lastPlace = ''
                     steps.forEach((st: any, i: number) => {
                       const fromName = st.from || (i > 0 ? steps[i - 1].to : startName)
-                      if (fromName && fromName !== lastPlace) { nodes.push({ kind: 'place', name: fromName }); lastPlace = fromName }
+                      if (fromName && !samePlace(fromName, lastPlace)) {
+                        nodes.push({ kind: 'place', name: fromName }); lastPlace = fromName
+                      } else if (fromName && lastPlace) {
+                        lastPlace = canonicalPlace(lastPlace, fromName)
+                      }
                       nodes.push({ kind: 'badge', st })
                       const toName = st.to || (i === steps.length - 1 ? destName : '')
-                      if (toName) { nodes.push({ kind: 'place', name: toName }); lastPlace = toName }
+                      if (toName && !samePlace(toName, lastPlace)) {
+                        nodes.push({ kind: 'place', name: toName }); lastPlace = toName
+                      } else if (toName && lastPlace) {
+                        lastPlace = canonicalPlace(lastPlace, toName)
+                      }
                     })
                     const lastNode = nodes[nodes.length - 1]
                     const ld = liveDetail[String(s.id)] || {}
@@ -545,10 +641,21 @@ export default function SchedulePage() {
                     }
                     const rows = nodes.map((nd: any, idx: number) => {
                       if (nd.kind === 'badge') {
-                        const isRail = (nd.st.mode || '').match(/지하철|전철|기차|열차/)
+                          const isRail = (nd.st.mode || '').match(/지하철|전철|기차|열차/)
                         return (
                           <div key={idx} className="d-flex flex-column align-items-center py-1">
                             {modeBadge(nd.st)}
+                            {nd.st.departure && (
+                              <small style={{ fontSize: 10, color: '#495057', marginTop: 2, fontWeight: 600 }}>
+                                {nd.st.departure}{nd.st.arrival ? `~${nd.st.arrival}` : ''}
+                                {nd.st.bus_no ? ` · ${nd.st.bus_no}` : ''}
+                              </small>
+                            )}
+                            {nd.st.departure && nd.st.from && (nd.st.mode || '').match(/버스|지하철|전철/) && (
+                              <small style={{ fontSize: 10, color: '#1f4e8c', maxWidth: 200, textAlign: 'center' }}>
+                                {nd.st.from}에서 탑승
+                              </small>
+                            )}
                             {isRail && nd.st.car_advice && (
                               <small style={{ fontSize: 10, color: '#7d5b0f', marginTop: 2, maxWidth: 260, textAlign: 'center' }}>
                                 🚃 {nd.st.car_advice}
@@ -586,6 +693,7 @@ export default function SchedulePage() {
                             return <span key={idx} style={{ display: 'inline-flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
                               {modeBadge(nd.st)}
                               {nd.st.time_min > 0 && <small style={{ fontSize: 10, color: '#868e96' }}>{nd.st.time_min}분</small>}
+                              {nd.st.departure && <small style={{ fontSize: 10, color: '#0a58ca', fontWeight: 700 }}>{nd.st.departure}</small>}
                             </span>
                           }
                           const isDest = lastNode && lastNode.kind === 'place' && idx === nodes.length - 1
@@ -626,8 +734,55 @@ export default function SchedulePage() {
                         {rows.length > 0 ? rows : (
                           <div className="text-muted" style={{ fontSize: 11 }}>{r.narrative || '경로 정보가 없습니다.'}</div>
                         )}
+                        {rideSteps.length > 0 && (
+                          <div className="mt-2 pt-2 border-top">
+                            <div className="fw-bold mb-1" style={{ fontSize: 11 }}>🚌 탑승 안내</div>
+                            {rideSteps.map(({ st, i }: any) => {
+                              const t = stepTicks[i] || { dep: '', arr: '' }
+                              const no = String(st.bus_no || '').replace(/번$/, '')
+                              const line = st.bus_no ? `${no}번` : (st.subway_name || '')
+                              const etaTxt = typeof st.eta_min === 'number' ? ` (${st.eta_min}분 후)` : ''
+                              const alts = Array.isArray(st.board_alts) ? st.board_alts : []
+                              const tight = typeof st.slack_min === 'number' && st.slack_min < 10
+                              return (
+                                <div key={i} className="mb-1"
+                                  style={{ borderLeft: `3px solid ${tight ? '#dc3545' : '#0d6efd'}`, paddingLeft: 6 }}>
+                                  <div className="d-flex justify-content-between align-items-start" style={{ fontSize: 11 }}>
+                                    <span>
+                                      <b>{st.mode}{line ? ` ${line}` : ''}{etaTxt}</b>{' '}
+                                      <b>{st.from || '-'}</b>
+                                      {t.dep ? ` ${t.dep} 탑승` : ' 탑승'}
+                                      {' → '}
+                                      <b>{st.to || '-'}</b>
+                                      {t.arr ? ` ${t.arr} 하차` : ' 하차'}
+                                      {st.ready_at && (
+                                        <span className={tight ? 'text-danger ms-1' : 'text-primary ms-1'}>
+                                          (정류장 도착 {st.ready_at} · 여유 {st.slack_min ?? 0}분{tight ? ' ⚠10분 권장' : ''})
+                                        </span>
+                                      )}
+                                    </span>
+                                    <span className="text-muted ms-2" style={{ whiteSpace: 'nowrap' }}>{st.time_min}분</span>
+                                  </div>
+                                  {alts.length > 0 && (
+                                    <div className="text-muted" style={{ fontSize: 10, paddingLeft: 2 }}>
+                                      이 정류장 전체: {alts.slice(0, 8).map((a: any) => `${a.route}(${a.min != null ? `${a.min}분` : '정보없음'}${a.dest ? `·${a.dest}` : ''})`).join(' · ')}
+                                    </div>
+                                  )}
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )}
                         <div className="d-flex gap-1 mt-2">
-                          <button className="btn btn-sm btn-outline-secondary flex-fill" onClick={() => setEditRoute({ id: s.id, item: s, steps: steps.map((st: any) => ({ ...st })) })}>✏️ 경로 수정</button>
+                          {(s.kind === 'route' || s.kind === 'custom_route' || /이동|귀가/.test(s.title || '')) && (
+                            <button className="btn btn-sm btn-outline-secondary flex-fill" onClick={() => setRouteEditor(s as ScheduleItem)}>✏️ 경로 수정</button>
+                          )}
+                          {(!tracking || tracking.sid !== s.id) ? (
+                            <button className="btn btn-sm btn-outline-danger flex-fill" onClick={() => startTrack(s)}>📍 기록 시작</button>
+                          ) : (
+                            <button className="btn btn-sm btn-danger flex-fill" onClick={stopTrack}>⏹ 기록 종료</button>
+                          )}
+                          <button className="btn btn-sm btn-outline-primary flex-fill" onClick={() => showActuals(s)}>📊 내 기록</button>
                         </div>
                       </div>
                     )
@@ -653,6 +808,8 @@ export default function SchedulePage() {
                           <div>
                             <strong>{s.title}</strong>
                             {s.is_recurring && <span className="badge bg-light text-dark ms-1" style={{ fontSize: '0.65rem' }}>🔄</span>}
+                            {s.kind === 'custom_route' && <span className="badge bg-info text-dark ms-1" style={{ fontSize: '0.65rem' }}>수정된 경로</span>}
+                            {s.estimated && <span className="badge bg-warning text-dark ms-1" style={{ fontSize: '0.65rem' }}>추정 경로</span>}
                           </div>
                           <div className="d-flex gap-1">
                             {isTransit && (
@@ -775,125 +932,12 @@ export default function SchedulePage() {
         </div>
       )}
 
-      {editRoute && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
-          <div style={{ background: '#fff', borderRadius: 16, padding: 16, width: 480, maxWidth: '100%', maxHeight: '86vh', overflow: 'auto', boxShadow: '0 8px 24px rgba(0,0,0,0.2)' }}>
-            <div className="d-flex justify-content-between align-items-center mb-2">
-              <h6 className="fw-bold mb-0">✏️ 이동 경로 수정</h6>
-              <button className="btn btn-sm btn-light" onClick={() => setEditRoute(null)}>✕</button>
-            </div>
-            <p className="small text-muted mb-2">각 구간의 이동수단과 소요시간, 출발/도착 장소를 수정할 수 있습니다.</p>
-            {editRoute.steps.map((st: any, idx: number) => (
-              <div key={idx} className="border rounded p-2 mb-2" style={{ background: '#fafafa' }}>
-                <div className="d-flex justify-content-between align-items-center mb-1">
-                  <span className="small fw-bold text-muted">구간 {idx + 1}</span>
-                  <button className="btn btn-sm btn-outline-danger py-0 px-1" onClick={() => setEditRoute((er: any) => ({ ...er, steps: er.steps.filter((_: any, i: number) => i !== idx) }))}>🗑️</button>
-                </div>
-                <div className="row g-1 mb-1">
-                  <div className="col-5">
-                    <label className="small d-block text-muted">이동수단</label>
-                    <select className="form-select form-select-sm" value={st.mode || ''}
-                      onChange={e => {
-                        const v = e.target.value
-                        setEditRoute((er: any) => ({ ...er, steps: er.steps.map((x: any, i: number) => {
-                          if (i !== idx) return x
-                          const nx = { ...x, mode: v }
-                          if (v.includes('도보')) { nx.bus_no = ''; nx.subway_name = ''; nx.detail = `도보 ${x.time_min || 0}분` }
-                          else if (v.includes('버스')) { nx.subway_name = ''; nx.bus_no = nx.bus_no || ''; nx.detail = `${nx.bus_no || ''} ${x.from || ''}→${x.to || ''} (${x.time_min || 0}분)` }
-                          else if (v.includes('지하철') || v.includes('전철') || v.includes('기차')) { nx.bus_no = ''; nx.subway_name = nx.subway_name || '지하철'; nx.detail = `${nx.subway_name || ''} ${x.from || ''}→${x.to || ''} (${x.time_min || 0}분)` }
-                        return nx
-                      }) }))}
-                      }>
-
-                      <option value="🚶 도보">🚶 도보</option>
-                      <option value="🚌 버스">🚌 버스</option>
-                      <option value="🚄 지하철">🚄 지하철</option>
-                      <option value="🚄 기차">🚄 기차</option>
-                      <option value="🚕 택시">🚕 택시</option>
-                      <option value="🚲 자전거">🚲 자전거</option>
-                    </select>
-                  </div>
-                  <div className="col-4">
-                    <label className="small d-block text-muted">소요시간(분)</label>
-                    <input type="number" min={0} className="form-control form-control-sm" value={st.time_min || 0}
-                      onChange={e => setEditRoute((er: any) => ({ ...er, steps: er.steps.map((x: any, i: number) => i !== idx ? x : { ...x, time_min: Number(e.target.value) || 0 }) }))} />
-                  </div>
-                  <div className="col-3">
-                    <label className="small d-block text-muted">호선/노선</label>
-                    <input className="form-control form-control-sm" placeholder="경의중앙선" value={st.subway_name || st.bus_no || ''}
-                      onChange={e => setEditRoute((er: any) => ({ ...er, steps: er.steps.map((x: any, i: number) => i !== idx ? x : { ...x, subway_name: e.target.value, bus_no: (x.mode || '').includes('버스') ? e.target.value : x.bus_no }) }))} />
-                  </div>
-                </div>
-                {(st.mode || '').match(/지하철|전철|기차|열차/) && (
-                  <div className="mb-1">
-                    <input className="form-control form-control-sm" placeholder="🚃 탈 칸/문 (예: 3번째 칸, 환승 통로와 가까움)" value={st.car_advice || ''}
-                      onChange={e => setEditRoute((er: any) => ({ ...er, steps: er.steps.map((x: any, i: number) => i !== idx ? x : { ...x, car_advice: e.target.value }) }))} />
-                  </div>
-                )}
-                <div className="row g-1">
-                  <div className="col-6">
-                    <input className="form-control form-control-sm" placeholder="출발 장소" value={st.from || ''}
-                      onChange={e => setEditRoute((er: any) => ({ ...er, steps: er.steps.map((x: any, i: number) => i !== idx ? x : { ...x, from: e.target.value }) }))} />
-                  </div>
-                  <div className="col-6">
-                    <input className="form-control form-control-sm" placeholder="도착 장소" value={st.to || ''}
-                      onChange={e => setEditRoute((er: any) => ({ ...er, steps: er.steps.map((x: any, i: number) => i !== idx ? x : { ...x, to: e.target.value }) }))} />
-                  </div>
-                </div>
-              </div>
-            ))}
-            <div className="d-flex gap-1 mb-3">
-              <button className="btn btn-sm btn-outline-secondary flex-fill" onClick={() => setEditRoute((er: any) => ({ ...er, steps: [...er.steps, { mode: '🚶 도보', from: '', to: '', detail: '도보 0분', time_min: 0 }] }))}>+ 구간 추가</button>
-            </div>
-            <div className="d-flex gap-2">
-              <button className="btn btn-sm btn-success flex-fill" disabled={savingRoute} onClick={async () => {
-                setSavingRoute(true)
-                try {
-                  const steps2 = editRoute.steps
-                  const total = steps2.reduce((a: number, s: any) => a + (s.time_min || 0), 0)
-                  const narrParts: string[] = []
-                  const prevRoute = (() => { try { const sv = JSON.parse((editRoute.item?.content) || 'null'); return sv } catch { return null } })()
-                  const prevFrom = prevRoute && prevRoute.from_lat ? prevRoute.from_lat : null
-                  const prevTo = prevRoute && prevRoute.to_lat ? prevRoute.to_lat : null
-                  let curName = editRoute.item?.departure_location || '출발'
-                  steps2.forEach((st: any, i: number) => {
-                    const nm = st.mode || ''
-                    const dur = st.time_min || 0
-                    const from = st.from || curName
-                    const to = st.to || (i === steps2.length - 1 ? (editRoute.item?.return_location || editRoute.item?.location || '목적지') : (steps2[i + 1] && steps2[i + 1].from) || '')
-                    curName = to
-                    if (nm.includes('도보')) narrParts.push(`${from}에서 ${dur}분 걸어서`)
-                    else if (nm.includes('버스')) narrParts.push(`${from}에서 ${st.bus_no || '버스'}를 타고 ${dur}분 가서 ${to}에서 내려서`)
-                    else if (nm.includes('기차')) narrParts.push(`${from}에서 ${st.subway_name || '기차'}를 타고 ${dur}분 가서 ${to}역에서 내려서`)
-                    else if (nm.includes('지하철') || nm.includes('전철')) narrParts.push(`${from}에서 ${st.subway_name || '지하철'}으로 지하철을 타고 ${dur}분 가서 ${to}역에서 내려서`)
-                    else if (nm.includes('택시')) narrParts.push(`${from}에서 택시를 타고 ${dur}분 가서 ${to}에 도착해서`)
-                    else if (nm.includes('자전거')) narrParts.push(`${from}에서 자전거를 타고 ${dur}분 가서 ${to}에 도착해서`)
-                    else narrParts.push(`${from}에서 ${dur}분 이동해서 ${to}에 도착해서`)
-                  })
-                  const destName = editRoute.item?.return_location || editRoute.item?.location || '목적지'
-                  const narrative = `${narrParts.join(' ')} ${destName}입니다.`
-                  const res = await fetch(`/api/bot/route/${editRoute.id}/save`, {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      steps: steps2, total_min: total, distance_km: 0,
-                      departure: prevRoute && prevRoute.departure || '', arrival: prevRoute && prevRoute.arrival || '',
-                      from_lat: prevFrom, to_lat: prevTo, narrative,
-                    }),
-                  })
-                  const data = await res.json()
-                  if (!data.success) { alert('저장 실패'); return }
-                  setEditRoute(null)
-                  setExpandedRoute(null)
-                  load()
-                } catch { alert('서버 연결 실패') }
-                finally { setSavingRoute(false) }
-              }}>{savingRoute ? '저장 중...' : '저장'}</button>
-              <button className="btn btn-sm btn-outline-secondary" onClick={() => setEditRoute(null)}>취소</button>
-            </div>
-          </div>
-        </div>
-      )}
-
+      <RouteEditorModal
+        schedule={routeEditor}
+        targetArrival={routeEditor ? routeTargetTime(routeEditor) : undefined}
+        onClose={() => setRouteEditor(null)}
+        onSaved={() => { setExpandedRoute(null); load() }}
+      />
 
       {/* 일정 공유 링크/토큰 모달 */}
       {feedInfo && (

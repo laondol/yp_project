@@ -1974,7 +1974,15 @@ def bot_schedule():
                 "repeat_lastday": bool(getattr(s, 'repeat_lastday', False)),
                 "reminder_minutes": s.reminder_minutes or 0,
                 "exceptions": s.repeat_exceptions or '',
+                "kind": s.kind or 'base',
             }
+            try:
+                _c = json.loads(s.content) if (s.content or '').strip().startswith('{') else None
+            except Exception:
+                _c = None
+            if _c:
+                item['route_source'] = _c.get('source', '')
+                item['estimated'] = bool(_c.get('estimated'))
             is_move = '이동' in s.title or '귀가' in s.title
             evt = s.event_date
             if evt:
@@ -3860,8 +3868,456 @@ def bot_route_save(schedule_id):
     if data.get('title'): s.title = data['title']
     if data.get('departure_location'): s.departure_location = data['departure_location']
     if data.get('return_location'): s.return_location = data['return_location']
+    if data.get('narrative'):
+        s.description = data['narrative']
+        s.memo = data['narrative']
+    # 출발 고정 / 도착 자동 조정: 경로 일정의 출발·도착 시각을 함께 갱신
+    if s.event_date and (data.get('departure') or data.get('arrival')):
+        def _hm_to_dt(hm, base):
+            try:
+                hh, mm = [int(x) for x in str(hm).split(':')[:2]]
+                if not (0 <= hh < 24 and 0 <= mm < 60):
+                    return None
+                return datetime(base.year, base.month, base.day, hh, mm)
+            except Exception:
+                return None
+        dep_dt = _hm_to_dt(data.get('departure'), s.event_date)
+        if dep_dt is not None:
+            s.event_date = dep_dt
+        arr_dt = _hm_to_dt(data.get('arrival'), s.event_date)
+        if arr_dt is not None:
+            if dep_dt is not None and arr_dt <= dep_dt:
+                arr_dt = arr_dt + timedelta(days=1)
+            s.end_date = arr_dt
+    # 사용자가 수정한 경로는 자동 재계산에서 보호
+    if s.kind in ('route', 'base', None):
+        s.kind = 'custom_route'
+    s.route_dirty = False
     db.session.commit()
     return jsonify({"success":True,"route":route_data})
+
+
+@tongbot_bp.route('/api/bot/route/<int:schedule_id>/reset', methods=['POST'])
+def bot_route_reset(schedule_id):
+    """수정 경로를 삭제하고 해당 일자의 자동 경로를 다시 생성한다."""
+    uid = session.get('user_id')
+    if not uid: return jsonify({"error":"로그인 필요"}), 401
+    s = TongBotSchedule.query.get_or_404(schedule_id)
+    if s.user_id != uid: return jsonify({"error":"권한 없음"}), 403
+    if s.kind != 'custom_route':
+        return jsonify({"success": True, "reset": False, "message": "수정 경로가 아닙니다."})
+    evt_date = s.event_date
+    db.session.delete(s)
+    db.session.commit()
+    try:
+        from services.route_recalc import _ensure_day_routes
+        _ensure_day_routes(uid, evt_date)
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": "자동 경로 재생성 실패", "detail": str(e)[:120]}), 500
+    return jsonify({"success": True, "reset": True})
+
+
+def _line_map_norm(value):
+    s = re.sub(r'\s+', '', value or '')
+    s = re.sub(r'(버스정류장|정류장|정류소|역)$', '', s)
+    return s
+
+
+def _line_map_cache_key(mode, line, fname, tname):
+    raw = f'{mode}|{_line_map_norm(line)}|{_line_map_norm(fname)}|{_line_map_norm(tname)}'
+    return 'line_map:' + hashlib.sha1(raw.encode('utf-8')).hexdigest()
+
+
+def _line_map_cache_get(mode, line, fname, tname):
+    from models import PublicDataCache
+    key = _line_map_cache_key(mode, line, fname, tname)
+    row = PublicDataCache.query.filter_by(key=key).first()
+    if not row:
+        return None
+    try:
+        if row.fetched_at and (datetime.now() - row.fetched_at).days > 30:
+            return None
+        payload = json.loads(row.payload or 'null')
+        # 전체 목록을 못 가져온 fallback은 1시간만 유효 (한도 회복 후 다시 조회)
+        if isinstance(payload, dict) and payload.get('source') == 'fallback' and row.fetched_at:
+            if (datetime.now() - row.fetched_at).total_seconds() > 3600:
+                return None
+        return payload
+    except Exception:
+        return None
+
+
+def _line_map_cache_set(mode, line, fname, tname, payload):
+    from models import PublicDataCache
+    key = _line_map_cache_key(mode, line, fname, tname)
+    row = PublicDataCache.query.filter_by(key=key).first()
+    text = json.dumps(payload, ensure_ascii=False)
+    if row:
+        row.payload = text
+        row.fetched_at = datetime.now()
+    else:
+        db.session.add(PublicDataCache(key=key, payload=text, fetched_at=datetime.now()))
+    try:
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+
+def _odsay_subway_station_id(name):
+    """역명 → ODsay 지하철역 ID (type=1). 실패 시 None."""
+    name = (name or '').strip().rstrip('역').strip()
+    if not name:
+        return None
+    try:
+        from services.directions import ODSAY_STATION_IDS
+        sid = ODSAY_STATION_IDS.get(name)
+        if sid:
+            return sid
+    except Exception:
+        pass
+    try:
+        from services import route_guard as rg
+        if not rg.can_call('ODSAY') or not rg.is_available('ODSAY'):
+            return None
+        rg.incr_usage('ODSAY')
+        d = requests.get('https://api.odsay.com/v1/api/searchStation',
+                         params={'apiKey': os.getenv('ODSAY_API_KEY', ''), 'stationName': name,
+                                 'lang': 0, 'output': 'json'}, timeout=8).json()
+    except Exception:
+        return None
+    if d.get('error'):
+        try:
+            from services import route_guard as rg
+            rg.mark_health('ODSAY', False, str(d.get('error'))[:100])
+        except Exception:
+            pass
+        return None
+    rows = (d.get('result') or {}).get('station') or []
+    if isinstance(rows, dict):
+        rows = [rows]
+    exact, any_subway = None, None
+    for row in rows:
+        try:
+            if str(row.get('CID')) != '1000' or int(row.get('type') or 0) != 1:
+                continue
+        except Exception:
+            continue
+        nm = (row.get('stationName') or '').replace('역', '').strip()
+        if nm == name:
+            exact = row
+            break
+        if any_subway is None:
+            any_subway = row
+    row = exact or any_subway
+    try:
+        return int(row.get('stationID')) if row else None
+    except Exception:
+        return None
+
+
+def _subway_line_map(fname, tname, line, time_min, detail=''):
+    sid = _odsay_subway_station_id(fname)
+    eid = _odsay_subway_station_id(tname)
+    if sid and eid and sid != eid:
+        try:
+            from services import route_guard as rg
+            if rg.can_call('ODSAY') and rg.is_available('ODSAY'):
+                rg.incr_usage('ODSAY')
+                d = requests.get('https://api.odsay.com/v1/api/subwayPath',
+                                 params={'apiKey': os.getenv('ODSAY_API_KEY', ''), 'CID': 1000,
+                                         'SID': sid, 'EID': eid, 'Sopt': 1, 'lang': 0, 'output': 'json'},
+                                 timeout=10).json()
+                if d.get('error'):
+                    rg.mark_health('ODSAY', False, str(d.get('error'))[:100])
+                if not d.get('error'):
+                    res = d.get('result') or {}
+                    rows = ((res.get('stationSet') or {}).get('stations') or [])
+                    if isinstance(rows, dict):
+                        rows = [rows]
+                    stops = []
+                    if rows:
+                        first = (rows[0].get('startName') or fname).strip()
+                        stops.append({'name': first, 'time_min': 0})
+                        for row in rows:
+                            end = (row.get('endName') or '').strip()
+                            if not end:
+                                continue
+                            try:
+                                t = int(float(row.get('travelTime') or 0))
+                            except Exception:
+                                t = 0
+                            stops.append({'name': end, 'time_min': max(0, t)})
+                    if len(stops) >= 2:
+                        drive = ((res.get('driveInfoSet') or {}).get('driveInfo') or [])
+                        lane = ''
+                        if drive:
+                            lane = (drive[0].get('laneName') or '').strip()
+                        return {
+                            'mode': 'subway',
+                            'line': lane or line or '지하철',
+                            'from': stops[0]['name'],
+                            'to': stops[-1]['name'],
+                            'stops': stops,
+                            'time_min': int(res.get('globalTravelTime') or (stops[-1]['time_min'] or time_min or 0)),
+                            'station_count': int(res.get('globalStationCount') or max(0, len(stops) - 1)),
+                            'source': 'odsay',
+                            'note': '',
+                        }
+        except Exception:
+            pass
+    m = re.search(r'(\d+)\s*정거장', detail or '')
+    count = int(m.group(1)) if m else None
+    return {
+        'mode': 'subway',
+        'line': line or '지하철',
+        'from': fname,
+        'to': tname,
+        'stops': [{'name': fname, 'time_min': 0}, {'name': tname, 'time_min': int(time_min or 0)}],
+        'time_min': int(time_min or 0),
+        'station_count': count,
+        'source': 'fallback',
+        'note': '정류장 전체 목록을 불러오지 못해 현재 구간만 표시합니다.',
+    }
+
+
+def _bus_line_map(fname, tname, line, time_min, detail=''):
+    # 1) 양평군 버스 시간표(무료) 우선
+    try:
+        from services import yangpyeong_bus as yb
+        routes = yb.find_routes(fname, tname, limit=10)
+        for row in routes:
+            stops = yb._stops(row)
+            keys = [yb._norm(x) for x in stops]
+            f, t = yb._norm(fname), yb._norm(tname)
+            fi = next((i for i, x in enumerate(keys) if x and x == f), -1)
+            ti = next((i for i, x in enumerate(keys) if x and x == t), -1)
+            if fi >= 0 and ti > fi:
+                seg = stops[fi:ti + 1]
+                ratio = max(0, len(seg) - 1) / max(1, len(stops) - 1)
+                bus_no = (row.get('노선번호') or '').strip('[] ')
+                return {
+                    'mode': 'bus',
+                    'line': bus_no or line or '버스',
+                    'from': seg[0],
+                    'to': seg[-1],
+                    'stops': [
+                        {'name': nm, 'time_min': int(round((time_min or 0) * ratio * (i / max(1, len(seg) - 1))))}
+                        for i, nm in enumerate(seg)
+                    ],
+                    'time_min': int(round((time_min or 0) * ratio)) or int(time_min or 0),
+                    'station_count': max(0, len(seg) - 1),
+                    'source': 'yp_bus',
+                    'note': '양평군 버스 시간표 기준 정류장 목록입니다.',
+                }
+    except Exception:
+        pass
+
+    # 2) ODsay 버스 노선 상세 (한도 내)
+    try:
+        from services import route_guard as rg
+        bus_no = re.sub(r'번$', '', (line or '')).strip()
+        if bus_no and rg.can_call('ODSAY') and rg.is_available('ODSAY'):
+            rg.incr_usage('ODSAY')
+            d = requests.get('https://api.odsay.com/v1/api/searchBusLane',
+                             params={'apiKey': os.getenv('ODSAY_API_KEY', ''), 'busNo': bus_no,
+                                     'CID': 1000, 'displayCnt': 5, 'lang': 0, 'output': 'json'},
+                             timeout=8).json()
+            if d.get('error'):
+                rg.mark_health('ODSAY', False, str(d.get('error'))[:100])
+            lanes = (d.get('result') or {}).get('lane') or []
+            if isinstance(lanes, dict):
+                lanes = [lanes]
+            lane = next((x for x in lanes if str(x.get('busNo')).replace('번', '') == bus_no), lanes[0] if lanes else None)
+            if lane and lane.get('busID') and rg.can_call('ODSAY') and rg.is_available('ODSAY'):
+                rg.incr_usage('ODSAY')
+                bd = requests.get('https://api.odsay.com/v1/api/busLaneDetail',
+                                  params={'apiKey': os.getenv('ODSAY_API_KEY', ''), 'busID': lane['busID'],
+                                          'lang': 0, 'output': 'json'}, timeout=10).json()
+                if bd.get('error'):
+                    rg.mark_health('ODSAY', False, str(bd.get('error'))[:100])
+                if not bd.get('error'):
+                    rows = (bd.get('result') or {}).get('station') or []
+                    if isinstance(rows, dict):
+                        rows = [rows]
+                    names = [(r.get('stationName') or '').strip() for r in rows]
+                    keys = [re.sub(r'\s+', '', n) for n in names]
+                    f = re.sub(r'\s+', '', fname or '')
+                    t = re.sub(r'\s+', '', tname or '')
+                    def _find(q):
+                        exact = next((i for i, k in enumerate(keys) if k == q), -1)
+                        if exact >= 0:
+                            return exact
+                        return next((i for i, k in enumerate(keys) if q and (q in k or k in q)), -1)
+                    fi, ti = _find(f), _find(t)
+                    if fi >= 0 and ti > fi:
+                        seg = rows[fi:ti + 1]
+                        dist = []
+                        for r in seg:
+                            try:
+                                dist.append(float(r.get('stationDistance') or 0))
+                            except Exception:
+                                dist.append(0.0)
+                        total_dist = sum(dist[1:]) or 1.0
+                        cum = [0.0]
+                        for x in dist[1:]:
+                            cum.append(cum[-1] + x)
+                        stops = []
+                        for i, r in enumerate(seg):
+                            stops.append({
+                                'name': (r.get('stationName') or '').strip(),
+                                'time_min': int(round((time_min or 0) * cum[i] / total_dist)),
+                                'lat': float(r.get('y')) if r.get('y') is not None else None,
+                                'lng': float(r.get('x')) if r.get('x') is not None else None,
+                            })
+                        return {
+                            'mode': 'bus',
+                            'line': (lane.get('busNo') or bus_no),
+                            'from': stops[0]['name'],
+                            'to': stops[-1]['name'],
+                            'stops': stops,
+                            'time_min': int(time_min or 0),
+                            'station_count': max(0, len(stops) - 1),
+                            'source': 'odsay_bus',
+                            'note': '',
+                        }
+    except Exception:
+        pass
+
+    m = re.search(r'(\d+)\s*(?:개\s*)?(?:정류장|정거장)', detail or '')
+    count = int(m.group(1)) if m else None
+    return {
+        'mode': 'bus',
+        'line': line or '버스',
+        'from': fname,
+        'to': tname,
+        'stops': [{'name': fname, 'time_min': 0}, {'name': tname, 'time_min': int(time_min or 0)}],
+        'time_min': int(time_min or 0),
+        'station_count': count,
+        'source': 'fallback',
+        'note': '정류장 전체 목록을 불러오지 못해 현재 구간만 표시합니다.',
+    }
+
+
+@tongbot_bp.route('/api/bot/route/line-map', methods=['POST'])
+def bot_route_line_map():
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({"error": "로그인이 필요합니다."}), 401
+    d = request.get_json(silent=True) or {}
+    mode = (d.get('mode') or '').strip().lower()
+    if mode not in ('subway', 'bus'):
+        return jsonify({'error': '지하철 또는 버스만 지원합니다.'}), 400
+    fname = (d.get('from_name') or '').strip()
+    tname = (d.get('to_name') or '').strip()
+    if not fname or not tname:
+        return jsonify({'error': '출발/도착 정류장이 필요합니다.'}), 400
+    line = (d.get('line') or '').strip()
+    detail = (d.get('detail') or '').strip()
+    try:
+        time_min = int(float(d.get('time_min') or 0))
+    except Exception:
+        time_min = 0
+
+    cached = _line_map_cache_get(mode, line, fname, tname)
+    if cached:
+        cached['cached'] = True
+        return jsonify(cached)
+
+    data = (_subway_line_map(fname, tname, line, time_min, detail)
+            if mode == 'subway' else _bus_line_map(fname, tname, line, time_min, detail))
+    if data.get('source') != 'fallback':
+        _line_map_cache_set(mode, line, fname, tname, data)
+    return jsonify(data)
+
+
+@tongbot_bp.route('/api/bot/place/search')
+def bot_place_search():
+    """장소 후보 검색 (네이버 지역검색 → 지오코딩 fallback). q가 없으면 최근 장소."""
+    uid = session.get('user_id')
+    if not uid: return jsonify({"error":"로그인 필요"}), 401
+    q = (request.args.get('q') or '').strip()
+    lat = request.args.get('lat', type=float)
+    lng = request.args.get('lng', type=float)
+
+    if not q:
+        rows = TongBotSchedule.query.filter(
+            TongBotSchedule.user_id == uid,
+            TongBotSchedule.location.isnot(None),
+            TongBotSchedule.location != '',
+        ).order_by(TongBotSchedule.event_date.desc()).limit(60).all()
+        seen, items = set(), []
+        for r in rows:
+            name = (r.location or '').strip()
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            items.append({'name': name, 'address': '', 'lat': None, 'lng': None, 'category': 'recent'})
+            if len(items) >= 8:
+                break
+        return jsonify({'items': items, 'source': 'recent'})
+
+    items = []
+    naver_id = (current_app.config.get('NAVER_SEARCH_CLIENT_ID') or
+                current_app.config.get('NAVER_CLIENT_ID') or os.getenv('NAVER_SEARCH_CLIENT_ID') or
+                os.getenv('NAVER_CLIENT_ID') or '')
+    naver_secret = (current_app.config.get('NAVER_SEARCH_CLIENT_SECRET') or
+                    current_app.config.get('NAVER_CLIENT_SECRET') or os.getenv('NAVER_SEARCH_CLIENT_SECRET') or
+                    os.getenv('NAVER_CLIENT_SECRET') or '')
+    if naver_id and naver_secret:
+        try:
+            params = {'query': q, 'display': 10}
+            if lat and lng:
+                params['x'] = str(lng)
+                params['y'] = str(lat)
+            resp = requests.get(
+                'https://openapi.naver.com/v1/search/local.json',
+                headers={'X-Naver-Client-Id': naver_id, 'X-Naver-Client-Secret': naver_secret},
+                params=params, timeout=8,
+            )
+            if resp.status_code == 200:
+                for it in (resp.json().get('items') or []):
+                    try:
+                        mx = int(it.get('mapx') or 0) / 1e7
+                        my = int(it.get('mapy') or 0) / 1e7
+                    except Exception:
+                        mx = my = None
+                    items.append({
+                        'name': (it.get('title') or '').replace('<b>', '').replace('</b>', ''),
+                        'address': it.get('roadAddress') or it.get('address') or '',
+                        'lat': my, 'lng': mx,
+                        'category': it.get('category') or '',
+                    })
+        except Exception:
+            pass
+
+    if not items:
+        try:
+            from services.transit import geocode_address
+            geo = geocode_address(
+                q,
+                current_app.config.get('KAKAO_REST_API_KEY') or os.getenv('KAKAO_REST_API_KEY', ''),
+                naver_id, naver_secret,
+            )
+            if geo and geo.get('lat'):
+                items.append({
+                    'name': geo.get('address') or q,
+                    'address': geo.get('address') or '',
+                    'lat': geo.get('lat'), 'lng': geo.get('lng'),
+                    'category': 'geocode',
+                })
+        except Exception:
+            pass
+
+    seen, out = set(), []
+    for it in items:
+        key = (it.get('name') or '', it.get('address') or '')
+        if not it.get('name') or key in seen:
+            continue
+        seen.add(key)
+        out.append(it)
+    return jsonify({'items': out[:10], 'source': 'search'})
 
 
 
@@ -3895,7 +4351,661 @@ def bot_route_shared_list():
         "creator_id":r.creator_id
     } for r in routes]})
 
+@tongbot_bp.route('/api/route/usage')
+def route_usage():
+    if not session.get('user_id'):
+        return jsonify({"error": "로그인이 필요합니다."}), 401
+    from services import route_guard as rg
+    from models import ProviderHealth
+    health = [{
+        'provider': h.provider, 'ok': h.ok_count or 0, 'fail': h.fail_count or 0,
+        'last_error': h.last_error or '',
+    } for h in ProviderHealth.query.all()]
+    return jsonify({'usage': rg.usage_summary(), 'health': health})
+
+@tongbot_bp.route('/api/transit/subway')
+def transit_subway():
+    if not session.get('user_id'):
+        return jsonify({"error": "로그인이 필요합니다."}), 401
+    from services.seoul_subway import arrivals
+    st = (request.args.get('station') or '').strip()
+    lines = (request.args.get('lines') or '').strip()
+    sub = set(lines.split(',')) if lines else None
+    return jsonify({'items': arrivals(st, limit=5, subway_ids=sub)})
 
 
+@tongbot_bp.route('/api/transit/train')
+def transit_train():
+    if not session.get('user_id'):
+        return jsonify({"error": "로그인이 필요합니다."}), 401
+    from services.tago_train import search_trains
+    f = (request.args.get('from') or '').strip()
+    t = (request.args.get('to') or '').strip()
+    d = (request.args.get('date') or '').strip() or None
+    return jsonify({'items': search_trains(f, t, d)})
+
+# ---------------------------------------------------------------- 구간별 경로 설계
+def _hm_min(t):
+    try:
+        h, m = str(t).split(':')[:2]
+        return int(h) * 60 + int(m)
+    except Exception:
+        return None
 
 
+def _leg_meta(steps):
+    transfers = 0
+    walk = 0
+    for st in steps or []:
+        m = st.get('mode') or ''
+        if ('버스' in m) or ('지하철' in m) or ('전철' in m) or ('열차' in m):
+            transfers += 1
+        if '도보' in m:
+            try:
+                walk += int(st.get('time_min') or 0)
+            except Exception:
+                pass
+    return {'transfers': max(0, transfers - 1), 'walk_min': walk}
+
+
+@tongbot_bp.route('/api/bot/route/segment-options', methods=['POST'])
+def route_segment_options():
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({"error": "로그인이 필요합니다."}), 401
+    d = request.get_json(silent=True) or {}
+    try:
+        flat = float(d.get('from_lat')); flng = float(d.get('from_lng'))
+        tlat = float(d.get('to_lat')); tlng = float(d.get('to_lng'))
+    except Exception:
+        return jsonify({"error": "좌표가 필요합니다."}), 400
+    fname = (d.get('from_name') or '').strip() or '출발지'
+    tname = (d.get('to_name') or '').strip() or '도착지'
+    arr = (d.get('arrival') or '').strip()
+    if ':' not in arr:
+        from datetime import datetime as _dt
+        arr = _dt.now().strftime('%H:%M')
+    try:
+        ah, am = [int(x) for x in arr.split(':')[:2]]
+        arrival_min = ah * 60 + am
+    except Exception:
+        arrival_min = 9 * 60
+    date = (d.get('date') or '').strip() or None
+
+    from services.directions import plan_segment, haversine_km
+    from services import yangpyeong_bus as yb
+    from services import seoul_transit as st
+    from services import train_route as tr
+
+    from services.directions import haversine_km as _hkm
+    km = haversine_km(flat, flng, tlat, tlng)
+    pref = _load_pref(uid)
+    items = []
+
+    def _ride_hint(plan):
+        for st in (plan.get('steps') or []):
+            if '버스' in (st.get('mode') or '') and (st.get('bus_no') or st.get('from')):
+                no = str(st.get('bus_no') or '').replace('번', '')
+                eta = st.get('eta_min')
+                if eta is not None:
+                    etc = f"({eta}분 후)"
+                elif st.get('departure'):
+                    etc = f"({st['departure']} 출발)"
+                else:
+                    etc = ''
+                return f"{no + '번' if no else ''}{etc} {st.get('from') or ''}→{st.get('to') or ''}"
+            if ('지하철' in (st.get('mode') or '') or '전철' in (st.get('mode') or '')) and st.get('subway_name'):
+                return f"{st['subway_name']} {st.get('from') or ''}→{st.get('to') or ''}"
+        return ''
+
+    def add(source, label, plan):
+        if not plan or not plan.get('steps'):
+            return
+        try:
+            from services.directions import stamp_steps
+            stamp_steps(plan, arr)
+        except Exception:
+            pass
+        # 탑승 준비: 정류장 도착 시각(마지막 도보 도착)과 여유 시간
+        # 직전 '대기'를 제외한 마지막 도착 시각 (도보/버스/지하철). 없으면 출발시각.
+        _last_arr = plan.get('departure') or None
+        for _st in plan['steps']:
+            _mode = _st.get('mode') or ''
+            if ('버스' in _mode or '지하철' in _mode or '전철' in _mode) and _st.get('departure'):
+                _ready = _last_arr
+                _dm = _hm_min(_st['departure'])
+                _pm = _hm_min(_ready) if _ready else None
+                if _dm is not None and _pm is not None:
+                    _slack = _dm - _pm
+                    if _slack < 0:
+                        _slack += 24 * 60
+                    _st['ready_at'] = _ready
+                    _st['slack_min'] = int(_slack)
+                    _st['wait_guide'] = 10
+            if _st.get('arrival') and '대기' not in _mode:
+                _last_arr = _st['arrival']
+        meta = _leg_meta(plan['steps'])
+        items.append({
+            'source': source, 'label': label,
+            'total_min': plan.get('total_min') or 0,
+            'steps': plan.get('steps') or [],
+            'transfers': meta['transfers'], 'walk_min': meta['walk_min'],
+            'distance_km': plan.get('distance_km') or round(km, 1),
+            'estimated': bool(plan.get('estimated')),
+            'departure': plan.get('departure') or '',
+            'arrival': plan.get('arrival') or '',
+            'late_min': int(plan.get('late_min') or 0),
+            'pref_rank': 0, 'violations': [],
+            'from_name': fname, 'to_name': tname,
+            'to_lat': tlat, 'to_lng': tlng,
+        })
+
+    # 0) 자체엔진 (양평 버스 시간표 기반)
+    try:
+        from services import transit_graph as tg
+        if tg.in_yangpyeong(flat, flng) and tg.in_yangpyeong(tlat, tlng):
+            for _i, _o in enumerate(tg.plan_options(flat, flng, tlat, tlng, arrival_min,
+                                                    limit=5, from_name=fname, to_name=tname)):
+                _hint = _ride_hint(_o)
+                _lbl = f'양평 버스 {_i + 1}' + (f' · {_hint}' if _hint else '')
+                if _o.get('late_min'):
+                    _lbl += f" ({_o['late_min']}분 늦음)"
+                add('yp_graph', _lbl, _o)
+    except Exception:
+        pass
+
+    # 1) 공공자전거 (설정에서 사용 + 브랜드 선택 시)
+    if pref.get('bike_enabled') and 0.8 <= km <= 8.0:
+        try:
+            from services import public_bike as pb
+            bm = pb.brand_map()
+            for bid in (pref.get('bike_brands') or []):
+                br = bm.get(bid)
+                if not br or not br.get('available'):
+                    continue
+                sa = pb.near(flat, flng, 0.8, 1)
+                sb = pb.near(tlat, tlng, 0.8, 1)
+                if not sa or not sb:
+                    continue
+                a, b = sa[0], sb[0]
+                wa = max(1, int(round(a['distance_m'] / 1000 / 4.5 * 60)) + 1)
+                wb = max(1, int(round(b['distance_m'] / 1000 / 4.5 * 60)) + 1)
+                ride_km = max(0.3, _hkm(a['lat'], a['lng'], b['lat'], b['lng']) * 1.25)
+                ride = max(3, int(round(ride_km / 13 * 60)) + 3)
+                steps = [
+                    {'mode': '🚶 도보', 'from': fname, 'to': a['name'],
+                     'detail': f"대여소까지 {a['distance_m']}m", 'time_min': wa},
+                    {'mode': '🚲 자전거', 'from': a['name'], 'to': b['name'],
+                     'detail': f"{br['name']} {ride_km:.1f}km · 대여 {a['bikes']}대",
+                     'time_min': ride, 'bike_brand': br['name'],
+                     'bike_from': a['name'], 'bike_to': b['name']},
+                    {'mode': '🚶 도보', 'from': b['name'], 'to': tname,
+                     'detail': f"도착지까지 {b['distance_m']}m", 'time_min': wb},
+                ]
+                total = wa + ride + wb
+                add('bike', f"공공자전거({br['name']}) {total}분 · {a['name']}→{b['name']}", {
+                    'steps': steps, 'total_min': total,
+                    'distance_km': round(ride_km + (a['distance_m'] + b['distance_m']) / 1000, 1),
+                    'estimated': True,
+                })
+        except Exception:
+            pass
+
+    # 2) 도보
+    if km <= 5:
+        wmin = max(1, int(km / 4.5 * 60) + 2)
+        add('walk', f'도보 {wmin}분', {
+            'steps': [{'mode': '🚶 도보', 'from': fname, 'to': tname,
+                       'detail': f'도보 {wmin}분 ({km:.1f}km)', 'time_min': wmin}],
+            'total_min': wmin, 'distance_km': round(km, 1), 'estimated': False,
+        })
+
+    # 2) 택시 (네이버 자동차 길찾기 키가 있으면 실제 도로 기준)
+    if km >= 1:
+        from services.naver_route import taxi_estimate
+        te = taxi_estimate(flat, flng, tlat, tlng)
+        road = float(te.get('distance_km') or round(km * 1.3, 1))
+        tmin = int(te.get('duration_min') or (int(road / 40 * 60) + 5))
+        fare = int(te.get('fare') or round(road * 1500 + 3800, -2))
+        _src_txt = '네이버 길찾기' if te.get('source') == 'naver' else '추정'
+        add('taxi', f'택시 {tmin}분 · 약 {fare:,}원', {
+            'steps': [{'mode': '🚕 택시', 'from': fname, 'to': tname,
+                       'detail': f'택시 {tmin}분 ({road:.1f}km, 약 {fare:,}원, {_src_txt})',
+                       'time_min': tmin}],
+            'total_min': tmin, 'distance_km': road,
+            'estimated': te.get('source') != 'naver',
+        })
+
+    # 3) 양평 버스 시간표
+    try:
+        yp = yb.plan(fname, tname, arrival_min, direct_km=km)
+        if yp:
+            add('yp_bus', '양평 버스', yp)
+    except Exception:
+        pass
+
+    # 4) 서울 대중교통
+    try:
+        sp = st.plan(flat, flng, tlat, tlng, arrival_min)
+        if sp:
+            add('seoul', '서울 대중교통', sp)
+    except Exception:
+        pass
+
+    # 5) 경의중앙선 + 서울 대중교통 조합 (양평↔서울)
+    try:
+        from services import rail_seoul as rs
+        for rp in rs.plan_all(fname, flat, flng, tname, tlat, tlng, arrival_min, date=date):
+            _hint = _ride_hint(rp)
+            _suffix = f' · {_hint}' if _hint else ''
+            if rp.get('source') == 'bus_seoul':
+                add('bus_seoul', f"광역버스+서울 {rp.get('total_min')}분{_suffix}", rp)
+            else:
+                add('rail_seoul', f"경의중앙선+서울 {rp.get('total_min')}분{_suffix}", rp)
+    except Exception:
+        pass
+
+    # 6) 열차 (장거리)
+    if km >= 60:
+        try:
+            tp = tr.plan(fname, flat, flng, tname, tlat, tlng, arrival_min, date=date)
+            if tp:
+                add('train', '열차', tp)
+        except Exception:
+            pass
+
+    # 6) ODsay 대중교통 후보 여러 개 (한도 내)
+    try:
+        from services import route_guard as rg
+        from services.directions import odsay_transit_options
+        if rg.can_call('ODSAY'):
+            opts = odsay_transit_options(flat, flng, tlat, tlng, os.getenv('ODSAY_API_KEY'),
+                                         arrival_min=arrival_min, limit=3)
+            for i, o in enumerate(opts):
+                o.setdefault('departure', '')
+                o.setdefault('arrival', arr)
+                add(f'odsay{i+1}', f'대중교통 {i+1}', o)
+            if not opts:
+                p = plan_segment(fname, flat, flng, tname, tlat, tlng, arr,
+                                 naver_id=os.getenv('NAVER_CLIENT_ID'), naver_secret=os.getenv('NAVER_CLIENT_SECRET'),
+                                 odsay_key=os.getenv('ODSAY_API_KEY'), allow_paid=True, date=date)
+                if p:
+                    add(p.get('source') or 'transit', '대중교통', p)
+    except Exception:
+        pass
+
+    # 7) 내 실측 기록 기반
+    try:
+        st_ = _actual_stats(uid, flat, flng, tlat, tlng)
+        if st_ and st_.get('count', 0) >= 1:
+            add('actual', f"내 기록 기반 {st_['median']}분 ({st_['count']}회)", {
+                'steps': [{'mode': '🧭 내 기록', 'from': fname, 'to': tname,
+                           'detail': f"실측 평균 {st_['avg']}분 ({st_['count']}회, 최근 6개월)",
+                           'time_min': st_['median']}],
+                'total_min': st_['median'], 'distance_km': round(km, 1), 'estimated': False,
+            })
+    except Exception:
+        pass
+
+    # 7-0) 선형(폴리라인) 기반 버스 연결 — 정류소 목록이 없어도 실제 지나가는 노선
+    try:
+        from services import bus_polyline as bp
+        from datetime import datetime as _dt2, timedelta as _td2, date as _date2
+        _use_rt = True
+        _now = _dt2.now()
+        if date:
+            try:
+                _use_rt = _date2.fromisoformat(str(date)[:10]) == _now.date()
+            except Exception:
+                _use_rt = True
+        # 도착 희망 시각이 이미 지났거나 너무 멀면 실시간(지금 출발) 안내는 제외
+        try:
+            _nowm = _now.hour * 60 + _now.minute
+            if not (-10 <= (arrival_min - _nowm) <= 240):
+                _use_rt = False
+        except Exception:
+            pass
+        for _lk in (bp.options_near(flat, flng, tlat, tlng, limit=3) if _use_rt else []):
+            _dep = _dt2.now()
+            _arr = _dep + _td2(minutes=int(_lk['total_min']))
+            _steps = [
+                {'mode': '🚶 도보', 'from': fname, 'to': _lk['stop'],
+                 'detail': f"{_lk['stop_distance_m']}m", 'time_min': _lk['walk_min']},
+                {'mode': '🚏 대기', 'from': _lk['stop'], 'to': _lk['stop'],
+                 'detail': f"{_lk['route']}번 {_lk['eta_min']}분 후", 'time_min': _lk['eta_min']},
+                {'mode': '🚌 버스', 'from': _lk['stop'], 'to': tname,
+                 'detail': f"{_lk['route']}번 ({_lk['km']}km)", 'time_min': _lk['ride_min'],
+                 'bus_no': f"{_lk['route']}번", 'eta_min': _lk['eta_min'],
+                 'slack_min': _lk['eta_min']},
+            ]
+            add('bus_link', f"{_lk['route']}번({_lk['eta_min']}분 후) {_lk['stop']}→{tname}", {
+                'steps': _steps, 'total_min': _lk['total_min'],
+                'distance_km': _lk['km'], 'estimated': True,
+                'departure': _dep.strftime('%H:%M'), 'arrival': _arr.strftime('%H:%M'),
+            })
+    except Exception:
+        pass
+
+    # 7-1) 대중교통 후보가 전혀 없으면 거리 기반 추정이라도 제공
+    _has_transit = any((it.get('source') or '').startswith('odsay')
+                       or (it.get('source') in ('seoul', 'yp_bus', 'train', 'cache', 'transit',
+                                                'naver', 'google', 'yp_graph', 'rail_seoul', 'bus_seoul', 'bus_link'))
+                       for it in items)
+    if not _has_transit and km >= 1.0:
+        try:
+            from services.directions import _estimate_plan
+            add('estimate', '대중교통(추정)', _estimate_plan(fname, tname, km, arrival_min))
+        except Exception:
+            pass
+
+    # 중복 제거 (같은 구간 구성)
+    seen = set(); out = []
+    for it in items:
+        sig = tuple((x.get('mode'), x.get('from'), x.get('to'), x.get('time_min')) for x in it['steps'])
+        if sig in seen:
+            continue
+        seen.add(sig); out.append(it)
+    # 8) 회원 설정 반영 (도보 한도·수단 선호 순서)
+    walk_max = int(pref.get('walk_max_min') or 10)
+    order = list(pref.get('mode_order') or [])
+    if pref.get('bike_enabled') and '자전거' not in order:
+        order.append('자전거')
+
+    def _mode_of(st):
+        m = st.get('mode') or ''
+        if '자전거' in m:
+            return '자전거'
+        if '택시' in m:
+            return '택시'
+        if '버스' in m:
+            return '버스'
+        if ('지하철' in m) or ('전철' in m):
+            return '지하철'
+        if ('기차' in m) or ('열차' in m) or ('KTX' in m):
+            return '기차'
+        if '도보' in m:
+            return '도보'
+        return None
+
+    for it in out:
+        modes = [_mode_of(x) for x in it['steps']]
+        modes = [m for m in modes if m]
+        rides = [m for m in modes if m != '도보']
+        viol = []
+        if int(it.get('walk_min') or 0) > walk_max:
+            viol.append(f"도보 {it.get('walk_min')}분 (설정 {walk_max}분 초과)")
+        first = rides[0] if rides else ('도보' if modes else '')
+        pref_id = '지하철' if first == '기차' else first
+        rank = order.index(pref_id) if (order and pref_id in order) else (99 if rides else 0)
+        if rides and order and pref_id not in order:
+            viol.append(f"선호 순서에 없는 수단: {first}")
+        for m in rides[1:]:
+            pid = '지하철' if m == '기차' else m
+            if order and pid not in order:
+                viol.append(f"포함된 수단: {m}")
+                break
+        it['pref_rank'] = rank
+        it['violations'] = viol
+
+    # 설정 위반 → 선호 순위 → 소요시간 순
+    out.sort(key=lambda x: (len(x['violations']), x['pref_rank'], x['total_min']))
+    return jsonify({'items': out, 'distance_km': round(km, 1), 'pref': pref,
+                    'walk_max_min': walk_max})
+
+# ---------------------------------------------------------------- 이동 기록 (실측)
+def _actual_stats(uid, flat, flng, tlat, tlng, months=6):
+    """같은 구간(약 150m 허용)의 실측 기록 통계"""
+    from datetime import timedelta
+    from models import RouteActual
+    since = datetime.now() - timedelta(days=30 * months)
+    rows = RouteActual.query.filter(
+        RouteActual.user_id == uid,
+        RouteActual.created_at >= since,
+        RouteActual.duration_min > 0,
+        RouteActual.from_lat.isnot(None),
+        RouteActual.to_lat.isnot(None),
+    ).all()
+    def near(a, b):
+        return a is not None and b is not None and abs(float(a) - float(b)) <= 0.0015
+    same = [r for r in rows if near(r.from_lat, flat) and near(r.from_lng, flng)
+            and near(r.to_lat, tlat) and near(r.to_lng, tlng)]
+    if not same:
+        return None
+    ds = sorted(r.duration_min for r in same)
+    med = ds[len(ds) // 2]
+    return {'count': len(ds), 'median': med, 'avg': round(sum(ds) / len(ds), 1),
+            'min': ds[0], 'max': ds[-1]}
+
+
+@tongbot_bp.route('/api/bot/route/<int:sid>/track/start', methods=['POST'])
+def route_track_start(sid):
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({"error": "로그인이 필요합니다."}), 401
+    from models import RouteActual
+    s = TongBotSchedule.query.get_or_404(sid)
+    if s.user_id != uid:
+        return jsonify({"error": "권한 없음"}), 403
+    d = request.get_json(silent=True) or {}
+    row = RouteActual(
+        user_id=uid, schedule_id=sid,
+        from_name=(d.get('from_name') or s.departure_location or '')[:100],
+        to_name=(d.get('to_name') or s.location or '')[:100],
+        from_lat=d.get('from_lat'), from_lng=d.get('from_lng'),
+        to_lat=d.get('to_lat'), to_lng=d.get('to_lng'),
+        started_at=datetime.now(), points_json='[]',
+    )
+    db.session.add(row); db.session.commit()
+    return jsonify({'status': 'ok', 'id': row.id})
+
+
+@tongbot_bp.route('/api/bot/route/track/<int:rid>/append', methods=['POST'])
+def route_track_append(rid):
+    uid = session.get('user_id')
+    from models import RouteActual
+    row = RouteActual.query.get_or_404(rid)
+    if row.user_id != uid:
+        return jsonify({"error": "권한 없음"}), 403
+    d = request.get_json(silent=True) or {}
+    try:
+        pts = json.loads(row.points_json or '[]')
+    except Exception:
+        pts = []
+    for p in (d.get('points') or []):
+        if len(pts) >= 2000:
+            break
+        try:
+            pts.append([float(p.get('lat')), float(p.get('lng')), int(p.get('ts') or 0)])
+        except Exception:
+            continue
+    row.points_json = json.dumps(pts, ensure_ascii=False)
+    db.session.commit()
+    return jsonify({'status': 'ok', 'count': len(pts)})
+
+
+@tongbot_bp.route('/api/bot/route/track/<int:rid>/stop', methods=['POST'])
+def route_track_stop(rid):
+    uid = session.get('user_id')
+    from models import RouteActual
+    row = RouteActual.query.get_or_404(rid)
+    if row.user_id != uid:
+        return jsonify({"error": "권한 없음"}), 403
+    from services.directions import haversine_km
+    try:
+        pts = json.loads(row.points_json or '[]')
+    except Exception:
+        pts = []
+    dist = 0.0
+    for i in range(1, len(pts)):
+        dist += haversine_km(pts[i - 1][0], pts[i - 1][1], pts[i][0], pts[i][1])
+    row.ended_at = datetime.now()
+    row.duration_min = max(1, int((row.ended_at - row.started_at).total_seconds() // 60))
+    row.distance_km = round(dist, 2)
+    # 저장 용량 절감: 5점 간격으로 단순화
+    row.points_json = json.dumps(pts[::5], ensure_ascii=False)
+    db.session.commit()
+    return jsonify({'status': 'ok', 'duration_min': row.duration_min, 'distance_km': row.distance_km})
+
+
+@tongbot_bp.route('/api/bot/route/<int:sid>/actuals')
+def route_actuals(sid):
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({"error": "로그인이 필요합니다."}), 401
+    from models import RouteActual
+    s = TongBotSchedule.query.get_or_404(sid)
+    if s.user_id != uid:
+        return jsonify({"error": "권한 없음"}), 403
+    try:
+        c = json.loads(s.content or 'null') or {}
+    except Exception:
+        c = {}
+    stats = _actual_stats(uid, c.get('from_lat'), c.get('from_lng'), c.get('to_lat'), c.get('to_lng'))
+    rows = RouteActual.query.filter_by(user_id=uid, schedule_id=sid).order_by(RouteActual.id.desc()).limit(10).all()
+    return jsonify({'stats': stats, 'items': [{
+        'id': r.id, 'duration_min': r.duration_min, 'distance_km': r.distance_km,
+        'started_at': r.started_at.isoformat() if r.started_at else '',
+        'ended_at': r.ended_at.isoformat() if r.ended_at else '',
+    } for r in rows]})
+
+# ---------------------------------------------------------------- 경로 추천 설정
+DEFAULT_PREF = {
+    'walk_max_min': 10,
+    'bike_enabled': False,
+    'bike_brands': [],
+    'mode_order': ['버스', '지하철', '택시'],
+}
+
+
+def _load_pref(uid):
+    from models import UserRoutePref
+    row = UserRoutePref.query.filter_by(user_id=uid).first()
+    if not row:
+        return dict(DEFAULT_PREF, bike_brands=[], mode_order=list(DEFAULT_PREF['mode_order']))
+    try:
+        brands = json.loads(row.bike_brands or '[]')
+    except Exception:
+        brands = []
+    try:
+        order = json.loads(row.mode_order or '[]')
+    except Exception:
+        order = list(DEFAULT_PREF['mode_order'])
+    return {
+        'walk_max_min': int(row.walk_max_min or 10),
+        'bike_enabled': bool(row.bike_enabled),
+        'bike_brands': brands if isinstance(brands, list) else [],
+        'mode_order': order if isinstance(order, list) else list(DEFAULT_PREF['mode_order']),
+    }
+
+
+@tongbot_bp.route('/api/bot/route/preferences', methods=['GET', 'POST'])
+def route_preferences():
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({"error": "로그인이 필요합니다."}), 401
+    from models import db, UserRoutePref
+    row = UserRoutePref.query.filter_by(user_id=uid).first()
+    if request.method == 'GET':
+        return jsonify({'pref': _load_pref(uid)})
+
+    d = request.get_json(silent=True) or {}
+    try:
+        walk = int(d.get('walk_max_min', 10))
+    except Exception:
+        walk = 10
+    walk = max(1, min(60, walk))
+    brands = d.get('bike_brands')
+    if not isinstance(brands, list):
+        brands = []
+    brands = [str(b)[:30] for b in brands][:10]
+    order = d.get('mode_order')
+    allowed = ('버스', '지하철', '택시', '자전거', '기차')
+    if not isinstance(order, list):
+        order = []
+    order = [m for m in (str(x) for x in order) if m in allowed][:5]
+
+    if not row:
+        row = UserRoutePref(user_id=uid)
+        db.session.add(row)
+    row.walk_max_min = walk
+    row.bike_enabled = bool(d.get('bike_enabled'))
+    row.bike_brands = json.dumps(brands, ensure_ascii=False)
+    row.mode_order = json.dumps(order, ensure_ascii=False)
+    db.session.commit()
+    return jsonify({'status': 'ok', 'pref': _load_pref(uid)})
+
+@tongbot_bp.route('/api/bot/bike/near')
+def bike_near():
+    """공공자전거 브랜드/대여소 조회"""
+    from services import public_bike as pb
+    lat = request.args.get('lat', type=float)
+    lng = request.args.get('lng', type=float)
+    radius = request.args.get('radius', 0.7, type=float)
+    limit = min(20, request.args.get('limit', 8, type=int))
+    wanted = [x.strip() for x in (request.args.get('brands') or '').split(',') if x.strip()]
+    out = {'brands': pb.brands(), 'stations': [], 'status': pb.status()}
+    if lat is not None and lng is not None:
+        if not wanted:
+            wanted = [b['id'] for b in pb.brands() if b.get('available')]
+        if 'ttaereung' in wanted:
+            out['stations'] = pb.near(lat, lng, max(0.1, min(2.0, radius)), limit)
+    return jsonify(out)
+
+@tongbot_bp.route('/api/bot/bus/near')
+def bus_near():
+    """좌표 주변 정류장 + 실시간 도착 (경로 수정 화면용)"""
+    from models import BusStopMap
+    from services.directions import haversine_km
+    try:
+        lat = float(request.args.get('lat'))
+        lng = float(request.args.get('lng'))
+    except Exception:
+        return jsonify({'error': '좌표가 필요합니다.'}), 400
+    radius = min(2000.0, max(100.0, request.args.get('radius', 800, type=float)))
+    limit = min(6, request.args.get('limit', 3, type=int))
+
+    rows = BusStopMap.query.all()
+    near = []
+    for r in rows:
+        if not (r.lat and r.lng):
+            continue
+        d = haversine_km(lat, lng, r.lat, r.lng)
+        if d * 1000 <= radius:
+            near.append((d, r))
+    near.sort(key=lambda x: x[0])
+
+    # 경유 노선 (양평 시간표 그래프)
+    routes_by_key = {}
+    try:
+        from services import transit_graph as tg
+        g = tg.build_graph()
+        for k, ris in g.get('by_stop', {}).items():
+            routes_by_key[k] = sorted({g['routes'][i]['no'] for i in ris})
+    except Exception:
+        pass
+
+    out = []
+    seen = set()
+    for d, r in near:
+        if len(out) >= limit:
+            break
+        key = (r.name, round(r.lat, 4), round(r.lng, 4))
+        if key in seen:
+            continue
+        seen.add(key)
+        realtime = []
+        try:
+            from services import tago_arrival
+            realtime = tago_arrival.arrivals(r.city_code, r.node_id, limit=4) or []
+        except Exception:
+            realtime = []
+        out.append({
+            'name': r.name,
+            'city_code': r.city_code,
+            'node_id': r.node_id,
+            'lat': r.lat, 'lng': r.lng,
+            'distance_m': int(round(d * 1000)),
+            'routes': routes_by_key.get(__import__('services.transit_graph', fromlist=['stop_key']).stop_key(r.name), [])[:8],
+            'realtime': realtime,
+        })
+    return jsonify({'stops': out})

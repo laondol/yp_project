@@ -92,3 +92,12 @@ class Config:
         'client_secret': NAVER_CLIENT_SECRET,
     } if NAVER_CLIENT_ID else None
     ODCLOUD_API_KEY = os.getenv('ODCLOUD_API_KEY', '')
+    SEOUL_SUBWAY_API_KEY = os.getenv('SEOUL_SUBWAY_API_KEY', '')
+
+    # 모바일 앱(/api/app/*) — Bearer JWT, 웹 세션과 분리
+    # APP_JWT_SECRET 미설정 시 SECRET_KEY에서 파생(별도 .env 설정 권장)
+    APP_JWT_SECRET = os.getenv('APP_JWT_SECRET', '')
+    APP_JWT_DAYS = int(os.getenv('APP_JWT_DAYS', '30'))
+    APP_LOGIN_MAX_FAILS = int(os.getenv('APP_LOGIN_MAX_FAILS', '5'))
+    APP_LOGIN_WINDOW_MIN = int(os.getenv('APP_LOGIN_WINDOW_MIN', '15'))
+    APP_TRIP_RETENTION_DAYS = int(os.getenv('APP_TRIP_RETENTION_DAYS', '180'))

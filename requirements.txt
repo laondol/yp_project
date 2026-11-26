@@ -1,5 +1,6 @@
 flask
 flask-sqlalchemy
+SQLAlchemy<2.1  # 2.1부터 postgresql:// 기본 DBAPI가 psycopg3로 바뀌어 기존 psycopg2 환경과 충돌
 flask-cors
 flask-migrate
 requests
@@ -15,3 +16,5 @@ authlib
 psycopg2-binary  # LGPL-3.0 with exceptions - dynamic linking only, no modifications
 pywebpush
 piexif
+PyJWT  # 모바일 앱 Bearer JWT (HS256) + FCM/APNs 토큰 서명
+httpx[http2]  # APNs HTTP/2 발송

@@ -831,3 +831,85 @@ def admin_ai_broadcasts_delete(b_id):
     db.session.commit()
     return jsonify({"success": True})
 
+@admin_bp.route('/api/admin/route-eval/run', methods=['POST'])
+def admin_route_eval_run():
+    if session.get('role') != 'admin':
+        return jsonify({'status': 'error', 'msg': '관리자만 실행할 수 있습니다.'}), 403
+    from services.route_eval import run_all
+    d = request.get_json(silent=True) or {}
+    try:
+        res = run_all(limit=d.get('limit'), providers=d.get('providers'))
+        return jsonify({'status': 'ok', **res})
+    except Exception as e:
+        return jsonify({'status': 'error', 'msg': str(e)}), 500
+
+
+@admin_bp.route('/api/admin/route-eval/summary')
+def admin_route_eval_summary():
+    if session.get('role') != 'admin':
+        return jsonify({'status': 'error', 'msg': '관리자만 조회할 수 있습니다.'}), 403
+    from services.route_eval import summary
+    days = request.args.get('days', 30, type=int)
+    return jsonify(summary(days=days))
+
+@admin_bp.route('/api/admin/route-eval/graph')
+def admin_route_eval_graph():
+    """자체 경로엔진(양평 버스 시간표) 진단"""
+    if session.get('role') != 'admin':
+        return jsonify({'status': 'error', 'msg': '관리자만 조회할 수 있습니다.'}), 403
+    from services import transit_graph as tg
+    out = {'status': 'ok', 'stats': tg.stats(), 'options': []}
+    try:
+        flat = float(request.args.get('from_lat'))
+        flng = float(request.args.get('from_lng'))
+        tlat = float(request.args.get('to_lat'))
+        tlng = float(request.args.get('to_lng'))
+    except Exception:
+        return jsonify(out)
+    arr = request.args.get('arrival', '09:00')
+    try:
+        ah, am = [int(x) for x in arr.split(':')[:2]]
+        arrival_min = ah * 60 + am
+    except Exception:
+        arrival_min = 9 * 60
+    out['options'] = tg.plan_options(
+        flat, flng, tlat, tlng, arrival_min, limit=4,
+        from_name=request.args.get('from_name', '출발지'),
+        to_name=request.args.get('to_name', '도착지'))
+    return jsonify(out)
+
+
+@admin_bp.route('/api/admin/bus-stop-map', methods=['GET', 'POST', 'DELETE'])
+def admin_bus_stop_map():
+    if session.get('role') != 'admin':
+        return jsonify({'status': 'error', 'msg': '관리자만 가능합니다.'}), 403
+    from models import db, BusStopMap
+    if request.method == 'POST':
+        d = request.get_json(silent=True) or {}
+        items = d.get('items') if isinstance(d.get('items'), list) else [d]
+        n = 0
+        for it in items:
+            cc = str(it.get('city_code') or '').strip()
+            nid = str(it.get('node_id') or '').strip()
+            if not cc or not nid:
+                continue
+            row = BusStopMap.query.filter_by(city_code=cc, node_id=nid).first()
+            if not row:
+                row = BusStopMap(city_code=cc, node_id=nid)
+                db.session.add(row)
+            row.name = str(it.get('name') or '')
+            if it.get('lat') is not None:
+                row.lat = float(it.get('lat'))
+            if it.get('lng') is not None:
+                row.lng = float(it.get('lng'))
+            n += 1
+        db.session.commit()
+        return jsonify({'status': 'ok', 'saved': n})
+    if request.method == 'DELETE':
+        nid = (request.args.get('node_id') or '').strip()
+        BusStopMap.query.filter_by(node_id=nid).delete()
+        db.session.commit()
+        return jsonify({'status': 'ok'})
+    rows = BusStopMap.query.order_by(BusStopMap.city_code, BusStopMap.name).all()
+    return jsonify({'items': [{'city_code': r.city_code, 'node_id': r.node_id,
+                               'name': r.name, 'lat': r.lat, 'lng': r.lng} for r in rows]})

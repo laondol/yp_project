@@ -172,6 +172,14 @@ def _gen_occurrences(base):
 
 from .geo import _geocode_location
 
+def _paid_allowed():
+    try:
+        from services import route_guard as _rg
+        return _rg.usage_today('ODSAY') < 10
+    except Exception:
+        return True
+
+
 def _ensure_day_routes(uid, evt_date, exclude_ids=None):
     """Recalculate all 이동/귀가 routes for a given day based on current non-이동/귀가 events."""
     user = User.query.get(uid)
@@ -321,7 +329,8 @@ def _ensure_day_routes(uid, evt_date, exclude_ids=None):
             continue
         plan_to = plan_segment(from_time, from_lat, from_lng, evt.location, loc_lat, loc_lng,
             arr_dt.strftime("%H:%M"), home_town=user.town or '', home_village=user.village or '',
-            naver_id=naver_id, naver_secret=naver_secret, odsay_key=odsay_key, google_key=google_key)
+            naver_id=naver_id, naver_secret=naver_secret, odsay_key=odsay_key, google_key=google_key,
+            allow_paid=_paid_allowed(), date=evt_date.strftime('%Y%m%d'))
         plan_to.update({"from_lat":from_lat,"from_lng":from_lng,"to_lat":loc_lat,"to_lng":loc_lng})
         dep_dt = arr_dt - timedelta(minutes=plan_to['total_min'])
         # 외출일(처리 기준일)에 고정: 이동 출발이 전날/다음 날로 밀리지 않도록 클램프
@@ -380,7 +389,8 @@ def _ensure_day_routes(uid, evt_date, exclude_ids=None):
                 target_arrival = "22:00"
                 plan_home = plan_segment(last_loc, last_lat, last_lng, return_dest, return_lat, return_lng, target_arrival,
                     home_town=user.town or '', home_village=user.village or '',
-                    naver_id=naver_id, naver_secret=naver_secret, odsay_key=odsay_key, google_key=google_key)
+                    naver_id=naver_id, naver_secret=naver_secret, odsay_key=odsay_key, google_key=google_key,
+                    allow_paid=_paid_allowed(), date=evt_date.strftime('%Y%m%d'))
                 plan_home.update({"from_lat":last_lat,"from_lng":last_lng,"to_lat":return_lat,"to_lng":return_lng})
                 _compact_home = format_memo_compact(plan_home)
                 _narrative_home = format_memo_narrative(plan_home, origin_name=last_loc, dest_name=return_dest)

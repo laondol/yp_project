@@ -287,6 +287,35 @@ def run_attachment_archive_scheduler(app):
         time.sleep(86400)
 
 
+def purge_app_data(app):
+    """모바일 앱 보관 정책 1회 실행: trip_summary 6개월 파기 + 로그인 실패 기록 1일 정리."""
+    with app.app_context():
+        from models import AppLoginAttempt, AppTripSummary
+        days = int(app.config.get('APP_TRIP_RETENTION_DAYS') or 180)
+        cutoff = datetime.now() - timedelta(days=days)
+        removed = AppTripSummary.query.filter(AppTripSummary.created_at < cutoff).delete(
+            synchronize_session=False,
+        )
+        stale = AppLoginAttempt.query.filter(
+            AppLoginAttempt.created_at < datetime.now() - timedelta(days=1),
+        ).delete(synchronize_session=False)
+        db.session.commit()
+        return {'trips_purged': removed, 'login_attempts_purged': stale}
+
+
+def run_app_data_retention_scheduler(app):
+    """모바일 앱 데이터 보관 정책: trip_summary 6개월 후 파기, 로그인 실패 기록 1일 정리."""
+    time.sleep(240)
+    while True:
+        try:
+            stats = purge_app_data(app)
+            print(f"[APP-RETENTION] trips_purged={stats['trips_purged']} "
+                  f"login_attempts_purged={stats['login_attempts_purged']}")
+        except Exception as e:
+            print(f"[APP-RETENTION] error: {e}")
+        time.sleep(86400)
+
+
 def run_startup_tasks(app):
     for attempt in range(10):
         try:
@@ -520,6 +549,7 @@ def main():
     threading.Thread(target=run_news_score_scheduler, args=(app,), daemon=True).start()
     threading.Thread(target=run_news_cleanup_scheduler, args=(app,), daemon=True).start()
     threading.Thread(target=run_attachment_archive_scheduler, args=(app,), daemon=True).start()
+    threading.Thread(target=run_app_data_retention_scheduler, args=(app,), daemon=True).start()
 
     print("[SCHEDULER] All schedulers started. Keeping alive...")
     while True:

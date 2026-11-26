@@ -29,6 +29,7 @@ from route_modules.did_bp import did_bp
 from route_modules.note_bp import note_bp
 from route_modules.yard_bp import yard_bp
 from route_modules.discussion_bp import discussion_bp
+from route_modules.app_bp import app_bp
 from werkzeug.security import generate_password_hash
 import sys
 import os
@@ -89,6 +90,7 @@ def create_app():
     app.register_blueprint(did_bp)
     app.register_blueprint(note_bp)
     app.register_blueprint(discussion_bp)
+    app.register_blueprint(app_bp)
     
     # gunicorn에서도 실행되도록 초기화 보장
     with app.app_context():

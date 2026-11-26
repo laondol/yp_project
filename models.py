@@ -1623,3 +1623,254 @@ class NewsSource(db.Model):
     verify_date = db.Column(db.Boolean, default=False)
     enabled = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.now)
+
+
+# ---------------------------------------------------------------------------
+# 모바일 앱(/api/app/*) 전용 테이블
+# ---------------------------------------------------------------------------
+
+class AppRouteActual(db.Model):
+    """앱 출발/도착 체크인 실측 (계획 경로 1건당 1행)"""
+    __tablename__ = 'route_actual'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    plan_id = db.Column(db.Integer, db.ForeignKey('tong_bot_schedule.id', ondelete='SET NULL'), nullable=True, index=True)
+    route_kind = db.Column(db.String(20), default='move')  # move | return
+    depart_at = db.Column(db.DateTime, nullable=True)
+    arrive_at = db.Column(db.DateTime, nullable=True)
+    duration_min = db.Column(db.Integer, nullable=True)
+    depart_lat = db.Column(db.Float, nullable=True)
+    depart_lng = db.Column(db.Float, nullable=True)
+    arrive_lat = db.Column(db.Float, nullable=True)
+    arrive_lng = db.Column(db.Float, nullable=True)
+    transfers = db.Column(db.Integer, nullable=True)
+    walk_min = db.Column(db.Integer, nullable=True)
+    wait_min = db.Column(db.Integer, nullable=True)
+    source = db.Column(db.String(20), default='checkin')  # checkin | manual
+    memo = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+
+class AppTripSummary(db.Model):
+    """앱이 업로드한 이동 요약 (6개월 보관, 좌표는 출발/도착 중심)"""
+    __tablename__ = 'trip_summary'
+    id = db.Column(db.Integer, primary_key=True)
+    user_ref = db.Column(db.String(64), nullable=False, index=True)  # 익명 HMAC (user_id 원문 미저장)
+    plan_id = db.Column(db.Integer, nullable=True, index=True)
+    route_kind = db.Column(db.String(20), default='move')
+    start_at = db.Column(db.DateTime, nullable=False)
+    end_at = db.Column(db.DateTime, nullable=True)
+    duration_min = db.Column(db.Integer, nullable=False, default=0)
+    depart_lat = db.Column(db.Float, nullable=True)
+    depart_lng = db.Column(db.Float, nullable=True)
+    arrive_lat = db.Column(db.Float, nullable=True)
+    arrive_lng = db.Column(db.Float, nullable=True)
+    transfers = db.Column(db.Integer, nullable=True)
+    walk_min = db.Column(db.Integer, nullable=True)
+    wait_min = db.Column(db.Integer, nullable=True)
+    quality = db.Column(db.Integer, default=0)
+    segment_key = db.Column(db.String(80), nullable=True, index=True)
+    polyline_simplified = db.Column(db.Text, nullable=True)  # JSON [[lat,lng], ...] 단순화
+    created_at = db.Column(db.DateTime, default=datetime.now, index=True)
+
+
+class AppRouteStat(db.Model):
+    """익명 구간 통계 (요일·시간대별 소요시간 분포). 장기 보관"""
+    __tablename__ = 'route_stat'
+    id = db.Column(db.Integer, primary_key=True)
+    segment_key = db.Column(db.String(80), nullable=False, index=True)
+    dow = db.Column(db.Integer, nullable=False, default=0)  # 0=월 ... 6=일
+    hour_bucket = db.Column(db.Integer, nullable=False, default=0)  # 0~23
+    median_min = db.Column(db.Integer, nullable=True)
+    p25 = db.Column(db.Integer, nullable=True)
+    p75 = db.Column(db.Integer, nullable=True)
+    samples = db.Column(db.Integer, default=0)
+    __table_args__ = (
+        db.UniqueConstraint('segment_key', 'dow', 'hour_bucket', name='uq_route_stat_segment_dow_hour'),
+    )
+
+
+class AppRecommendation(db.Model):
+    """추천 후보 스냅샷 (plan_id 최신 1건 유지)"""
+    __tablename__ = 'recommendation'
+    id = db.Column(db.Integer, primary_key=True)
+    plan_id = db.Column(db.Integer, nullable=False, index=True)
+    options_json = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+
+class AppDevice(db.Model):
+    """앱 푸시 토큰 (APNs/FCM)"""
+    __tablename__ = 'app_device'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    platform = db.Column(db.String(16), default='ios')  # ios | android
+    push_token = db.Column(db.String(512), nullable=False, unique=True)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+
+class AppConsent(db.Model):
+    """앱 위치정보/통계 동의 이력"""
+    __tablename__ = 'app_consent'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    location = db.Column(db.Boolean, default=False)
+    background = db.Column(db.Boolean, default=False)
+    aggregate_use = db.Column(db.Boolean, default=False)
+    version = db.Column(db.String(20), default='1.0')
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+
+class AppLoginAttempt(db.Model):
+    """앱 로그인 실패 제한 (이메일/IP 원문 대신 해시만 저장)"""
+    __tablename__ = 'app_login_attempt'
+    id = db.Column(db.Integer, primary_key=True)
+    email_hash = db.Column(db.String(64), nullable=False, index=True)
+    ip_hash = db.Column(db.String(64), nullable=True, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.now, index=True)
+
+
+class RouteCache(db.Model):
+    """경로 API 결과 영구 캐시 (좌표 반올림 + 시간 버킷)"""
+    __tablename__ = 'route_cache'
+    id = db.Column(db.Integer, primary_key=True)
+    key = db.Column(db.String(120), unique=True, nullable=False, index=True)
+    steps_json = db.Column(db.Text, default='[]')
+    total_min = db.Column(db.Integer, default=0)
+    distance_km = db.Column(db.Float, default=0)
+    provider = db.Column(db.String(20), default='')
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+
+class ApiUsage(db.Model):
+    """제공자별 일일 호출 수"""
+    __tablename__ = 'api_usage'
+    id = db.Column(db.Integer, primary_key=True)
+    day = db.Column(db.String(10), nullable=False, index=True)
+    provider = db.Column(db.String(20), nullable=False, index=True)
+    count = db.Column(db.Integer, default=0)
+    __table_args__ = (db.UniqueConstraint('day', 'provider', name='uq_api_usage_day_provider'),)
+
+
+class ProviderHealth(db.Model):
+    """경로 제공자 상태 (성공/실패 횟수, 마지막 오류)"""
+    __tablename__ = 'provider_health'
+    id = db.Column(db.Integer, primary_key=True)
+    provider = db.Column(db.String(20), unique=True, nullable=False)
+    ok_count = db.Column(db.Integer, default=0)
+    fail_count = db.Column(db.Integer, default=0)
+    last_ok_at = db.Column(db.DateTime)
+    last_fail_at = db.Column(db.DateTime)
+    last_error = db.Column(db.String(200), default='')
+
+
+class PublicDataCache(db.Model):
+    """공공데이터 API 응답 캐시 (양평군 버스정보 등)"""
+    __tablename__ = 'public_data_cache'
+    id = db.Column(db.Integer, primary_key=True)
+    key = db.Column(db.String(120), unique=True, nullable=False, index=True)
+    payload = db.Column(db.Text, default='')
+    fetched_at = db.Column(db.DateTime, default=datetime.now)
+
+
+class RouteEval(db.Model):
+    """경로 제공자 비교 검증 결과 (하네스)"""
+    __tablename__ = 'route_eval'
+    id = db.Column(db.Integer, primary_key=True)
+    case_id = db.Column(db.String(40), index=True)
+    from_name = db.Column(db.String(100), default='')
+    to_name = db.Column(db.String(100), default='')
+    provider = db.Column(db.String(20), index=True)
+    total_min = db.Column(db.Integer, default=0)
+    transfers = db.Column(db.Integer, default=0)
+    walk_min = db.Column(db.Integer, default=0)
+    distance_km = db.Column(db.Float, default=0)
+    estimated = db.Column(db.Boolean, default=False)
+    ok = db.Column(db.Boolean, default=False)
+    error = db.Column(db.String(200), default='')
+    created_at = db.Column(db.DateTime, default=datetime.now, index=True)
+
+
+class BusStopMap(db.Model):
+    """TAGO 정밀 도착용 정류장 매핑 (cityCode + nodeId)"""
+    __tablename__ = 'bus_stop_map'
+    id = db.Column(db.Integer, primary_key=True)
+    city_code = db.Column(db.String(10), nullable=False, index=True)
+    node_id = db.Column(db.String(30), nullable=False, index=True)
+    name = db.Column(db.String(100), default='', index=True)
+    lat = db.Column(db.Float, nullable=True)
+    lng = db.Column(db.Float, nullable=True)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+    __table_args__ = (db.UniqueConstraint('city_code', 'node_id', name='uq_bus_stop_map'),)
+
+
+class RouteActual(db.Model):
+    """사용자가 실제로 이동한 기록 (경로 개선 반영용)"""
+    __tablename__ = 'route_track'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    schedule_id = db.Column(db.Integer, nullable=True, index=True)
+    from_name = db.Column(db.String(100), default='')
+    to_name = db.Column(db.String(100), default='')
+    from_lat = db.Column(db.Float)
+    from_lng = db.Column(db.Float)
+    to_lat = db.Column(db.Float)
+    to_lng = db.Column(db.Float)
+    started_at = db.Column(db.DateTime, default=datetime.now)
+    ended_at = db.Column(db.DateTime, nullable=True)
+    duration_min = db.Column(db.Integer, default=0)
+    distance_km = db.Column(db.Float, default=0)
+    points_json = db.Column(db.Text, default='[]')
+    created_at = db.Column(db.DateTime, default=datetime.now, index=True)
+
+class TransitStopGeo(db.Model):
+    """양평 버스 시간표 경유지 좌표 (자체 경로엔진용)"""
+    __tablename__ = 'transit_stop_geo'
+    id = db.Column(db.Integer, primary_key=True)
+    name_key = db.Column(db.String(100), nullable=False, unique=True, index=True)
+    name = db.Column(db.String(100), default='')
+    lat = db.Column(db.Float, nullable=True)
+    lng = db.Column(db.Float, nullable=True)
+    source = db.Column(db.String(20), default='')
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+class UserRoutePref(db.Model):
+    """회원별 경로 추천 설정 (도보 한도·자전거·수단 선호 순서)"""
+    __tablename__ = 'user_route_pref'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, unique=True, index=True)
+    walk_max_min = db.Column(db.Integer, default=10)
+    bike_enabled = db.Column(db.Boolean, default=False)
+    bike_brands = db.Column(db.Text, default='[]')
+    mode_order = db.Column(db.Text, default='["버스","지하철","택시"]')
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+class GbisRoute(db.Model):
+    """경기도 버스노선 (GBIS busrouteservice)"""
+    __tablename__ = 'gbis_route'
+    id = db.Column(db.Integer, primary_key=True)
+    route_id = db.Column(db.String(20), nullable=False, unique=True, index=True)
+    route_name = db.Column(db.String(40), default='', index=True)
+    route_type = db.Column(db.String(40), default='')
+    start_name = db.Column(db.String(80), default='')
+    end_name = db.Column(db.String(80), default='')
+    region = db.Column(db.String(40), default='')
+    admin = db.Column(db.String(60), default='')
+    first_time = db.Column(db.String(10), default='')
+    last_time = db.Column(db.String(10), default='')
+    peak_alloc = db.Column(db.Integer, default=0)
+    company = db.Column(db.String(60), default='')
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+
+class GbisRouteStop(db.Model):
+    """GBIS 노선 경유 정류소 (순번·좌표)"""
+    __tablename__ = 'gbis_route_stop'
+    id = db.Column(db.Integer, primary_key=True)
+    route_id = db.Column(db.String(20), nullable=False, index=True)
+    seq = db.Column(db.Integer, default=0)
+    station_id = db.Column(db.String(20), default='', index=True)
+    name = db.Column(db.String(100), default='', index=True)
+    lat = db.Column(db.Float)
+    lng = db.Column(db.Float)
+    __table_args__ = (db.UniqueConstraint('route_id', 'seq', name='uq_gbis_route_stop'),)

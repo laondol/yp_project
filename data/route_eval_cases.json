@@ -1,0 +1,166 @@
+[
+  {
+    "id": "yp-local-1",
+    "from_name": "양평역",
+    "from_lat": 37.491,
+    "from_lng": 127.487,
+    "to_name": "양평군청",
+    "to_lat": 37.4915,
+    "to_lng": 127.4885,
+    "arrive": "10:00"
+  },
+  {
+    "id": "yp-local-2",
+    "from_name": "양평터미널",
+    "from_lat": 37.4915,
+    "from_lng": 127.4876,
+    "to_name": "용문역",
+    "to_lat": 37.482,
+    "to_lng": 127.594,
+    "arrive": "10:00"
+  },
+  {
+    "id": "yp-local-3",
+    "from_name": "양평터미널",
+    "from_lat": 37.4915,
+    "from_lng": 127.4876,
+    "to_name": "여주터미널",
+    "to_lat": 37.295,
+    "to_lng": 127.637,
+    "arrive": "14:00"
+  },
+  {
+    "id": "yp-seoul-1",
+    "from_name": "양평역",
+    "from_lat": 37.491,
+    "from_lng": 127.487,
+    "to_name": "서울시청",
+    "to_lat": 37.5665,
+    "to_lng": 126.978,
+    "arrive": "10:00"
+  },
+  {
+    "id": "yp-seoul-2",
+    "from_name": "양평역",
+    "from_lat": 37.491,
+    "from_lng": 127.487,
+    "to_name": "강남역",
+    "to_lat": 37.4979,
+    "to_lng": 127.0276,
+    "arrive": "09:30"
+  },
+  {
+    "id": "seoul-1",
+    "from_name": "명동",
+    "from_lat": 37.5636,
+    "from_lng": 126.983,
+    "to_name": "강남역",
+    "to_lat": 37.4979,
+    "to_lng": 127.0276,
+    "arrive": "15:00"
+  },
+  {
+    "id": "seoul-2",
+    "from_name": "홍대입구",
+    "from_lat": 37.5572,
+    "from_lng": 126.9245,
+    "to_name": "서울역",
+    "to_lat": 37.5547,
+    "to_lng": 126.9707,
+    "arrive": "12:00"
+  },
+  {
+    "id": "seoul-3",
+    "from_name": "서울역",
+    "from_lat": 37.5547,
+    "from_lng": 126.9707,
+    "to_name": "김포공항",
+    "to_lat": 37.5583,
+    "to_lng": 126.7906,
+    "arrive": "18:00"
+  },
+  {
+    "id": "near-1",
+    "from_name": "양평역",
+    "from_lat": 37.491,
+    "from_lng": 127.487,
+    "to_name": "가평역",
+    "to_lat": 37.814,
+    "to_lng": 127.51,
+    "arrive": "11:00"
+  },
+  {
+    "id": "near-2",
+    "from_name": "광주터미널",
+    "from_lat": 37.429,
+    "from_lng": 127.255,
+    "to_name": "양평역",
+    "to_lat": 37.491,
+    "to_lng": 127.487,
+    "arrive": "13:00"
+  },
+  {
+    "id": "near-3",
+    "from_name": "이천터미널",
+    "from_lat": 37.272,
+    "from_lng": 127.435,
+    "to_name": "양평역",
+    "to_lat": 37.491,
+    "to_lng": 127.487,
+    "arrive": "16:00"
+  },
+  {
+    "id": "far-1",
+    "from_name": "양평역",
+    "from_lat": 37.491,
+    "from_lng": 127.487,
+    "to_name": "인천터미널",
+    "to_lat": 37.456,
+    "to_lng": 126.705,
+    "arrive": "10:00"
+  },
+  {
+    "id": "train-1",
+    "from_name": "서울",
+    "from_lat": 37.5547,
+    "from_lng": 126.9707,
+    "to_name": "강릉",
+    "to_lat": 37.764,
+    "to_lng": 128.899,
+    "arrive": "10:00",
+    "date": "20261126"
+  },
+  {
+    "id": "train-2",
+    "from_name": "서울",
+    "from_lat": 37.5547,
+    "from_lng": 126.9707,
+    "to_name": "부산",
+    "to_lat": 35.115,
+    "to_lng": 129.041,
+    "arrive": "10:00",
+    "date": "20261126"
+  },
+  {
+    "id": "train-3",
+    "from_name": "용산",
+    "from_lat": 37.529,
+    "from_lng": 126.965,
+    "to_name": "강릉",
+    "to_lat": 37.764,
+    "to_lng": 128.899,
+    "arrive": "10:00",
+    "date": "20261126"
+  },
+  {
+    "id": "train-4",
+    "from_name": "청량리",
+    "from_lat": 37.58,
+    "from_lng": 127.047,
+    "to_name": "강릉",
+    "to_lat": 37.764,
+    "to_lng": 128.899,
+    "arrive": "10:00",
+    "date": "20261126"
+  }
+]
