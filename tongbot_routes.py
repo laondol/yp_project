@@ -5078,3 +5078,47 @@ def bus_near():
             'realtime': realtime,
         })
     return jsonify({'stops': out})
+
+@tongbot_bp.route('/api/bot/route/providers')
+def route_providers():
+    """경로 추천에 사용하는 제공자 상태 (수동 확인용)"""
+    from services import route_guard as rg
+    out = {}
+    try:
+        from models import GbisRoute, GbisRouteStop
+        out['public'] = {
+            'name': '자체 공공데이터(경기버스정보)',
+            'ok': True,
+            'routes': GbisRoute.query.count(),
+            'stops': GbisRouteStop.query.count(),
+        }
+    except Exception as e:
+        out['public'] = {'name': '자체 공공데이터', 'ok': False, 'error': str(e)[:80]}
+
+    try:
+        limit = rg._limit('ODSAY')
+        used = rg.usage_today('ODSAY')
+        out['odsay'] = {
+            'name': 'ODsay 대중교통', 'ok': rg.can_call('ODSAY'),
+            'used': used, 'limit': limit, 'remaining': max(0, limit - used),
+        }
+    except Exception as e:
+        out['odsay'] = {'name': 'ODsay', 'ok': False, 'error': str(e)[:80]}
+
+    out['naver'] = {
+        'name': '네이버 지도',
+        'ok': bool(os.getenv('NAVER_MAPS_CLIENT_ID') or os.getenv('NAVER_DIRECTIONS_CLIENT_ID')),
+        'transit_api': False,
+        'note': '네이버는 대중교통 경로 API를 제공하지 않습니다(자동차 길찾기만, 별도 Maps 키 필요).',
+    }
+    out['kakao'] = {
+        'name': '카카오', 'ok': bool(os.getenv('KAKAO_REST_API_KEY')),
+        'note': '장소 검색용. 대중교통 경로 API 없음.',
+    }
+    try:
+        out['tago'] = {'name': 'TAGO 열차/버스', 'ok': rg.can_call('TAGO_TRAIN'),
+                       'used_train': rg.usage_today('TAGO_TRAIN'),
+                       'used_arrival': rg.usage_today('TAGO_ARRIVAL')}
+    except Exception:
+        pass
+    return jsonify({'providers': out})

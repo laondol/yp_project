@@ -189,6 +189,7 @@ export default function RouteEditorModal({ schedule, targetArrival, onClose, onS
   const [bikeStatus, setBikeStatus] = useState<{ available: boolean; stations: number; reason: string } | null>(null)
   const [prefSaving, setPrefSaving] = useState(false)
   const [prefSaved, setPrefSaved] = useState('')
+  const [providers, setProviders] = useState<any>(null)
   const [originEdit, setOriginEdit] = useState('')
   const [destEdit, setDestEdit] = useState('')
   const [endpointOpen, setEndpointOpen] = useState<'origin' | 'dest' | null>(null)
@@ -383,9 +384,17 @@ export default function RouteEditorModal({ schedule, targetArrival, onClose, onS
     })
   }
 
+  async function loadProviders() {
+    try {
+      const d = await fetch('/api/bot/route/providers', { credentials: 'include' }).then(r => r.json())
+      setProviders(d?.providers || null)
+    } catch { /* ignore */ }
+  }
+
   useEffect(() => {
     void loadPrefs()
     void loadBikeInfo()
+    void loadProviders()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [schedule?.id])
 
@@ -1221,6 +1230,18 @@ export default function RouteEditorModal({ schedule, targetArrival, onClose, onS
                 }} disabled={loading}>다시 찾기</button>
               </div>
 
+              {providers && (
+                <div className="small text-muted mb-2 d-flex flex-wrap gap-2 align-items-center"
+                  style={{ fontSize: 10 }}>
+                  <span className="badge bg-success">자체 공공데이터</span>
+                  <span>노선 {providers.public?.routes ?? 0} · 정류장 {(providers.public?.stops ?? 0).toLocaleString()}</span>
+                  <span className={`badge ${providers.odsay?.ok ? 'bg-primary' : 'bg-secondary'}`}>ODsay</span>
+                  <span>잔여 {providers.odsay?.remaining ?? 0}/{providers.odsay?.limit ?? 0}</span>
+                  <span className="badge bg-secondary">네이버</span>
+                  <span style={{ color: '#adb5bd' }}>대중교통 경로 미지원(자동차만)</span>
+                </div>
+              )}
+
               {plan && (plan.steps || []).length > 0 && (() => {
                 const savedChain = buildChain(plan, origin, destination)
                 const savedTotal = legDuration(savedChain.legs) || Number(plan.total_min) || 0
@@ -1411,6 +1432,7 @@ export default function RouteEditorModal({ schedule, targetArrival, onClose, onS
                               <div className="d-flex justify-content-between align-items-start gap-2">
                                 <div className="small">
                                   <b>{o.label || `대안 ${k + 1}`}</b> · {formatDuration(os.total)}
+                                  {(() => { const b = sourceBadge(o.source); return <span className={`badge ${b.cls} ms-1`} style={{ fontSize: 9 }}>{b.text}</span> })()}
                                   <div className="text-muted">
                                     환승 {os.transfers} · 도보{' '}
                                     <span className={os.walk > pref.walk_max_min ? 'text-danger fw-bold' : undefined}>{os.walk}분</span>
