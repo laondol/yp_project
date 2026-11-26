@@ -1236,6 +1236,20 @@ export default function RouteEditorModal({ schedule, targetArrival, onClose, onS
                           구간 {savedChain.legs.length}개 · 저장된 출발 {plan.departure || '-'} / 도착 {plan.arrival || '-'}
                         </div>
                       </div>
+                      <div className="d-flex flex-column gap-1">
+                      <button className="btn btn-sm btn-outline-primary" disabled={saving} onClick={async () => {
+                        if (!schedule) return
+                        if (!window.confirm('저장된 경로를 최신 버스·정류장 정보로 다시 계산할까요?')) return
+                        setSaving(true)
+                        try {
+                          const d = await fetch(`/api/bot/route/${schedule.id}/refresh`, {
+                            method: 'POST', credentials: 'include',
+                          }).then(r => r.json())
+                          if (d?.success) { onSaved(); onClose() }
+                          else setSaveError(d?.error || '갱신에 실패했습니다.')
+                        } catch { setSaveError('갱신에 실패했습니다.') }
+                        finally { setSaving(false) }
+                      }}>최신 정보로 갱신</button>
                       <button className="btn btn-sm btn-success" onClick={() => {
                         setChain(savedChain)
                         if (plan.departure) setDeparture(String(plan.departure).slice(0, 5))
@@ -1243,6 +1257,7 @@ export default function RouteEditorModal({ schedule, targetArrival, onClose, onS
                         setStage('edit')
                         setBanner('저장해 둔 경로를 불러왔습니다. 구간을 눌러 수정하거나 그대로 저장할 수 있습니다.')
                       }}>이 경로 수정</button>
+                      </div>
                     </div>
                     <div className="mt-2 pt-2 border-top">{chainPreview(savedChain)}</div>
                   </div>

@@ -36,6 +36,23 @@ export default function SchedulePage() {
   const [routeEditor, setRouteEditor] = useState<ScheduleItem | null>(null)
   const [tracking, setTracking] = useState<any>(null)
   const [saving, setSaving] = useState(false)
+
+  const refreshRoute = async (s: ScheduleItem) => {
+    if (!window.confirm('저장된 경로를 최신 버스·정류장 정보로 다시 계산할까요?')) return
+    try {
+      const d = await fetch(`/api/bot/route/${s.id}/refresh`, {
+        method: 'POST', credentials: 'include',
+      }).then(r => r.json())
+      if (d?.success) {
+        await load()
+        setExpandedRoute(s.id)
+      } else {
+        alert(d?.error || '경로 갱신에 실패했습니다.')
+      }
+    } catch {
+      alert('경로 갱신에 실패했습니다.')
+    }
+  }
   const [shareSchedule, setShareSchedule] = useState<ScheduleItem | null>(null)
   const [shareUsers, setShareUsers] = useState<{id:number;username:string;real_name?:string}[]>([])
   const [shareSelectedIds, setShareSelectedIds] = useState<number[]>([])
@@ -775,7 +792,10 @@ export default function SchedulePage() {
                         )}
                         <div className="d-flex gap-1 mt-2">
                           {(s.kind === 'route' || s.kind === 'custom_route' || /이동|귀가/.test(s.title || '')) && (
-                            <button className="btn btn-sm btn-outline-secondary flex-fill" onClick={() => setRouteEditor(s as ScheduleItem)}>✏️ 경로 수정</button>
+                            <>
+                              <button className="btn btn-sm btn-outline-secondary flex-fill" onClick={() => setRouteEditor(s as ScheduleItem)}>✏️ 경로 수정</button>
+                              <button className="btn btn-sm btn-outline-success flex-fill" onClick={() => void refreshRoute(s)}>🔄 최신 경로</button>
+                            </>
                           )}
                           {(!tracking || tracking.sid !== s.id) ? (
                             <button className="btn btn-sm btn-outline-danger flex-fill" onClick={() => startTrack(s)}>📍 기록 시작</button>

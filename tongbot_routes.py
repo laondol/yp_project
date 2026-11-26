@@ -3847,6 +3847,70 @@ def bot_route_detail(schedule_id):
     return jsonify({"schedule":schedule_info, "route":route_data,
                     "train_times":train_times, "walk_stops":walk_stops, "bus_stops":bus_stops})
 
+@tongbot_bp.route('/api/bot/route/<int:schedule_id>/refresh', methods=['POST'])
+def bot_route_refresh(schedule_id):
+    """저장된 경로를 최신 엔진(버스 시간표·정류장)으로 다시 계산해 갱신한다."""
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({"error": "로그인 필요"}), 401
+    s = TongBotSchedule.query.get_or_404(schedule_id)
+    if s.user_id != uid:
+        return jsonify({"error": "권한 없음"}), 403
+    try:
+        content = json.loads(s.content or '{}') or {}
+    except Exception:
+        content = {}
+
+    flat, flng = content.get('from_lat'), content.get('from_lng')
+    tlat, tlng = content.get('to_lat'), content.get('to_lng')
+    from_name = s.departure_location or '출발지'
+    to_name = s.location or '도착지'
+
+    if not (flat and flng and tlat and tlng):
+        try:
+            from config import Config
+            from services.transit import geocode_address
+            for nm, is_from in ((from_name, True), (to_name, False)):
+                g = geocode_address(nm, Config.KAKAO_REST_API_KEY,
+                                    Config.NAVER_SEARCH_CLIENT_ID or Config.NAVER_CLIENT_ID,
+                                    Config.NAVER_SEARCH_CLIENT_SECRET or Config.NAVER_CLIENT_SECRET)
+                if g and g.get('lat'):
+                    if is_from:
+                        flat, flng = g['lat'], g['lng']
+                    else:
+                        tlat, tlng = g['lat'], g['lng']
+        except Exception:
+            pass
+    if not (flat and flng and tlat and tlng):
+        return jsonify({"error": "좌표를 찾지 못했습니다."}), 400
+
+    arrival = '09:00'
+    if s.end_date:
+        arrival = s.end_date.strftime('%H:%M')
+    elif content.get('arrival'):
+        arrival = str(content['arrival'])[:5]
+    date = s.event_date.strftime('%Y%m%d') if s.event_date else None
+
+    from services.directions import plan_segment, format_memo_compact, format_memo_narrative
+    plan = plan_segment(from_name, flat, flng, to_name, tlat, tlng, arrival,
+                        naver_id=os.getenv('NAVER_CLIENT_ID'),
+                        naver_secret=os.getenv('NAVER_CLIENT_SECRET'),
+                        odsay_key=os.getenv('ODSAY_API_KEY'), date=date)
+    if not plan or not plan.get('steps'):
+        return jsonify({"error": "경로를 찾지 못했습니다."}), 404
+    plan.update({'from_lat': flat, 'from_lng': flng, 'to_lat': tlat, 'to_lng': tlng})
+    try:
+        plan['compact'] = format_memo_compact(plan)
+        plan['narrative'] = format_memo_narrative(plan, origin_name=from_name, dest_name=to_name)
+    except Exception:
+        pass
+    s.content = json.dumps(plan, ensure_ascii=False)
+    if s.kind in ('route', 'base', None):
+        s.kind = 'custom_route'
+    db.session.commit()
+    return jsonify({"success": True, "route": plan})
+
+
 @tongbot_bp.route('/api/bot/route/<int:schedule_id>/save', methods=['POST'])
 def bot_route_save(schedule_id):
     uid = session.get('user_id')
