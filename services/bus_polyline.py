@@ -179,3 +179,74 @@ def options_near(from_lat, from_lng, to_lat, to_lng, limit=4, radius_km=1.2, max
                     break
     out.sort(key=lambda x: x['total_min'])
     return out[:limit]
+
+
+_KNOWN = {'at': 0.0, 'rows': None}
+
+
+def _known_stops():
+    """전국 버스정류장 + GBIS 정류장 (이름/좌표/ID) — 폴리라인 스냅용"""
+    import time as _t
+    if _KNOWN['rows'] is not None and _KNOWN['at'] + 3600 > _t.time():
+        return _KNOWN['rows']
+    rows = {}
+    try:
+        from models import BusStopMap
+        for r in BusStopMap.query.all():
+            if r.lat and r.lng and r.name:
+                rows[('n', r.name, round(r.lat, 5), round(r.lng, 5))] = {
+                    'name': r.name, 'lat': r.lat, 'lng': r.lng, 'station_id': ''
+                }
+    except Exception:
+        pass
+    try:
+        from models import GbisRouteStop
+        for r in GbisRouteStop.query.all():
+            if r.lat and r.lng and r.name:
+                rows[('g', r.name, round(r.lat, 5), round(r.lng, 5))] = {
+                    'name': r.name, 'lat': r.lat, 'lng': r.lng, 'station_id': r.station_id or ''
+                }
+    except Exception:
+        pass
+    out = list(rows.values())
+    _KNOWN['rows'] = out
+    _KNOWN['at'] = _t.time()
+    return out
+
+
+def derive_stops(route_id, tol_m=60):
+    """정류소 목록 API를 못 쓸 때: 노선 선형 + 보유 정류장 좌표로 정류장 순서 복원"""
+    pts = line(route_id)
+    if len(pts) < 2:
+        return []
+    # 폴리라인 격자 인덱스
+    cell = 0.002
+    grid = {}
+    for i, (la, lo) in enumerate(pts):
+        grid.setdefault((int(la / cell), int(lo / cell)), []).append(i)
+
+    cand = []
+    for st in _known_stops():
+        la, lo = st['lat'], st['lng']
+        cx, cy = int(la / cell), int(lo / cell)
+        best_d, best_i = 1e18, -1
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for i in grid.get((cx + dx, cy + dy), []):
+                    d = _dist_m(la, lo, pts[i][0], pts[i][1])
+                    if d < best_d:
+                        best_d, best_i = d, i
+        if best_i >= 0 and best_d <= tol_m:
+            cand.append((best_i, best_d, st))
+
+    cand.sort(key=lambda x: (x[0], x[1]))
+    out = []
+    seen = set()
+    for idx, d, st in cand:
+        key = (st['name'], round(st['lat'], 4), round(st['lng'], 4))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({'seq': len(out) + 1, 'station_id': st.get('station_id') or '',
+                    'name': st['name'], 'lat': st['lat'], 'lng': st['lng']})
+    return out

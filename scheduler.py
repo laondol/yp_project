@@ -296,13 +296,17 @@ def run_gbis_sync_scheduler(app):
     """
     import time as _t
 
-    def _count():
+    def _status():
         try:
             with app.app_context():
-                from models import GbisRoute
-                return GbisRoute.query.count()
+                from models import GbisRoute, GbisRouteStop
+                return GbisRoute.query.count(), GbisRouteStop.query.count()
         except Exception:
-            return 0
+            return 0, 0
+
+    def _need():
+        routes, stops = _status()
+        return routes < 200 or stops < 15000
 
     def _sync():
         try:
@@ -312,12 +316,15 @@ def run_gbis_sync_scheduler(app):
             print(f'[GBIS] 자동 적재 실패: {e}')
 
     _t.sleep(60)  # 기동 안정화 대기
-    if _count() < 200:
+    if _need():
         _sync()
 
+    # 한도에 걸려도 포기하지 않고 30분마다 재시도 (한도는 자정에 초기화)
     while True:
-        _t.sleep(6 * 3600)
-        if _count() < 200:
+        _t.sleep(30 * 60)
+        if _need():
+            r, st = _status()
+            print(f'[GBIS] 자동 보충 재시도 (노선 {r} · 정류장 {st})')
             _sync()
 
 

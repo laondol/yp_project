@@ -72,6 +72,16 @@ def main():
         if not gb._key():
             print('[gbis] API 키가 없어 중단합니다.')
             return
+
+        # 이미 정식(station_id 있음)으로 적재된 노선은 건너뛴다 (한도 절약)
+        done = set()
+        try:
+            from models import GbisRouteStop as _S
+            rows = db.session.query(_S.route_id).filter(_S.station_id != '').distinct().all()
+            done = {r[0] for r in rows}
+        except Exception:
+            done = set()
+        print(f'[gbis] 정식 적재 완료 노선 {len(done)}개 (건너뜀)')
         added = 0
         for i, num in enumerate(numbers, 1):
             if gb.quota_blocked():
@@ -84,9 +94,20 @@ def main():
                 continue
             for r in routes:
                 # 양평 지역 노선만 적재 (지역명 또는 시/종점 좌표 기준)
-                stops = gb.route_stations(r['route_id'])
-                if not stops:
+                if r['route_id'] in done:
                     continue
+                stops = gb.route_stations(r['route_id'])
+                derived = False
+                if not stops:
+                    # 한도/미제공 → 노선 선형 + 보유 정류장 좌표로 복원
+                    try:
+                        from services import bus_polyline as _bp
+                        stops = _bp.derive_stops(r['route_id'])
+                        derived = bool(stops)
+                    except Exception:
+                        stops = []
+                    if not stops:
+                        continue
                 hit = sum(1 for s in stops if in_yp(s['lat'], s['lng']))
                 if r.get('region') != '양평' and hit < 1:
                     continue
