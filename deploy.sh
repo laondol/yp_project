@@ -20,7 +20,16 @@ if [ -n "$RAG_CHANGED" ]; then
     echo "  -> RAG requirements.txt changed, rebuilding RAG image..."
     docker compose -f $COMPOSE_FILE build rag
 else
-    echo "  -> No dependency changes, skipping rebuild."
+    echo "  -> No RAG dependency changes."
+fi
+
+# 백엔드 requirements 변경 시 Flask 이미지 재빌드 (누락 시 기동 실패: ModuleNotFoundError)
+REQ_CHANGED=$(git diff HEAD~1 --name-only 2>/dev/null | grep -E "^requirements\.txt$" || true)
+if [ -n "$REQ_CHANGED" ]; then
+    echo "  -> requirements.txt changed, rebuilding Flask image..."
+    docker compose -f $COMPOSE_FILE build flask_app
+else
+    echo "  -> No backend dependency changes."
 fi
 
 # 3. Restart services (code changes reflected via volume mount)
