@@ -1031,6 +1031,9 @@ export default function RouteEditorModal({ schedule, targetArrival, onClose, onS
           from_lng: origin.lng,
           to_lat: destination.lat,
           to_lng: destination.lng,
+          // 장소명도 함께 갱신해야 상세 화면·네이버 지도 링크가 새 목적지로 열린다
+          departure_location: origin.name,
+          return_location: destination.name,
           narrative: narrativeOf(chain),
         }),
       }).then(x => x.json())
