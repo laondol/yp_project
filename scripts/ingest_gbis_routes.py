@@ -65,8 +65,13 @@ def upsert_route(r):
 def main():
     extra = [x.strip() for x in (sys.argv[1] if len(sys.argv) > 1 else '').split(',') if x.strip()]
     with app.app_context():
+        print(f'[gbis] API 키: {"설정됨" if gb._key() else "없음(GG_BUS_API_KEY 확인)"}')
+        print(f'[gbis] 현재 DB: 노선 {GbisRoute.query.count()} · 정류장 {GbisRouteStop.query.count()}')
         numbers = sorted(set(route_numbers()) | set(extra))
         print(f'[gbis] 노선번호 후보 {len(numbers)}개')
+        if not gb._key():
+            print('[gbis] API 키가 없어 중단합니다.')
+            return
         added = 0
         for i, num in enumerate(numbers, 1):
             if gb.quota_blocked():
@@ -100,4 +105,9 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except Exception:
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
