@@ -3931,7 +3931,12 @@ def bot_route_save(schedule_id):
     s.content = json.dumps(route_data, ensure_ascii=False)
     if data.get('title'): s.title = data['title']
     if data.get('departure_location'): s.departure_location = data['departure_location']
-    if data.get('return_location'): s.return_location = data['return_location']
+    if data.get('return_location'):
+        s.return_location = data['return_location']
+        # 이동/귀가 일정은 목적지 필드도 함께 맞춰야 상세·지도 링크가 일치한다
+        if (s.kind in ('route', 'custom_route')
+                or ('이동' in (s.title or '')) or ('귀가' in (s.title or ''))):
+            s.location = data['return_location']
     if data.get('narrative'):
         s.description = data['narrative']
         s.memo = data['narrative']
