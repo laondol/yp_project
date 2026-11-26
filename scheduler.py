@@ -287,6 +287,40 @@ def run_attachment_archive_scheduler(app):
         time.sleep(86400)
 
 
+def run_gbis_sync_scheduler(app):
+    """GBIS 노선·정류장 데이터를 서버에서 자동 생성/보충한다.
+
+    - 최초 배포 시: 노선 데이터가 없으면 백그라운드로 적재
+    - 이후 6시간마다: 부족분만 재시도 (일일 한도 초과 시 다음 주기에 이어서)
+    - 별도 수동 실행(docker exec) 불필요
+    """
+    import time as _t
+
+    def _count():
+        try:
+            with app.app_context():
+                from models import GbisRoute
+                return GbisRoute.query.count()
+        except Exception:
+            return 0
+
+    def _sync():
+        try:
+            from scripts.ingest_gbis_routes import main as ingest
+            ingest()
+        except Exception as e:
+            print(f'[GBIS] 자동 적재 실패: {e}')
+
+    _t.sleep(60)  # 기동 안정화 대기
+    if _count() < 200:
+        _sync()
+
+    while True:
+        _t.sleep(6 * 3600)
+        if _count() < 200:
+            _sync()
+
+
 def purge_app_data(app):
     """모바일 앱 보관 정책 1회 실행: trip_summary 6개월 파기 + 로그인 실패 기록 1일 정리."""
     with app.app_context():
@@ -550,6 +584,7 @@ def main():
     threading.Thread(target=run_news_cleanup_scheduler, args=(app,), daemon=True).start()
     threading.Thread(target=run_attachment_archive_scheduler, args=(app,), daemon=True).start()
     threading.Thread(target=run_app_data_retention_scheduler, args=(app,), daemon=True).start()
+    threading.Thread(target=run_gbis_sync_scheduler, args=(app,), daemon=True).start()
 
     print("[SCHEDULER] All schedulers started. Keeping alive...")
     while True:

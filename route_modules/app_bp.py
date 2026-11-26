@@ -30,6 +30,13 @@ from services.geo import _geocode_location
 
 app_bp = Blueprint('app_api', __name__, url_prefix='/api/app')
 
+
+@app_bp.errorhandler(RuntimeError)
+def _app_feature_unavailable(e):
+    # 선택 의존성(예: PyJWT) 미설치 시 500 대신 503
+    from flask import jsonify as _jsonify
+    return _jsonify({'error': '앱 기능을 사용할 수 없습니다.', 'detail': str(e)}), 503
+
 PASSWORD_SALT = 'ypsite_2026_client_hash'
 MOVE_TITLE_KEYS = ('이동', '귀가')
 

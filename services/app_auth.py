@@ -5,7 +5,10 @@ import hmac
 import os
 from datetime import datetime, timedelta, timezone
 
-import jwt
+try:
+    import jwt
+except Exception:  # PyJWT 미설치 → 앱 토큰 기능만 비활성화 (서버 기동은 유지)
+    jwt = None
 from flask import current_app
 
 _TOKEN_TYPE = 'app'
@@ -22,8 +25,14 @@ def jwt_secret():
     return hmac.new(base, b'unocum-app-jwt-v1', hashlib.sha256).hexdigest()
 
 
+def _need_jwt():
+    if jwt is None:
+        raise RuntimeError('PyJWT 미설치 — 앱 로그인 기능을 사용할 수 없습니다.')
+
+
 def issue_token(user):
     """(token, expires_at) 반환. 만료 정책: 30일 단일 토큰(설정 가능)."""
+    _need_jwt()
     days = int(current_app.config.get('APP_JWT_DAYS') or 30)
     now = datetime.now(timezone.utc)
     exp = now + timedelta(days=days)
@@ -40,6 +49,7 @@ def issue_token(user):
 
 
 def decode_token(token):
+    _need_jwt()
     """유효하면 payload(dict), 아니면 None. 예외는 조용히 무시한다."""
     if not token:
         return None
