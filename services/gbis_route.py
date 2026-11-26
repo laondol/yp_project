@@ -118,14 +118,17 @@ def route_stations(route_id):
     if not rid:
         return []
     ck = f'gbis_route_stops:{rid}'
+    miss_ck = f'gbis_route_stops_miss:{rid}'
+    if _cache_get(miss_ck, timedelta(hours=6)) is not None:
+        return []
     hit = _cache_get(ck, timedelta(days=STOPS_TTL_D))
-    if hit is not None:
+    if hit:
         return hit
     data = _get('getBusRouteStationListv2', {'routeId': rid})
     rows = _items(data, 'busRouteStationList')
     if not rows:
         # 한도 초과/미제공 → 6시간 부정 캐시 (재호출 방지)
-        _cache_set(ck, [])
+        _cache_set(miss_ck, [])
         return []
     out = []
     for x in rows:

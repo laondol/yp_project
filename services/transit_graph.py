@@ -134,10 +134,10 @@ def _headway(route_type, peak):
 def _synthetic_deps(first, last, headway):
     f = _times(first or '')
     l = _times(last or '')
-    start = f[0] if f else 6 * 60
-    end = l[0] if l else 22 * 60
+    start = max(0, min(1439, f[0] if f else 6 * 60))
+    end = max(0, min(1439, l[0] if l else 22 * 60))
     if end <= start:
-        end = start + 12 * 60
+        end = min(1439, start + 12 * 60)
     out = []
     t = start
     while t <= end:
@@ -219,11 +219,18 @@ def _build_from_gbis():
             dest_name = seq[-1]['name']
             deps = _find_deps(od_idx, rt.route_name, stop_key(origin_name), stop_key(dest_name))
             if not deps:
+                payload = None
+                try:
+                    from services import gbis_route as _gr
+                    payload = _gr.route_info(rt.route_id) or {}
+                except Exception:
+                    payload = {}
                 if di == 0:
-                    deps = _synthetic_deps(rt.first_time, rt.last_time, headway)
+                    deps = _synthetic_deps(rt.first_time or payload.get('up_first'),
+                                           rt.last_time or payload.get('up_last'), headway)
                 else:
-                    deps = _synthetic_deps(rt.last_time or rt.first_time,
-                                           rt.first_time, headway)
+                    deps = _synthetic_deps(payload.get('down_first') or rt.first_time,
+                                           payload.get('down_last') or rt.last_time, headway)
             if not deps:
                 continue
 
