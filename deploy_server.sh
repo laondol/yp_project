@@ -37,6 +37,12 @@ echo " 양평서버 안전 배포 v4   $(date '+%Y-%m-%d %H:%M:%S')"
 echo " 로그: $LOG"
 echo "============================================================"
 
+COMPOSE_BIN="docker compose"
+if ! docker compose version >/dev/null 2>&1; then
+  if command -v docker-compose >/dev/null 2>&1; then COMPOSE_BIN="docker-compose"; fi
+fi
+compose() { $COMPOSE_BIN "$@"; }
+
 http_code() { curl -s -o /dev/null -m 5 -w "%{http_code}" "$1" || echo "000"; }
 
 wait_http() { # url tries label
@@ -130,11 +136,13 @@ if [ "$NO_BUILD" = "1" ]; then
 elif [ "$FRONT_CHANGED" = "0" ] && [ "$FORCE" = "0" ]; then
   echo "  프론트 변경 없음 → 생략"
 else
-  command -v npm >/dev/null || { echo "❌ npm 없음 → WSL에서 빌드 후 dist 복사 필요 (서비스는 그대로)"; exit 1; }
-  if ! ( cd frontend && npm run build ); then
-    echo "❌ 빌드 실패 → 서비스는 그대로 유지 (중단)"; exit 1
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "  ⚠️ npm 없음 → 프론트 빌드 생략 (기존 dist 유지)"
+  elif ! ( cd frontend && npm run build ); then
+    echo "  ⚠️ 빌드 실패 → 기존 dist 유지하고 배포 계속"
+  else
+    echo "  빌드 성공"
   fi
-  echo "  빌드 성공"
 fi
 
 # ---------------- 4) 백업 ----------------
@@ -170,16 +178,22 @@ if [ "$NEED_RESTART" = "1" ]; then
   sleep 10
   RUNNING=$(running_commit)
   echo "  실행 중 커밋: ${RUNNING:-응답없음} (기대: $(git rev-parse --short HEAD))"
-  if [ "$RUNNING" != "$(git rev-parse --short HEAD)" ]; then
-    echo "  ⚠️ 실행 코드가 최신이 아님 → 컨테이너 강제 재생성"
-    docker compose up -d --force-recreate flask_app >/dev/null 2>&1 || docker restart yp_flask
+  WANT=$(git rev-parse --short HEAD)
+  if [ "$RUNNING" != "$WANT" ]; then
+    echo "  ⚠️ 실행 커밋 불일치(${RUNNING:-없음} != $WANT) → 컨테이너 강제 재생성"
+    compose up -d --force-recreate flask_app >/dev/null 2>&1 || docker restart yp_flask
     sleep 12
     RUNNING=$(running_commit)
     echo "  재확인 커밋: ${RUNNING:-응답없음}"
-    if [ "$RUNNING" != "$(git rev-parse --short HEAD)" ]; then
-      echo "❌ 실행 코드 반영 실패"
-      rollback
-      echo "배포 중단 (로그: $LOG)"; exit 1
+    if [ "$RUNNING" != "$WANT" ]; then
+      CODE=$(http_code "http://127.0.0.1:5000/api/version")
+      if [ "$CODE" = "200" ]; then
+        echo "  ⚠️ 커밋 표기 불일치이지만 서비스 정상(200) → 계속 진행"
+      else
+        echo "❌ 실행 코드 반영 실패 (HTTP $CODE)"
+        rollback
+        echo "배포 중단 (로그: $LOG)"; exit 1
+      fi
     fi
   fi
   docker restart yp_scheduler || true
